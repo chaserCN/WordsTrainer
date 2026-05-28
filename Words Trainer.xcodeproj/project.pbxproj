@@ -112,6 +112,7 @@
 			);
 			name = "Words Trainer";
 			packageProductDependencies = (
+				EBEE36512FC8C9DE00BDFEB6 /* FSRS */,
 			);
 			productName = "Words Trainer";
 			productReference = EBEE36162FC8C9D900BDFEB6 /* Words Trainer.app */;
@@ -198,6 +199,9 @@
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EBEE36172FC8C9D900BDFEB6 /* Products */;
 			projectDirPath = "";
+			packageReferences = (
+				EBEE36502FC8C9DE00BDFEB6 /* XCRemoteSwiftPackageReference "swift-fsrs" */,
+			);
 			projectRoot = "";
 			targets = (
 				EBEE36152FC8C9D900BDFEB6 /* Words Trainer */,
@@ -578,6 +582,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		EBEE36502FC8C9DE00BDFEB6 /* XCRemoteSwiftPackageReference "swift-fsrs" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/open-spaced-repetition/swift-fsrs";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		EBEE36512FC8C9DE00BDFEB6 /* FSRS */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EBEE36502FC8C9DE00BDFEB6 /* XCRemoteSwiftPackageReference "swift-fsrs" */;
+			productName = FSRS;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = EBEE360E2FC8C9D900BDFEB6 /* Project object */;
 }

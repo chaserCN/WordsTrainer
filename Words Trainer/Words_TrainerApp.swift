@@ -1,23 +1,18 @@
-//
-//  Words_TrainerApp.swift
-//  Words Trainer
-//
-//  Created by Nikolay on 28.05.2026.
-//
-
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 @main
 struct Words_TrainerApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            DeckRecord.self,
+            CardRecord.self,
+            CardProgressRecord.self,
+            DeckDailyUsageRecord.self,
         ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            return try ModelContainer(for: schema, configurations: [config])
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
@@ -25,7 +20,7 @@ struct Words_TrainerApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            DeckListView()
         }
         .modelContainer(sharedModelContainer)
     }
