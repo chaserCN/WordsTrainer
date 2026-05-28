@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		EBEE36862FC8CB7E00BDFEB6 /* FSRS in Frameworks */ = {isa = PBXBuildFile; productRef = EBEE36512FC8C9DE00BDFEB6 /* FSRS */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		EBEE36262FC8C9DE00BDFEB6 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EBEE36862FC8CB7E00BDFEB6 /* FSRS in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -196,12 +201,12 @@
 			);
 			mainGroup = EBEE360D2FC8C9D900BDFEB6;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
-			productRefGroup = EBEE36172FC8C9D900BDFEB6 /* Products */;
-			projectDirPath = "";
 			packageReferences = (
 				EBEE36502FC8C9DE00BDFEB6 /* XCRemoteSwiftPackageReference "swift-fsrs" */,
 			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = EBEE36172FC8C9D900BDFEB6 /* Products */;
+			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				EBEE36152FC8C9D900BDFEB6 /* Words Trainer */,

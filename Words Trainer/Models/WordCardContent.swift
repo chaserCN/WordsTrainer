@@ -6,7 +6,8 @@ struct WordCardContent: Codable, Identifiable, Hashable {
     let word: String
     let translation: String
     let clozePrompt: String
-    let clozeAnswer: String
+    /// Override when the gap uses a different form than `word` (e.g. went vs go).
+    let clozeAnswer: String?
     let explanation: String?
     let imageURL: URL?
     let audioWordURL: URL?
@@ -18,7 +19,7 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         word: String,
         translation: String,
         clozePrompt: String,
-        clozeAnswer: String,
+        clozeAnswer: String? = nil,
         explanation: String? = nil,
         imageURL: URL? = nil,
         audioWordURL: URL? = nil,
@@ -35,6 +36,46 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         self.audioWordURL = audioWordURL
         self.audioExampleURL = audioExampleURL
         self.distractors = distractors
+    }
+
+    /// Answer accepted in cloze exercises when `clozeAnswer` is nil.
+    var effectiveClozeAnswer: String {
+        if let clozeAnswer, !clozeAnswer.isEmpty {
+            return clozeAnswer
+        }
+        return Self.headword(from: word)
+    }
+
+    /// Semicolon-separated senses in `translation` (trimmed, non-empty).
+    static func translationSenses(_ translation: String) -> [String] {
+        translation.split(separator: ";", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// One sense for matching columns — stable per card id, not stored in DB.
+    func matchingTranslationDisplay() -> String {
+        let senses = Self.translationSenses(translation)
+        guard senses.count > 1 else {
+            return senses.first ?? translation
+        }
+        let index = abs(id.hashValue) % senses.count
+        return senses[index]
+    }
+
+    static func headword(from word: String) -> String {
+        var plain = word.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        plain = plain.split(separator: "(", maxSplits: 1).first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? plain
+        let lower = plain.lowercased()
+        if lower.hasPrefix("an ") {
+            plain = String(plain.dropFirst(3))
+        } else if lower.hasPrefix("a ") {
+            plain = String(plain.dropFirst(2))
+        } else if lower.hasPrefix("the ") {
+            plain = String(plain.dropFirst(4))
+        }
+        return plain.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

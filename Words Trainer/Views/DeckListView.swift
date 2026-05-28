@@ -1,10 +1,7 @@
-import SwiftData
 import SwiftUI
 
 struct DeckListView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query(sort: \DeckRecord.title) private var decks: [DeckRecord]
-
+    @State private var decks: [DeckContent] = []
     @State private var store: DeckStore?
     @State private var loadError: String?
 
@@ -14,9 +11,17 @@ struct DeckListView: View {
                 AppBackground()
 
                 if let loadError {
-                    ContentUnavailableView("Ошибка", systemImage: "exclamationmark.triangle", description: Text(loadError))
-                } else if decks.isEmpty {
-                    ContentUnavailableView("Нет колод", systemImage: "books.vertical", description: Text("Загрузка…"))
+                    DataPlaceholderView(
+                        title: "Ошибка",
+                        systemImage: "exclamationmark.triangle",
+                        message: loadError
+                    )
+                } else if decks.isEmpty, store != nil {
+                    DataPlaceholderView(
+                        title: "Нет колод",
+                        systemImage: "books.vertical",
+                        message: emptyDecksMessage
+                    )
                 } else if let store {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 20) {
@@ -48,14 +53,47 @@ struct DeckListView: View {
         }
     }
 
+    private var emptyDecksMessage: String {
+        if DeckStore.databaseExists {
+            "В базе нет колод."
+        } else {
+            "Скопируйте test_data/Data в Documents/Data/ (см. test_data/README.md)."
+        }
+    }
+
     private func bootstrap() async {
-        let deckStore = DeckStore(modelContext: modelContext)
-        store = deckStore
         do {
-            try deckStore.seedIfNeeded()
+            let deckStore = try DeckStore()
+            store = deckStore
+            decks = try deckStore.allDecks()
         } catch {
             loadError = error.localizedDescription
         }
+    }
+}
+
+private struct DataPlaceholderView: View {
+    let title: String
+    let systemImage: String
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: systemImage)
+                .font(.system(size: 48, weight: .light))
+                .foregroundStyle(.white.opacity(0.55))
+
+            Text(title)
+                .font(.title2.bold())
+                .foregroundStyle(.white)
+
+            Text(message)
+                .font(.body)
+                .foregroundStyle(.white.opacity(0.68))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -89,7 +127,7 @@ private extension DeckStats {
 }
 
 struct DeckCardView: View {
-    let deck: DeckRecord
+    let deck: DeckContent
     let store: DeckStore
 
     @State private var stats: DeckStats = .zero
@@ -138,7 +176,7 @@ struct DeckCardView: View {
 }
 
 struct DeckDetailView: View {
-    let deck: DeckRecord
+    let deck: DeckContent
     let store: DeckStore
 
     @State private var stats: DeckStats = .zero
@@ -212,7 +250,7 @@ struct DeckDetailView: View {
 }
 
 private struct DeckDetailHero: View {
-    let deck: DeckRecord
+    let deck: DeckContent
     let stats: DeckStats
 
     var body: some View {
@@ -504,5 +542,4 @@ private struct LightCardBackground: View {
 
 #Preview {
     DeckListView()
-        .modelContainer(for: [DeckRecord.self, CardRecord.self, CardProgressRecord.self, DeckDailyUsageRecord.self], inMemory: true)
 }
