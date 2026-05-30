@@ -8,6 +8,12 @@ struct StudySessionView: View {
     /// Для matching завершаем не по scheduler (он пустеет раньше времени из-за резерва замены),
     /// а когда доска реально опустела после анимации последнего гашения.
     @State private var matchingFinished = false
+    /// Поставлен ли на этом раунде новый рекорд — чтобы сыграть джингл в конце раунда.
+    @State private var beatRecord = false
+    /// Счётчик залпов конфетти: ++ запускает залп на постоянно смонтированной ConfettiView.
+    @State private var confettiBurst = 0
+    /// Время прохождения раунда — для сообщения о рекорде.
+    @State private var finishedDuration: TimeInterval?
 
     var body: some View {
         StudyScreenChrome {
@@ -19,7 +25,14 @@ struct StudySessionView: View {
                         MatchingColumnsStudyView(
                             session: session,
                             store: store,
-                            onFinished: { matchingFinished = true }
+                            onFinished: {
+                                matchingFinished = true
+                                // Поздравление только при новом рекорде.
+                                if beatRecord {
+                                    confettiBurst += 1
+                                    WordAudioPlayer.shared.playEffect(named: "new_record")
+                                }
+                            }
                         )
                     }
                 } else if session.isFinished {
@@ -40,6 +53,11 @@ struct StudySessionView: View {
                 }
             }
         }
+        .overlay {
+            if session.mode == .matching {
+                ConfettiView(trigger: confettiBurst)
+            }
+        }
         .navigationTitle(session.mode.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
@@ -52,21 +70,31 @@ struct StudySessionView: View {
         }
         .onChange(of: session.isFinished) { _, isFinished in
             guard isFinished, session.mode == .matching else { return }
-            _ = try? store.saveMatchingRecordIfBest(
+            let duration = session.matchingElapsed
+            finishedDuration = duration
+            beatRecord = (try? store.saveMatchingRecordIfBest(
                 deckID: session.deckID,
-                duration: session.matchingElapsed,
+                duration: duration,
                 pairCount: session.matchingTotalPairCount
-            )
+            )) ?? false
         }
     }
 
     private var finishedView: some View {
-        ContentUnavailableView(
-            "Готово",
-            systemImage: "checkmark.circle",
-            description: Text("Сессия по колоде «\(deckTitle)» завершена.")
-        )
-        .foregroundStyle(.white)
+        let isNewRecord = session.mode == .matching && beatRecord
+        return ContentUnavailableView {
+            Label(
+                isNewRecord ? "Новый рекорд!" : "Готово",
+                systemImage: isNewRecord ? "trophy.fill" : "checkmark.circle"
+            )
+        } description: {
+            if isNewRecord, let finishedDuration {
+                Text("Лучшее время: \(StudyDurationFormat.string(finishedDuration))")
+            } else {
+                Text("Сессия по колоде «\(deckTitle)» завершена.")
+            }
+        }
+        .foregroundStyle(isNewRecord ? .yellow : .white)
     }
 
     private func submit(_ outcome: ReviewOutcome) {

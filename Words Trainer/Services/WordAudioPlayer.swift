@@ -13,6 +13,7 @@ final class WordAudioPlayer {
     private let playerNode = AVAudioPlayerNode()
     private let timePitch = AVAudioUnitTimePitch()
     private let speechSynthesizer = AVSpeechSynthesizer()
+    private var effectPlayer: AVAudioPlayer?
 
     private static let wrongPitchCents: Float = -500
     private static let wrongSpeechPitchMultiplier: Float = 0.72
@@ -31,6 +32,20 @@ final class WordAudioPlayer {
                 card: card,
                 pitchMultiplier: style == .wrong ? Self.wrongSpeechPitchMultiplier : 1
             )
+        }
+    }
+
+    /// Plays a bundled sound effect (e.g. the new-record jingle at the end of a round).
+    func playEffect(named name: String, withExtension ext: String = "mp3") {
+        guard AppSettings.shared.isSoundEnabled else { return }
+        guard let url = Bundle.main.url(forResource: name, withExtension: ext) else { return }
+        configureAudioSession()
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            effectPlayer = player
+            player.play()
+        } catch {
+            // Best-effort: a missing/broken effect should not disrupt the round.
         }
     }
 
