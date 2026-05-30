@@ -145,24 +145,8 @@ struct MatchingPairSchedulerTests {
 
     // MARK: - Slot filling
 
-    @Test("four unique single-sense cards fill all slots")
-    func fourUniqueCardsFillSlots() {
-        let cards: [(String, String)] = [
-            ("a", "1"),
-            ("b", "2"),
-            ("c", "3"),
-            ("d", "4"),
-        ]
-        let scheduler = TestFixtures.scheduler(cards: cards, seed: 8)
-
-        #expect(scheduler.visible.count == MatchingPairScheduler.slotCount)
-        #expect(scheduler.visibleCardIDsAreUnique)
-        #expect(scheduler.remainingCount == 4)
-        #expect(scheduler.pool.isEmpty)
-    }
-
-    @Test("more than four unique cards leave remainder in pool")
-    func fiveCardsLeavePool() {
+    @Test("five unique single-sense cards fill all slots")
+    func fiveUniqueCardsFillSlots() {
         let cards: [(String, String)] = [
             ("a", "1"),
             ("b", "2"),
@@ -170,11 +154,29 @@ struct MatchingPairSchedulerTests {
             ("d", "4"),
             ("e", "5"),
         ]
+        let scheduler = TestFixtures.scheduler(cards: cards, seed: 8)
+
+        #expect(scheduler.visible.count == MatchingPairScheduler.slotCount)
+        #expect(scheduler.visibleCardIDsAreUnique)
+        #expect(scheduler.remainingCount == 5)
+        #expect(scheduler.pool.isEmpty)
+    }
+
+    @Test("more than five unique cards leave remainder in pool")
+    func sixCardsLeavePool() {
+        let cards: [(String, String)] = [
+            ("a", "1"),
+            ("b", "2"),
+            ("c", "3"),
+            ("d", "4"),
+            ("e", "5"),
+            ("f", "6"),
+        ]
         let scheduler = TestFixtures.scheduler(cards: cards, seed: 9)
 
-        #expect(scheduler.visible.count == 4)
+        #expect(scheduler.visible.count == 5)
         #expect(scheduler.pool.count == 1)
-        #expect(scheduler.remainingCount == 5)
+        #expect(scheduler.remainingCount == 6)
         #expect(scheduler.visibleCardIDsAreUnique)
     }
 

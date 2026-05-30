@@ -47,11 +47,6 @@ struct DeckListView: View {
             .navigationTitle("Колоды")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    SoundToggleToolbarButton()
-                }
-            }
         }
         .task {
             await bootstrap()
@@ -134,6 +129,7 @@ private extension DeckStats {
 struct DeckCardView: View {
     let deck: DeckContent
     let store: DeckStore
+    var showsChevron: Bool = true
 
     @State private var stats: DeckStats = .zero
 
@@ -154,10 +150,12 @@ struct DeckCardView: View {
 
                 Spacer()
 
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Color.black.opacity(0.24))
-                    .padding(.top, 6)
+                if showsChevron {
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.black.opacity(0.24))
+                        .padding(.top, 6)
+                }
             }
 
             HStack(spacing: 10) {
@@ -194,9 +192,9 @@ struct DeckDetailView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    DeckDetailHero(deck: deck, stats: stats)
+                    DeckCardView(deck: deck, store: store, showsChevron: false)
 
-                    StudySection(title: "Упражнения") {
+                    StudySection(title: "Упражнения", remaining: remainingSummary) {
                         StudyActionButton(
                             title: "Предложения",
                             subtitle: "Выбери слово для примера с пропуском",
@@ -218,7 +216,7 @@ struct DeckDetailView: View {
                         }
                     }
 
-                    StudySection(title: "Помню / Забыл") {
+                    StudySection(title: "Помню / Забыл", remaining: queueRemainingLabel) {
                         StudyActionButton(
                             title: "Быстрый проход",
                             subtitle: "Покажи слово и отметь: помню или забыл",
@@ -238,11 +236,6 @@ struct DeckDetailView: View {
         .navigationTitle(deck.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                SoundToggleToolbarButton()
-            }
-        }
         .navigationDestination(isPresented: $showStudy) {
             if let session {
                 StudySessionView(session: session, store: store, deckTitle: deck.title)
@@ -253,54 +246,72 @@ struct DeckDetailView: View {
         }
     }
 
+    private var matchingPairCount: Int {
+        deck.cards.reduce(0) { total, card in
+            let senses = WordCardContent.translationSenses(card.translation)
+            return total + (senses.isEmpty ? 1 : senses.count)
+        }
+    }
+
+    private var queueRemainingLabel: String? {
+        guard stats.studyTotal > 0 else { return nil }
+        return remainingCardsLabel(stats.studyTotal)
+    }
+
+    private var remainingSummary: String? {
+        let parts = [
+            matchingPairCount > 0 ? remainingPairsLabel(matchingPairCount) : nil,
+            stats.studyTotal > 0 ? remainingCardsLabel(stats.studyTotal) : nil,
+        ].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private func remainingPairsLabel(_ count: Int) -> String {
+        let mod10 = count % 10
+        let mod100 = count % 100
+        let word: String
+        if mod100 >= 11 && mod100 <= 14 {
+            word = "пар"
+        } else if mod10 == 1 {
+            word = "пара"
+        } else if mod10 >= 2 && mod10 <= 4 {
+            word = "пары"
+        } else {
+            word = "пар"
+        }
+        return "\(count) \(word) осталось"
+    }
+
+    private func remainingCardsLabel(_ count: Int) -> String {
+        let mod10 = count % 10
+        let mod100 = count % 100
+        let word: String
+        if mod100 >= 11 && mod100 <= 14 {
+            word = "карточек"
+        } else if mod10 == 1 {
+            word = "карточка"
+        } else if mod10 >= 2 && mod10 <= 4 {
+            word = "карточки"
+        } else {
+            word = "карточек"
+        }
+        return "\(count) \(word) в очереди"
+    }
+
     private func start(_ mode: StudyMode) {
         session = try? store.startSession(deck: deck, mode: mode)
         showStudy = session != nil
     }
 }
 
-private struct DeckDetailHero: View {
-    let deck: DeckContent
-    let stats: DeckStats
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            HStack(spacing: 16) {
-                DeckIcon(symbolName: deck.avatarSystemName, size: 68)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(deck.title)
-                        .font(.title.bold())
-                        .foregroundStyle(Color(red: 0.08, green: 0.08, blue: 0.13))
-                    Text("\(deck.cards.count) карточек · \(deck.languageCode.uppercased())")
-                        .font(.subheadline)
-                        .foregroundStyle(Color(red: 0.45, green: 0.46, blue: 0.55))
-                }
-
-                Spacer()
-            }
-
-            HStack(spacing: 10) {
-                DeckMetricCard(title: "Новые", value: stats.newAvailable, tint: .blue)
-                DeckMetricCard(title: "Повторить", value: stats.dueTotal, tint: .orange)
-            }
-        }
-        .padding(20)
-        .background(LightCardBackground(cornerRadius: 30))
-        .overlay {
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .stroke(.white.opacity(0.75), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.28), radius: 28, x: 0, y: 18)
-    }
-}
-
 private struct StudySection<Content: View>: View {
     let title: String
+    var remaining: String?
     let content: Content
 
-    init(title: String, @ViewBuilder content: () -> Content) {
+    init(title: String, remaining: String? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
+        self.remaining = remaining
         self.content = content()
     }
 
@@ -309,6 +320,11 @@ private struct StudySection<Content: View>: View {
             Text(title)
                 .font(.headline)
                 .foregroundStyle(.white)
+            if let remaining {
+                Text(remaining)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.62))
+            }
             VStack(spacing: 10) {
                 content
             }
@@ -455,26 +471,6 @@ private struct DeckQueueSummary: View {
         if stats.reviewDue > 0 { return .green }
         if stats.newAvailable > 0 { return .blue }
         return .gray
-    }
-}
-
-private struct DeckMetricCard: View {
-    let title: String
-    let value: Int
-    let tint: Color
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Text("\(value)")
-                .font(.title2.bold())
-                .foregroundStyle(tint)
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(Color(red: 0.45, green: 0.46, blue: 0.55))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 

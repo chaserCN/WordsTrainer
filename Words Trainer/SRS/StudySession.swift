@@ -6,6 +6,8 @@ import FSRS
 final class StudySession {
     let deckID: UUID
     let mode: StudyMode
+    let matchingTotalPairCount: Int
+    let matchingStartedAt: Date?
     private(set) var queue: [StudyQueueItem]
     private var matchingScheduler: MatchingPairScheduler?
     private var dailyUsage: DeckDailyUsage?
@@ -28,6 +30,11 @@ final class StudySession {
         matchingScheduler?.visible ?? []
     }
 
+    var matchingElapsed: TimeInterval {
+        guard let matchingStartedAt else { return 0 }
+        return Date().timeIntervalSince(matchingStartedAt)
+    }
+
     init(
         deckID: UUID,
         mode: StudyMode,
@@ -39,11 +46,17 @@ final class StudySession {
         self.mode = mode
         self.dailyUsage = dailyUsage
         self.engine = engine
-        self.queue = mode == .matching ? [] : queue
         if mode == .matching {
-            var rng = SystemRandomNumberGenerator()
             let pairs = queue.flatMap { MatchingPair.pairs(from: $0) }
+            matchingTotalPairCount = pairs.count
+            matchingStartedAt = Date()
+            self.queue = []
+            var rng = SystemRandomNumberGenerator()
             matchingScheduler = MatchingPairScheduler(pairs: pairs, rng: &rng)
+        } else {
+            matchingTotalPairCount = 0
+            matchingStartedAt = nil
+            self.queue = queue
         }
     }
 

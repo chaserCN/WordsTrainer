@@ -118,6 +118,57 @@ final class ContentDatabase {
         try exec(sql, uuid: deckID, text: usage.dayKey, int: usage.newCardsStudied)
     }
 
+    func matchingRecord(deckID: UUID) throws -> DeckMatchingRecord? {
+        let sql = """
+        SELECT best_duration_seconds, pair_count, achieved_at
+        FROM deck_matching_records
+        WHERE deck_id = ?
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: deckID)
+
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return DeckMatchingRecord(
+            deckID: deckID,
+            bestDuration: sqlite3_column_double(statement, 0),
+            pairCount: Int(sqlite3_column_int(statement, 1)),
+            achievedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2))
+        )
+    }
+
+    func saveMatchingRecord(_ record: DeckMatchingRecord) throws {
+        let sql = """
+        INSERT INTO deck_matching_records (deck_id, best_duration_seconds, pair_count, achieved_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(deck_id) DO UPDATE SET
+            best_duration_seconds = excluded.best_duration_seconds,
+            pair_count = excluded.pair_count,
+            achieved_at = excluded.achieved_at
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: record.deckID)
+        guard sqlite3_bind_double(statement, 2, record.bestDuration) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        guard sqlite3_bind_int(statement, 3, Int32(record.pairCount)) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        guard sqlite3_bind_double(statement, 4, record.achievedAt.timeIntervalSince1970) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
+        }
+    }
+
     // MARK: - Schema
 
     private func executeMigrations() throws {
@@ -160,6 +211,13 @@ final class ContentDatabase {
             PRIMARY KEY (deck_id, day_key),
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
+        CREATE TABLE IF NOT EXISTS deck_matching_records (
+            deck_id TEXT PRIMARY KEY NOT NULL,
+            best_duration_seconds REAL NOT NULL,
+            pair_count INTEGER NOT NULL,
+            achieved_at REAL NOT NULL,
+            FOREIGN KEY (deck_id) REFERENCES decks(id)
+        );
         """
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw ContentDatabaseError.migrationFailed
@@ -174,6 +232,7 @@ final class ContentDatabase {
             "UPDATE card_progress SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
             "UPDATE card_progress SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
             "UPDATE deck_daily_usage SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
+            "UPDATE deck_matching_records SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
         ]
         for sql in statements {
             guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {

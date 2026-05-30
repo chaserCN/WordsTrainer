@@ -73,6 +73,43 @@ final class DeckStore {
             try database.saveDailyUsage(deckID: deckID, usage: updated)
         }
     }
+
+    func matchingRecord(deckID: UUID) throws -> DeckMatchingRecord? {
+        try database.matchingRecord(deckID: deckID)
+    }
+
+    /// Saves when there is no record, the pair count changed, or the time improved.
+    @discardableResult
+    func saveMatchingRecordIfBest(
+        deckID: UUID,
+        duration: TimeInterval,
+        pairCount: Int
+    ) throws -> Bool {
+        let existing = try database.matchingRecord(deckID: deckID)
+        if let existing {
+            guard existing.pairCount == pairCount else {
+                try database.saveMatchingRecord(
+                    DeckMatchingRecord(
+                        deckID: deckID,
+                        bestDuration: duration,
+                        pairCount: pairCount,
+                        achievedAt: .now
+                    )
+                )
+                return true
+            }
+            guard duration < existing.bestDuration else { return false }
+        }
+        try database.saveMatchingRecord(
+            DeckMatchingRecord(
+                deckID: deckID,
+                bestDuration: duration,
+                pairCount: pairCount,
+                achievedAt: .now
+            )
+        )
+        return true
+    }
 }
 
 extension StudySession {

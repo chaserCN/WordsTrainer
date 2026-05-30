@@ -2,7 +2,7 @@ import Foundation
 
 /// Selects and tracks matching-column pairs without showing two senses of the same word at once.
 struct MatchingPairScheduler: Sendable {
-    static let slotCount = 4
+    static let slotCount = 5
 
     private(set) var visible: [MatchingPair] = []
     private(set) var pool: [MatchingPair]
