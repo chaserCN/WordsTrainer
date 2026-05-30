@@ -172,7 +172,7 @@ struct MatchingColumnsStudyView: View {
 
                     MatchingCell(
                         item: row.translation,
-                        label: translationLabel(for: row.translation),
+                        label: row.translation.card.matchingTranslationDisplay(),
                         isSelected: selectedTranslationID == row.translation.id,
                         isWrong: wrongTranslationID == row.translation.id,
                         action: { selectTranslation(row.translation) }
@@ -252,13 +252,6 @@ struct MatchingColumnsStudyView: View {
         }
         insertIndex = min(insertIndex, translationItems.count)
         translationItems.insert(newCard, at: insertIndex)
-    }
-
-    private func translationLabel(for item: StudyQueueItem) -> String {
-        if wrongWordID != nil {
-            return ""
-        }
-        return item.card.matchingTranslationDisplay()
     }
 
     private func checkPairIfReady() {
