@@ -53,16 +53,6 @@ struct WordCardContent: Codable, Identifiable, Hashable {
             .filter { !$0.isEmpty }
     }
 
-    /// One sense for matching columns — stable per card id, not stored in DB.
-    func matchingTranslationDisplay() -> String {
-        let senses = Self.translationSenses(translation)
-        guard senses.count > 1 else {
-            return senses.first ?? translation
-        }
-        let index = abs(id.hashValue) % senses.count
-        return senses[index]
-    }
-
     static func headword(from word: String) -> String {
         var plain = word.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
         plain = plain.split(separator: "(", maxSplits: 1).first?

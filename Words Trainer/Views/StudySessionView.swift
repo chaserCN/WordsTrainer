@@ -6,32 +6,41 @@ struct StudySessionView: View {
     let deckTitle: String
 
     var body: some View {
-        Group {
-            if session.isFinished {
-                ContentUnavailableView(
-                    "Готово",
-                    systemImage: "checkmark.circle",
-                    description: Text("Сессия по колоде «\(deckTitle)» завершена.")
-                )
-            } else if session.mode == .matching {
-                MatchingColumnsStudyView(session: session)
-            } else if let item = session.current {
-                switch session.mode {
-                case .recall:
-                    RecallStudyView(card: item.card) { outcome in
-                        submit(outcome)
+        StudyScreenChrome {
+            Group {
+                if session.isFinished {
+                    ContentUnavailableView(
+                        "Готово",
+                        systemImage: "checkmark.circle",
+                        description: Text("Сессия по колоде «\(deckTitle)» завершена.")
+                    )
+                    .foregroundStyle(.white)
+                } else if session.mode == .matching {
+                    MatchingColumnsStudyView(session: session)
+                } else if let item = session.current {
+                    switch session.mode {
+                    case .recall:
+                        RecallStudyView(card: item.card) { outcome in
+                            submit(outcome)
+                        }
+                    case .clozeMultipleChoice:
+                        ClozeMCQStudyView(card: item.card) { outcome in
+                            submit(outcome)
+                        }
+                    case .matching, .clozeTyping:
+                        EmptyView()
                     }
-                case .clozeMultipleChoice:
-                    ClozeMCQStudyView(card: item.card) { outcome in
-                        submit(outcome)
-                    }
-                case .matching, .clozeTyping:
-                    EmptyView()
                 }
             }
         }
         .navigationTitle(session.mode.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                SoundToggleToolbarButton()
+            }
+        }
     }
 
     private func submit(_ outcome: ReviewOutcome) {
@@ -52,6 +61,7 @@ struct RecallStudyView: View {
             Spacer()
             Text(card.word)
                 .font(.largeTitle.bold())
+                .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
             Spacer()
             HStack(spacing: 16) {
@@ -68,9 +78,9 @@ struct RecallStudyView: View {
                 .tint(.green)
             }
             .controlSize(.large)
+            .padding(.horizontal, 20)
             .padding(.bottom, 32)
         }
-        .padding()
     }
 }
 
@@ -86,6 +96,7 @@ struct ClozeMCQStudyView: View {
         VStack(alignment: .leading, spacing: 24) {
             HTMLText(html: card.clozePrompt)
                 .font(.title2)
+                .foregroundStyle(.white)
                 .padding(.top, 24)
 
             ForEach(choices, id: \.self) { option in
@@ -97,20 +108,26 @@ struct ClozeMCQStudyView: View {
                 } label: {
                     HStack {
                         Text(option)
+                            .foregroundStyle(.white)
                         Spacer()
                         if answered, option == selected {
                             Image(systemName: option == card.effectiveClozeAnswer ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundStyle(option == card.effectiveClozeAnswer ? .green : .red)
                         }
                     }
                     .padding()
-                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+                    .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(.white.opacity(0.12), lineWidth: 1)
+                    }
                 }
                 .buttonStyle(.plain)
                 .disabled(answered && option != selected)
             }
             Spacer()
         }
-        .padding()
+        .padding(.horizontal, 20)
         .onAppear {
             if choices.isEmpty {
                 choices = (card.distractors + [card.effectiveClozeAnswer]).shuffled()
@@ -122,17 +139,17 @@ struct ClozeMCQStudyView: View {
 struct MatchingColumnsStudyView: View {
     @Bindable var session: StudySession
 
-    @State private var selectedWordID: UUID?
-    @State private var selectedTranslationID: UUID?
-    @State private var wrongWordID: UUID?
-    @State private var wrongTranslationID: UUID?
-    @State private var translationItems: [StudyQueueItem] = []
+    @State private var selectedWordID: String?
+    @State private var selectedTranslationID: String?
+    @State private var wrongWordID: String?
+    @State private var wrongTranslationID: String?
+    @State private var translationItems: [MatchingPair] = []
 
-    private var wordItems: [StudyQueueItem] {
+    private var wordItems: [MatchingPair] {
         session.matchingVisibleItems
     }
 
-    private var matchingRows: [(word: StudyQueueItem, translation: StudyQueueItem)] {
+    private var matchingRows: [(word: MatchingPair, translation: MatchingPair)] {
         let words = wordItems
         guard !words.isEmpty,
               translationItems.count == words.count,
@@ -147,9 +164,10 @@ struct MatchingColumnsStudyView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Соедини пары")
                     .font(.largeTitle.bold())
+                    .foregroundStyle(.white)
                 Text("Выбери слово слева и перевод справа. Правильная пара исчезнет.")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.68))
             }
             .padding(.top, 12)
 
@@ -163,7 +181,7 @@ struct MatchingColumnsStudyView: View {
             ForEach(Array(matchingRows.enumerated()), id: \.offset) { _, row in
                 HStack(alignment: .center, spacing: 12) {
                     MatchingCell(
-                        item: row.word,
+                        pairID: row.word.id,
                         label: row.word.card.word,
                         isSelected: selectedWordID == row.word.id,
                         isWrong: wrongWordID == row.word.id,
@@ -171,8 +189,8 @@ struct MatchingColumnsStudyView: View {
                     )
 
                     MatchingCell(
-                        item: row.translation,
-                        label: row.translation.card.matchingTranslationDisplay(),
+                        pairID: row.translation.id,
+                        label: row.translation.translation,
                         isSelected: selectedTranslationID == row.translation.id,
                         isWrong: wrongTranslationID == row.translation.id,
                         action: { selectTranslation(row.translation) }
@@ -184,92 +202,73 @@ struct MatchingColumnsStudyView: View {
 
             Text("\(session.remainingCount) осталось")
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.62))
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 12)
         }
-        .padding()
+        .padding(.horizontal, 20)
         .onChange(of: wordItems.map(\.id), initial: true) { _, ids in
-            syncTranslations(withWordIDs: ids)
+            syncTranslations(withPairIDs: ids)
         }
     }
 
-    private func syncTranslations(withWordIDs ids: [UUID]) {
+    private func syncTranslations(withPairIDs ids: [String]) {
         guard !ids.isEmpty else {
             translationItems = []
             return
         }
         let idSet = Set(ids)
-        if translationItems.count == ids.count,
-           Set(translationItems.map(\.id)) == idSet {
+        let previousIDs = Set(translationItems.map(\.id))
+        if previousIDs == idSet, translationItems.count == ids.count {
             return
         }
-        let byID = Dictionary(uniqueKeysWithValues: (translationItems + wordItems).map { ($0.id, $0) })
+
+        let byID = Dictionary(uniqueKeysWithValues: wordItems.map { ($0.id, $0) })
         var next = ids.compactMap { byID[$0] }
-        if next.count != ids.count {
-            next = wordItems.shuffled()
-        } else if translationItems.isEmpty {
+        guard next.count == ids.count else {
+            translationItems = wordItems.shuffled()
+            return
+        }
+
+        if previousIDs != idSet || translationItems.isEmpty {
             next.shuffle()
         }
         translationItems = next
     }
 
-    private func selectWord(_ item: StudyQueueItem) {
+    private func selectWord(_ pair: MatchingPair) {
         guard wrongWordID == nil else { return }
-        if selectedWordID == item.id {
+        if selectedWordID == pair.id {
             selectedWordID = nil
             return
         }
-        selectedWordID = item.id
+        selectedWordID = pair.id
+        WordAudioPlayer.shared.playWord(from: pair.card)
         checkPairIfReady()
     }
 
-    private func selectTranslation(_ item: StudyQueueItem) {
+    private func selectTranslation(_ pair: MatchingPair) {
         guard wrongWordID == nil else { return }
-        if selectedTranslationID == item.id {
+        if selectedTranslationID == pair.id {
             selectedTranslationID = nil
             return
         }
-        selectedTranslationID = item.id
+        selectedTranslationID = pair.id
         checkPairIfReady()
-    }
-
-    private func refillTranslationColumn(
-        removedID: UUID,
-        newCard: StudyQueueItem?,
-        wordSlotIndex: Int
-    ) {
-        translationItems.removeAll { $0.id == removedID }
-        guard let newCard else { return }
-
-        let slotCount = wordItems.count
-        guard slotCount > 0 else { return }
-
-        var insertIndex = wordSlotIndex
-        if slotCount > 1 {
-            let alternatives = (0..<slotCount).filter { $0 != wordSlotIndex }
-            insertIndex = alternatives.randomElement() ?? wordSlotIndex
-        }
-        insertIndex = min(insertIndex, translationItems.count)
-        translationItems.insert(newCard, at: insertIndex)
     }
 
     private func checkPairIfReady() {
         guard let selectedWordID, let selectedTranslationID else { return }
         if selectedWordID == selectedTranslationID {
-            let matchedID = selectedWordID
             withAnimation(.snappy) {
-                if let refill = session.removeMatchedCard(id: matchedID) {
-                    refillTranslationColumn(
-                        removedID: matchedID,
-                        newCard: refill.newCard,
-                        wordSlotIndex: refill.slotIndex
-                    )
-                }
+                session.removeMatchedPair(id: selectedWordID)
             }
             self.selectedWordID = nil
             self.selectedTranslationID = nil
         } else {
+            if let wordPair = wordItems.first(where: { $0.id == selectedWordID }) {
+                WordAudioPlayer.shared.playWord(from: wordPair.card, style: .wrong)
+            }
             wrongWordID = selectedWordID
             wrongTranslationID = selectedTranslationID
             self.selectedWordID = nil
@@ -290,7 +289,7 @@ private struct MatchingColumnHeaderStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .font(.caption.bold())
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.white.opacity(0.62))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 4)
     }
@@ -303,7 +302,7 @@ private extension View {
 }
 
 private struct MatchingCell: View {
-    let item: StudyQueueItem
+    let pairID: String
     let label: String
     let isSelected: Bool
     let isWrong: Bool
@@ -313,33 +312,47 @@ private struct MatchingCell: View {
         Button(action: action) {
             Text(label)
                 .font(.headline)
-                .foregroundStyle(.primary)
+                .foregroundStyle(textColor)
                 .multilineTextAlignment(.center)
                 .lineLimit(3)
                 .minimumScaleFactor(0.82)
                 .frame(maxWidth: .infinity, minHeight: 58, alignment: .center)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
-                .background(backgroundColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .background {
+                    Group {
+                        if isWrong {
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(Color.red.opacity(0.82))
+                        } else if isSelected {
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(Color.blue.opacity(0.88))
+                        } else {
+                            LightCardBackground(cornerRadius: 18)
+                        }
+                    }
+                }
                 .overlay {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .stroke(borderColor, lineWidth: isSelected || isWrong ? 2 : 1)
                 }
+                .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 6)
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
         .transition(.scale.combined(with: .opacity))
     }
 
-    private var backgroundColor: Color {
-        if isWrong { return .red.opacity(0.16) }
-        if isSelected { return .blue.opacity(0.18) }
-        return Color(.secondarySystemGroupedBackground)
+    private var textColor: Color {
+        if isWrong || isSelected {
+            return .white
+        }
+        return Color(red: 0.08, green: 0.08, blue: 0.13)
     }
 
     private var borderColor: Color {
-        if isWrong { return .red.opacity(0.65) }
-        if isSelected { return .blue }
-        return .black.opacity(0.08)
+        if isWrong { return .red.opacity(0.95) }
+        if isSelected { return .blue.opacity(0.95) }
+        return .white.opacity(0.75)
     }
 }

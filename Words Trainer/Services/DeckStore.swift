@@ -75,85 +75,13 @@ final class DeckStore {
     }
 }
 
-@Observable
-@MainActor
-final class StudySession {
-    private static let matchingSlotCount = 4
-
-    let deckID: UUID
-    let mode: StudyMode
-    private(set) var queue: [StudyQueueItem]
-    private(set) var matchingWordSlots: [StudyQueueItem] = []
-    private var matchingPool: [StudyQueueItem] = []
-    private var dailyUsage: DeckDailyUsage?
-    private let engine: StudySessionEngine
-
-    var current: StudyQueueItem? { queue.first }
-    var remainingCount: Int {
-        if mode == .matching {
-            return matchingWordSlots.count + matchingPool.count
-        }
-        return queue.count
-    }
-    var isFinished: Bool {
-        if mode == .matching {
-            return matchingWordSlots.isEmpty && matchingPool.isEmpty
-        }
-        return queue.isEmpty
-    }
-    var matchingVisibleItems: [StudyQueueItem] { matchingWordSlots }
-
-    init(
-        deckID: UUID,
-        mode: StudyMode,
-        queue: [StudyQueueItem],
-        dailyUsage: DeckDailyUsage?,
-        engine: StudySessionEngine
-    ) {
-        self.deckID = deckID
-        self.mode = mode
-        self.dailyUsage = dailyUsage
-        self.engine = engine
-        if mode == .matching {
-            matchingWordSlots = Array(queue.prefix(Self.matchingSlotCount))
-            matchingPool = Array(queue.dropFirst(Self.matchingSlotCount))
-            self.queue = []
-        } else {
-            self.queue = queue
-        }
-    }
-
-    func outcome(for result: ReviewOutcome) -> ReviewOutcome {
-        result
-    }
-
+extension StudySession {
     func advanceAfterReview(
         outcome: ReviewOutcome,
         store: DeckStore
     ) throws {
-        guard let item = current else { return }
-        let wasNew = item.progress.fsrsCard.state == .new
-        let updated = try engine.applyReview(progress: item.progress, outcome: outcome)
-        try store.saveProgress(deckID: deckID, progress: updated, wasNew: wasNew && outcome.passed)
-        queue.removeFirst()
-    }
-
-    /// Removes a matched card; refills that word slot from the pool when possible.
-    /// Returns slot index and the new card in that slot (if refilled).
-    func removeMatchedCard(id: UUID) -> (slotIndex: Int, newCard: StudyQueueItem?)? {
-        guard mode == .matching else {
-            queue.removeAll { $0.id == id }
-            return nil
+        try advanceAfterReview(outcome: outcome) { progress, wasNew in
+            try store.saveProgress(deckID: deckID, progress: progress, wasNew: wasNew)
         }
-        guard let slotIndex = matchingWordSlots.firstIndex(where: { $0.id == id }) else {
-            return nil
-        }
-        matchingWordSlots.remove(at: slotIndex)
-        guard let next = matchingPool.first else {
-            return (slotIndex, nil)
-        }
-        matchingPool.removeFirst()
-        matchingWordSlots.insert(next, at: slotIndex)
-        return (slotIndex, next)
     }
 }

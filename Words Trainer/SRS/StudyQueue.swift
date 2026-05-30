@@ -13,6 +13,38 @@ struct StudyQueueItem: Identifiable, Sendable {
     }
 }
 
+/// One word sense paired with one translation line in matching columns.
+struct MatchingPair: Identifiable, Sendable, Hashable {
+    let cardID: UUID
+    let card: WordCardContent
+    let senseIndex: Int
+    let translation: String
+
+    var id: String { "\(cardID.uuidString)-\(senseIndex)" }
+
+    static func pairs(from item: StudyQueueItem) -> [MatchingPair] {
+        let senses = WordCardContent.translationSenses(item.card.translation)
+        if senses.isEmpty {
+            return [
+                MatchingPair(
+                    cardID: item.card.id,
+                    card: item.card,
+                    senseIndex: 0,
+                    translation: item.card.translation
+                ),
+            ]
+        }
+        return senses.enumerated().map { index, sense in
+            MatchingPair(
+                cardID: item.card.id,
+                card: item.card,
+                senseIndex: index,
+                translation: sense
+            )
+        }
+    }
+}
+
 enum StudyQueueBuilder {
     static func build(
         deck: DeckContent,
