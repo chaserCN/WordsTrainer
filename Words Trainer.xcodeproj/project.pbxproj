@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		EBEE36862FC8CB7E00BDFEB6 /* FSRS in Frameworks */ = {isa = PBXBuildFile; productRef = EBEE36512FC8C9DE00BDFEB6 /* FSRS */; };
+		EBEE36872FC8CB7E00BDFEB7 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = EBEE368A2FC8CB7E00BDFEBA /* FirebaseCore */; };
+		EBEE36882FC8CB7E00BDFEB8 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = EBEE368B2FC8CB7E00BDFEBB /* FirebaseCrashlytics */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,6 +59,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				EBEE36862FC8CB7E00BDFEB6 /* FSRS in Frameworks */,
+				EBEE36872FC8CB7E00BDFEB7 /* FirebaseCore in Frameworks */,
+				EBEE36882FC8CB7E00BDFEB8 /* FirebaseCrashlytics in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -107,6 +111,7 @@
 				EBEE36122FC8C9D900BDFEB6 /* Sources */,
 				EBEE36132FC8C9D900BDFEB6 /* Frameworks */,
 				EBEE36142FC8C9D900BDFEB6 /* Resources */,
+				EBEE368C2FC8CB7E00BDFEBC /* Upload Crashlytics dSYMs */,
 			);
 			buildRules = (
 			);
@@ -118,6 +123,8 @@
 			name = "Words Trainer";
 			packageProductDependencies = (
 				EBEE36512FC8C9DE00BDFEB6 /* FSRS */,
+				EBEE368A2FC8CB7E00BDFEBA /* FirebaseCore */,
+				EBEE368B2FC8CB7E00BDFEBB /* FirebaseCrashlytics */,
 			);
 			productName = "Words Trainer";
 			productReference = EBEE36162FC8C9D900BDFEB6 /* Words Trainer.app */;
@@ -203,6 +210,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				EBEE36502FC8C9DE00BDFEB6 /* XCRemoteSwiftPackageReference "swift-fsrs" */,
+				EBEE36892FC8CB7E00BDFEB9 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EBEE36172FC8C9D900BDFEB6 /* Products */;
@@ -239,6 +247,33 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		EBEE368C2FC8CB7E00BDFEBC /* Upload Crashlytics dSYMs */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${TARGET_NAME}",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Info.plist",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GoogleService-Info.plist",
+				"$(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)",
+			);
+			name = "Upload Crashlytics dSYMs";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		EBEE36122FC8C9D900BDFEB6 /* Sources */ = {
@@ -406,6 +441,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = F7B2N6P9WP;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -419,6 +455,10 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.uniweb.wordtrainer.Words-Trainer";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -438,6 +478,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = F7B2N6P9WP;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -451,6 +492,10 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.uniweb.wordtrainer.Words-Trainer";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -597,6 +642,14 @@
 				kind = branch;
 			};
 		};
+		EBEE36892FC8CB7E00BDFEB9 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -604,6 +657,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = EBEE36502FC8C9DE00BDFEB6 /* XCRemoteSwiftPackageReference "swift-fsrs" */;
 			productName = FSRS;
+		};
+		EBEE368A2FC8CB7E00BDFEBA /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EBEE36892FC8CB7E00BDFEB9 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		EBEE368B2FC8CB7E00BDFEBB /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EBEE36892FC8CB7E00BDFEB9 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
