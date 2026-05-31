@@ -44,6 +44,100 @@ struct RecallOutcomeButton: View {
     }
 }
 
+struct ReviewOutcomeControls: View {
+    var forgotTitle = "Забыл"
+    var rememberedTitle = "Помню"
+    var verticalPadding: CGFloat = 16
+    var isEnabled = true
+    let onAnswer: (ReviewOutcome) -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            RecallOutcomeButton(
+                title: forgotTitle,
+                systemImage: "xmark",
+                titleColor: MatchPalette.destructive,
+                iconColor: MatchPalette.destructive,
+                iconBackground: MatchPalette.destructive.opacity(0.14),
+                verticalPadding: verticalPadding
+            ) {
+                onAnswer(.forgot)
+            }
+            .frame(maxWidth: .infinity)
+
+            RecallOutcomeButton(
+                title: rememberedTitle,
+                systemImage: "checkmark",
+                titleColor: MatchPalette.successText,
+                iconColor: MatchPalette.successText,
+                iconBackground: MatchPalette.success.opacity(0.22),
+                verticalPadding: verticalPadding
+            ) {
+                onAnswer(.remembered)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.62)
+    }
+}
+
+struct StudyProgressHeader: View {
+    let totalCount: Int
+    let remainingCount: Int
+
+    private var completedCount: Int {
+        max(0, totalCount - remainingCount)
+    }
+
+    var body: some View {
+        StudySessionProgressBar(completed: completedCount, total: totalCount)
+    }
+}
+
+enum StudyCardChangeDirection {
+    case left
+    case right
+}
+
+struct StudyCardChangeTransition: ViewModifier {
+    let cardID: UUID
+    var direction: StudyCardChangeDirection = .right
+
+    private var removalOffset: CGSize {
+        direction == .left
+            ? CGSize(width: 6, height: -3)
+            : CGSize(width: -6, height: -3)
+    }
+
+    private var insertionOffset: CGSize {
+        direction == .left
+            ? CGSize(width: -6, height: 3)
+            : CGSize(width: 6, height: 3)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .id(cardID)
+            .transition(
+                .asymmetric(
+                    insertion: .opacity.combined(with: .offset(x: insertionOffset.width, y: insertionOffset.height)),
+                    removal: .opacity.combined(with: .offset(x: removalOffset.width, y: removalOffset.height))
+                )
+            )
+            .animation(.easeOut(duration: 0.18), value: cardID)
+    }
+}
+
+extension View {
+    func studyCardChangeTransition(
+        cardID: UUID,
+        direction: StudyCardChangeDirection = .right
+    ) -> some View {
+        modifier(StudyCardChangeTransition(cardID: cardID, direction: direction))
+    }
+}
+
 struct StudySessionProgressBar: View {
     let completed: Int
     let total: Int

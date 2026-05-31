@@ -4,6 +4,7 @@ struct FlashcardStudyView: View {
     let card: WordCardContent
     let totalCount: Int
     let remainingCount: Int
+    let isAnswerEnabled: Bool
     let onAnswer: (ReviewOutcome) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -14,6 +15,7 @@ struct FlashcardStudyView: View {
     @State private var backCardContentHeight: CGFloat = 0
     @State private var expandedCardContentHeight: CGFloat = 0
     @State private var cardRotation: Double = 0
+    @State private var cardChangeDirection: StudyCardChangeDirection = .right
     @State private var isFlipAnimating = false
     @State private var flipGeneration = 0
 
@@ -23,10 +25,6 @@ struct FlashcardStudyView: View {
     private static let actionGap: CGFloat = 20
     private static let flipHalfDuration = 0.18
     private static let flipPerspective: CGFloat = 0.25
-
-    private var completedCount: Int {
-        max(0, totalCount - remainingCount)
-    }
 
     private var hasWordAudio: Bool {
         card.audioWordURL != nil
@@ -48,7 +46,7 @@ struct FlashcardStudyView: View {
             )
 
             VStack(spacing: 0) {
-                StudySessionProgressBar(completed: completedCount, total: totalCount)
+                StudyProgressHeader(totalCount: totalCount, remainingCount: remainingCount)
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
 
@@ -60,6 +58,7 @@ struct FlashcardStudyView: View {
                     actionButtons
                 }
                 .padding(.horizontal, 16)
+                .studyCardChangeTransition(cardID: card.id, direction: cardChangeDirection)
 
                 Spacer(minLength: Self.verticalGap)
             }
@@ -72,31 +71,13 @@ struct FlashcardStudyView: View {
     }
 
     private var actionButtons: some View {
-        HStack(spacing: 10) {
-            RecallOutcomeButton(
-                title: "Снова",
-                systemImage: "xmark",
-                titleColor: MatchPalette.destructive,
-                iconColor: MatchPalette.destructive,
-                iconBackground: MatchPalette.destructive.opacity(0.14),
-                verticalPadding: 20
-            ) {
-                answer(.forgot)
-            }
-            .frame(maxWidth: .infinity)
-
-            RecallOutcomeButton(
-                title: "Хорошо",
-                systemImage: "checkmark",
-                titleColor: MatchPalette.successText,
-                iconColor: MatchPalette.successText,
-                iconBackground: MatchPalette.success.opacity(0.22),
-                verticalPadding: 20
-            ) {
-                answer(.remembered)
-            }
-            .frame(maxWidth: .infinity)
-        }
+        ReviewOutcomeControls(
+            forgotTitle: "Снова",
+            rememberedTitle: "Хорошо",
+            verticalPadding: 20,
+            isEnabled: isAnswerEnabled,
+            onAnswer: answer
+        )
     }
 
     private func flashcard(baseHeight: CGFloat, maxHeight: CGFloat) -> some View {
@@ -438,6 +419,12 @@ struct FlashcardStudyView: View {
     }
 
     private func answer(_ outcome: ReviewOutcome) {
+        switch outcome {
+        case .forgot, .incorrect:
+            cardChangeDirection = .left
+        case .remembered, .correct:
+            cardChangeDirection = .right
+        }
         onAnswer(outcome)
     }
 

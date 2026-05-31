@@ -52,6 +52,8 @@ struct MatchingColumnsStudyView: View {
     /// Лейблы всех виденных пар — чтобы текст не пропадал, пока матченная пара гаснет.
     @State private var pairCache: [String: MatchingPair] = [:]
     @State private var matchingRecord: DeckMatchingRecord?
+    @State private var previewPair: MatchingPair?
+    @State private var suppressedWordTapSlot: UUID?
 
     // Перемешивание поля, если три раза подряд матч в одни и те же ячейки.
     @State private var lastMatchedWordSlot: UUID?
@@ -98,16 +100,39 @@ struct MatchingColumnsStudyView: View {
         .onChange(of: session.matchingVisibleItems.map(\.id), initial: true) { _, _ in
             seedColumnsIfNeeded()
         }
+        .overlay {
+            if let previewPair {
+                MatchingFlashcardPreviewOverlay(pair: previewPair) {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        self.previewPair = nil
+                    }
+                    suppressedWordTapSlot = nil
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: previewPair?.id)
     }
 
     @ViewBuilder
     private func wordCell(_ slot: Slot) -> some View {
+        let pair = pairCache[slot.pairID]
         MatchingCell(
-            label: pairCache[slot.pairID]?.card.word ?? "",
+            label: pair?.card.word ?? "",
             isSelected: selectedWordSlot == slot.id,
             isWrong: wrongWordSlot == slot.id,
             isCorrect: correctWordSlots.contains(slot.id),
             action: { selectWord(slot) }
+        )
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.45)
+                .onEnded { _ in
+                    guard let pair else { return }
+                    suppressedWordTapSlot = slot.id
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        previewPair = pair
+                    }
+                }
         )
         .opacity(wordSlotOpacity[slot.id] ?? 1)
         .scaleEffect(scale(for: wordSlotOpacity[slot.id]))
@@ -156,6 +181,10 @@ struct MatchingColumnsStudyView: View {
 
     private func selectWord(_ slot: Slot) {
         guard wrongWordSlot == nil, isWordTappable(slot.id) else { return }
+        if suppressedWordTapSlot == slot.id {
+            suppressedWordTapSlot = nil
+            return
+        }
         if selectedWordSlot == slot.id {
             selectedWordSlot = nil
             return
@@ -523,6 +552,134 @@ private struct MatchingStatusBar: View {
             }
             .frame(height: 7)
         }
+    }
+}
+
+private struct MatchingFlashcardPreviewOverlay: View {
+    let pair: MatchingPair
+    let onClose: () -> Void
+
+    @State private var cardFrame: CGRect = .zero
+
+    private var card: WordCardContent {
+        pair.card
+    }
+
+    private var exampleTranslation: String? {
+        trimmedNonEmpty(card.clozeExampleTranslation)
+    }
+
+    private var notesText: String? {
+        trimmedNonEmpty(card.explanation)
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+
+            ScrollView(.vertical, showsIndicators: false) {
+                ZStack(alignment: .topTrailing) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        Text(card.word)
+                            .font(.title.bold())
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.trailing, 44)
+
+                        Text(pair.translation)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(card.clozeExamplePlainText)
+                                .font(.body)
+                                .foregroundStyle(oklch(0.92, 0.01, 260))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            if let exampleTranslation {
+                                Text(exampleTranslation)
+                                    .font(.body)
+                                    .foregroundStyle(oklch(0.92, 0.01, 260))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+
+                            if let notesText {
+                                Text(notesText)
+                                    .font(.subheadline)
+                                    .foregroundStyle(oklch(0.72, 0.015, 260))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .padding(24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.white.opacity(0.86))
+                            .frame(width: 32, height: 32)
+                            .background(Circle().fill(.white.opacity(0.10)))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(14)
+                    .accessibilityLabel("Закрыть")
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(oklch(0.32, 0.016, 260))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .strokeBorder(.white.opacity(0.10), lineWidth: 0.5)
+                )
+                .shadow(color: MatchPalette.shadow.opacity(0.22), radius: 18, x: 0, y: 10)
+                .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: MatchingPreviewCardFrameKey.self,
+                            value: proxy.frame(in: .named("matchingPreviewOverlay"))
+                        )
+                    }
+                )
+                .padding(.horizontal, 22)
+                .padding(.top, 96)
+                .padding(.bottom, 24)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .coordinateSpace(.named("matchingPreviewOverlay"))
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .named("matchingPreviewOverlay"))
+                .onEnded { value in
+                    let isTap = abs(value.translation.width) < 8 && abs(value.translation.height) < 8
+                    guard isTap, !cardFrame.contains(value.location) else { return }
+                    onClose()
+                }
+        )
+        .onPreferenceChange(MatchingPreviewCardFrameKey.self) { frame in
+            cardFrame = frame
+        }
+    }
+
+    private func trimmedNonEmpty(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+}
+
+private struct MatchingPreviewCardFrameKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
     }
 }
 

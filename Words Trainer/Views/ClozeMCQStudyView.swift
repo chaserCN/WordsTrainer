@@ -4,6 +4,7 @@ struct ClozeMCQStudyView: View {
     let card: WordCardContent
     let sessionChoicePool: [WordCardContent]
     let deckChoicePool: [WordCardContent]
+    let totalCount: Int
     let remainingCount: Int
     let onAnswer: (ReviewOutcome) -> Void
 
@@ -26,53 +27,53 @@ struct ClozeMCQStudyView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            sentenceCard
+            StudyProgressHeader(totalCount: totalCount, remainingCount: remainingCount)
 
-            VStack(spacing: 10) {
-                ForEach(choices, id: \.self) { option in
-                    ClozeChoiceButton(
-                        option: option,
-                        showResult: answered,
-                        isSelected: selected == option,
-                        isCorrect: answered && optionsMatch(option, card.effectiveClozeAnswer),
-                        isWrong: answered && selected == option && !optionsMatch(option, card.effectiveClozeAnswer),
-                        isDimmed: answered && selected != option && !optionsMatch(option, card.effectiveClozeAnswer)
-                    ) {
-                        select(option)
+            VStack(alignment: .leading, spacing: 14) {
+                sentenceCard
+
+                VStack(spacing: 10) {
+                    ForEach(choices, id: \.self) { option in
+                        ClozeChoiceButton(
+                            option: option,
+                            showResult: answered,
+                            isSelected: selected == option,
+                            isCorrect: answered && optionsMatch(option, card.effectiveClozeAnswer),
+                            isWrong: answered && selected == option && !optionsMatch(option, card.effectiveClozeAnswer),
+                            isDimmed: answered && selected != option && !optionsMatch(option, card.effectiveClozeAnswer)
+                        ) {
+                            select(option)
+                        }
+                        .disabled(answered)
                     }
-                    .disabled(answered)
                 }
-            }
 
-            Text(remainingCardsLabel(remainingCount))
-                .font(.caption)
-                .foregroundStyle(MatchPalette.muted)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+                if answered {
+                    VStack(spacing: 16) {
+                        if let translation = card.clozeExampleTranslation?.trimmingCharacters(in: .whitespacesAndNewlines),
+                           !translation.isEmpty {
+                            Text(translation)
+                                .font(.subheadline)
+                                .foregroundStyle(MatchPalette.foreground)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
+                        }
 
-            if answered {
-                VStack(spacing: 16) {
-                    if let translation = card.clozeExampleTranslation?.trimmingCharacters(in: .whitespacesAndNewlines),
-                       !translation.isEmpty {
-                        Text(translation)
-                            .font(.subheadline)
-                            .foregroundStyle(MatchPalette.foreground)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity)
+                        Button("Дальше") {
+                            onAnswer(passed ? .correct : .incorrect)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(MatchPalette.primary)
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity)
                     }
-
-                    Button("Дальше") {
-                        onAnswer(passed ? .correct : .incorrect)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(MatchPalette.primary)
-                    .controlSize(.large)
-                    .frame(maxWidth: .infinity)
+                    .padding(.top, 20)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                .padding(.top, 20)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
 
-            Spacer(minLength: 0)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -161,22 +162,6 @@ struct ClozeMCQStudyView: View {
 
     private func optionsMatch(_ lhs: String, _ rhs: String) -> Bool {
         lhs.compare(rhs, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
-    }
-
-    private func remainingCardsLabel(_ count: Int) -> String {
-        let mod10 = count % 10
-        let mod100 = count % 100
-        let word: String
-        if mod100 >= 11 && mod100 <= 14 {
-            word = "карточек"
-        } else if mod10 == 1 {
-            word = "карточка"
-        } else if mod10 >= 2 && mod10 <= 4 {
-            word = "карточки"
-        } else {
-            word = "карточек"
-        }
-        return "осталось \(count) \(word)"
     }
 }
 

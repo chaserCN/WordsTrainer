@@ -14,6 +14,9 @@ struct StudySessionView: View {
     @State private var confettiBurst = 0
     /// Время прохождения раунда — для сообщения о рекорде.
     @State private var finishedDuration: TimeInterval?
+    @State private var isFlashcardSubmitEnabled = true
+
+    private static let flashcardSubmitCooldown: TimeInterval = 1
 
     var body: some View {
         ZStack {
@@ -56,7 +59,8 @@ struct StudySessionView: View {
                         FlashcardStudyView(
                             card: item.card,
                             totalCount: session.sessionChoicePool.count,
-                            remainingCount: session.remainingCount
+                            remainingCount: session.remainingCount,
+                            isAnswerEnabled: isFlashcardSubmitEnabled
                         ) { outcome in
                             submit(outcome)
                         }
@@ -65,6 +69,7 @@ struct StudySessionView: View {
                             card: item.card,
                             sessionChoicePool: session.sessionChoicePool,
                             deckChoicePool: session.deckChoicePool,
+                            totalCount: session.sessionChoicePool.count,
                             remainingCount: session.remainingCount
                         ) { outcome in
                             submit(outcome)
@@ -138,6 +143,15 @@ struct StudySessionView: View {
     }
 
     private func submit(_ outcome: ReviewOutcome) {
+        if session.mode == .flashcards {
+            guard isFlashcardSubmitEnabled else { return }
+            isFlashcardSubmitEnabled = false
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.flashcardSubmitCooldown) {
+                isFlashcardSubmitEnabled = true
+            }
+        }
+
         do {
             try session.advanceAfterReview(outcome: outcome, store: store)
         } catch {
@@ -145,4 +159,3 @@ struct StudySessionView: View {
         }
     }
 }
-
