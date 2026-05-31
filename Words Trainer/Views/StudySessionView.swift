@@ -45,7 +45,11 @@ struct StudySessionView: View {
                 } else if let item = session.current {
                     switch session.mode {
                     case .recall:
-                        RecallStudyView(card: item.card) { outcome in
+                        RecallStudyView(
+                            card: item.card,
+                            totalCount: session.sessionChoicePool.count,
+                            remainingCount: session.remainingCount
+                        ) { outcome in
                             submit(outcome)
                         }
                     case .clozeMultipleChoice:
@@ -115,7 +119,7 @@ struct StudySessionView: View {
     }
 
     private var usesLightStudyTheme: Bool {
-        session.mode == .matching || session.mode == .clozeMultipleChoice
+        session.mode == .matching || session.mode == .clozeMultipleChoice || session.mode == .recall
     }
 
     private func submit(_ outcome: ReviewOutcome) {

@@ -2,32 +2,58 @@ import SwiftUI
 
 struct RecallStudyView: View {
     let card: WordCardContent
+    let totalCount: Int
+    let remainingCount: Int
     let onAnswer: (ReviewOutcome) -> Void
 
-    var body: some View {
-        VStack(spacing: 32) {
-            Spacer()
-            Text(card.word)
-                .font(.largeTitle.bold())
-                .foregroundStyle(.white)
-                .multilineTextAlignment(.center)
-            Spacer()
-            HStack(spacing: 16) {
-                Button("Забыл") {
-                    onAnswer(.forgot)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
+    private var completedCount: Int {
+        max(0, totalCount - remainingCount)
+    }
 
-                Button("Помню") {
-                    onAnswer(.remembered)
+    var body: some View {
+        VStack(spacing: 0) {
+            StudySessionProgressBar(completed: completedCount, total: totalCount)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+            Spacer()
+
+            VStack(spacing: 32) {
+                Text(card.word)
+                    .font(.largeTitle.bold())
+                    .foregroundStyle(MatchPalette.cardForeground)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+
+                HStack(spacing: 10) {
+                    RecallOutcomeButton(
+                        title: "Забыл",
+                        systemImage: "xmark",
+                        titleColor: MatchPalette.destructive,
+                        iconColor: MatchPalette.destructive,
+                        iconBackground: MatchPalette.destructive.opacity(0.14)
+                    ) {
+                        onAnswer(.forgot)
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    RecallOutcomeButton(
+                        title: "Помню",
+                        systemImage: "checkmark",
+                        titleColor: MatchPalette.successText,
+                        iconColor: MatchPalette.successText,
+                        iconBackground: MatchPalette.success.opacity(0.22)
+                    ) {
+                        onAnswer(.remembered)
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
             }
-            .controlSize(.large)
-            .padding(.horizontal, 20)
-            .padding(.bottom, 32)
+            .padding(.horizontal, 16)
+
+            Spacer()
+            Spacer(minLength: 56)
         }
+        .padding(.bottom, 10)
     }
 }
