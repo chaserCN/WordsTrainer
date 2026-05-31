@@ -4,13 +4,15 @@ import SwiftUI
 struct HTMLText: View {
     let html: String
     var foregroundColor: Color?
+    var font: Font?
 
     var body: some View {
         if let attributed = Self.attributedString(from: html) {
-            Text(Self.applyingStyle(to: attributed, foregroundColor: foregroundColor))
+            Text(Self.applyingStyle(to: attributed, foregroundColor: foregroundColor, font: font))
         } else {
             Text(html)
                 .foregroundStyle(foregroundColor ?? .primary)
+                .font(font)
         }
     }
 
@@ -26,10 +28,24 @@ struct HTMLText: View {
         return AttributedString(ns)
     }
 
-    private static func applyingStyle(to attributedString: AttributedString, foregroundColor: Color?) -> AttributedString {
-        var attributedString = attributedString
-        attributedString.font = nil
-        attributedString.foregroundColor = foregroundColor
-        return attributedString
+    private static func applyingStyle(
+        to attributedString: AttributedString,
+        foregroundColor: Color?,
+        font: Font?
+    ) -> AttributedString {
+        var result = attributedString
+        for run in result.runs {
+            if let foregroundColor {
+                result[run.range].foregroundColor = foregroundColor
+            }
+            if let font {
+                if run.inlinePresentationIntent?.contains(.stronglyEmphasized) == true {
+                    result[run.range].font = font.weight(.bold)
+                } else {
+                    result[run.range].font = font
+                }
+            }
+        }
+        return result
     }
 }

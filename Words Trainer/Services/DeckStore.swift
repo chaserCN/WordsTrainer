@@ -53,6 +53,7 @@ final class DeckStore {
             deckID: deck.id,
             mode: mode,
             queue: queue,
+            deckCards: deck.cards,
             dailyUsage: usage,
             engine: engine
         )

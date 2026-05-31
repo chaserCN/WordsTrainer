@@ -80,6 +80,44 @@ struct WordCardContentTests {
         #expect(card.effectiveClozeAnswer == "apple")
     }
 
+    @Test("fillTemplate replaces blank token and legacy gap")
+    func fillTemplateSupportsBlankMarkers() {
+        #expect(
+            WordCardContent.fillTemplate("She put her hands on her {{blank}}.", with: "hips")
+            == "She put her hands on her hips."
+        )
+        #expect(
+            WordCardContent.fillTemplate("He wore a plaster ___ on his arm.", with: "cast")
+            == "He wore a plaster cast on his arm."
+        )
+    }
+
+    @Test("clozeSentenceParts splits around blank markers")
+    func clozeSentencePartsSplit() {
+        let parts = WordCardContent.clozeSentenceParts(
+            in: "After the accident, he wore a plaster {{blank}} on his arm."
+        )
+        #expect(parts?.prefix == "After the accident, he wore a plaster ")
+        #expect(parts?.suffix == " on his arm.")
+
+        let legacy = WordCardContent.clozeSentenceParts(
+            in: "The fisherman ___ his net into the water."
+        )
+        #expect(legacy?.prefix == "The fisherman ")
+        #expect(legacy?.suffix == " his net into the water.")
+    }
+
+    @Test("clozeExamplePlainText strips markup and fills answer")
+    func clozeExamplePlainText() {
+        let card = WordCardContent(
+            word: "cast",
+            translation: "гипс",
+            clozePrompt: "After the accident, he wore a plaster ___ on his arm.",
+            clozeAnswer: "cast"
+        )
+        #expect(card.clozeExamplePlainText == "After the accident, he wore a plaster cast on his arm.")
+    }
+
     @Test("clozeChoices trims empty values and deduplicates answer")
     func clozeChoicesDeduplicateAnswer() {
         let card = WordCardContent(
@@ -127,6 +165,37 @@ struct WordCardContentTests {
         ]
 
         #expect(card.clozeChoices(answerPool: pool) == ["hips", "loads", "heels", "settle"])
+    }
+
+    @Test("clozeChoices fall back to deck pool when session is nearly exhausted")
+    func clozeChoicesFallBackToDeckPool() {
+        let card = TestFixtures.card(
+            word: "cast",
+            translation: "гипс",
+            clozePrompt: "He wore a plaster ___ on his arm.",
+            clozeAnswer: "cast"
+        )
+        let sessionMate = TestFixtures.card(
+            word: "load",
+            translation: "груз",
+            clozePrompt: "A heavy ___ of bricks.",
+            clozeAnswer: "load"
+        )
+        let deckOnly = [
+            TestFixtures.card(word: "hip", translation: "бедро", clozePrompt: "Hands on her ___", clozeAnswer: "hips"),
+            TestFixtures.card(word: "heel", translation: "пятка", clozePrompt: "Back of her ___", clozeAnswer: "heel"),
+            TestFixtures.card(word: "settle", translation: "осесть", clozePrompt: "They ___ there.", clozeAnswer: "settle"),
+        ]
+
+        let fromSessionOnly = card.clozeChoices(sessionPool: [card, sessionMate], deckPool: [])
+        #expect(fromSessionOnly == ["cast", "load"])
+
+        let withDeckFallback = card.clozeChoices(
+            sessionPool: [card, sessionMate],
+            deckPool: deckOnly + [card, sessionMate]
+        )
+        #expect(withDeckFallback.count == 4)
+        #expect(withDeckFallback.first == "cast")
     }
 
     @Test("clozeChoices prefer matching verb form")

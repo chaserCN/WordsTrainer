@@ -35,6 +35,17 @@ final class WordAudioPlayer {
         }
     }
 
+    func playExample(from card: WordCardContent) {
+        guard AppSettings.shared.isSoundEnabled else { return }
+        if let url = card.audioExampleURL {
+            playFile(at: url, pitchCents: 0)
+        } else {
+            let sentence = card.clozeExamplePlainText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !sentence.isEmpty else { return }
+            speakSentence(sentence)
+        }
+    }
+
     /// Plays a bundled sound effect (e.g. the new-record jingle at the end of a round).
     func playEffect(named name: String, withExtension ext: String = "mp3") {
         guard AppSettings.shared.isSoundEnabled else { return }
@@ -94,6 +105,17 @@ final class WordAudioPlayer {
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         utterance.pitchMultiplier = pitchMultiplier
+        speechSynthesizer.speak(utterance)
+    }
+
+    private func speakSentence(_ sentence: String) {
+        stopEnginePlayback()
+        speechSynthesizer.stopSpeaking(at: .immediate)
+        configureAudioSession()
+
+        let utterance = AVSpeechUtterance(string: sentence)
+        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         speechSynthesizer.speak(utterance)
     }
 

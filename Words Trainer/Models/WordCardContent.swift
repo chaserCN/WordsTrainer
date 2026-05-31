@@ -5,6 +5,11 @@ struct WordForm: Codable, Hashable {
     let text: String
 }
 
+struct ClozeSentenceParts: Equatable, Hashable {
+    let prefix: String
+    let suffix: String
+}
+
 /// Card content from server or local seed (no SRS state).
 struct WordCardContent: Codable, Identifiable, Hashable {
     static let blankToken = "{{blank}}"
@@ -18,6 +23,8 @@ struct WordCardContent: Codable, Identifiable, Hashable {
     let clozeTemplate: String?
     /// Override when the gap uses a different form than `word` (e.g. went vs go).
     let clozeAnswer: String?
+    /// Russian translation of the example sentence (`card_examples.translation`).
+    let clozeExampleTranslation: String?
     let answerFormKey: String?
     let shortDefinition: String?
     let memoryHint: String?
@@ -41,6 +48,7 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         clozePrompt: String,
         clozeTemplate: String? = nil,
         clozeAnswer: String? = nil,
+        clozeExampleTranslation: String? = nil,
         answerFormKey: String? = nil,
         shortDefinition: String? = nil,
         memoryHint: String? = nil,
@@ -63,6 +71,7 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         self.clozePrompt = clozePrompt
         self.clozeTemplate = clozeTemplate
         self.clozeAnswer = clozeAnswer
+        self.clozeExampleTranslation = clozeExampleTranslation
         self.answerFormKey = answerFormKey
         self.shortDefinition = shortDefinition
         self.memoryHint = memoryHint
@@ -94,6 +103,9 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         if let clozeTemplate {
             return Self.fillTemplate(clozeTemplate, with: "___")
         }
+        if clozePrompt.contains(Self.blankToken) || clozePrompt.contains("___") {
+            return Self.fillTemplate(clozePrompt, with: "___")
+        }
         return Self.clozePromptWithGap(from: clozePrompt)
     }
 
@@ -103,8 +115,36 @@ struct WordCardContent: Codable, Identifiable, Hashable {
     }
 
     func clozeChoices(answerPool: [WordCardContent], targetCount: Int = 4) -> [String] {
-        let otherCards = answerPool
-            .filter { $0.id != id }
+        clozeChoices(sessionPool: answerPool, deckPool: [], targetCount: targetCount)
+    }
+
+    /// Builds MCQ options from today's session first, then the full deck if needed.
+    func clozeChoices(
+        sessionPool: [WordCardContent],
+        deckPool: [WordCardContent],
+        targetCount: Int = 4
+    ) -> [String] {
+        let sessionOthers = sessionPool.filter { $0.id != id }
+        var distractors = distractorTexts(from: sessionOthers)
+        var choices = Self.uniqueChoices(
+            correctAnswer: effectiveClozeAnswer,
+            distractors: distractors
+        )
+
+        if choices.count < targetCount {
+            let sessionIDs = Set(sessionPool.map(\.id))
+            let deckOthers = deckPool.filter { $0.id != id && !sessionIDs.contains($0.id) }
+            distractors += distractorTexts(from: deckOthers)
+            choices = Self.uniqueChoices(
+                correctAnswer: effectiveClozeAnswer,
+                distractors: distractors
+            )
+        }
+
+        return Array(choices.prefix(max(1, targetCount)))
+    }
+
+    private func distractorTexts(from otherCards: [WordCardContent]) -> [String] {
         let exactMatches = otherCards.compactMap { card -> (UUID, String)? in
             guard let text = card.choiceText(exactlyMatching: answerFormKey) else { return nil }
             return (card.id, text)
@@ -114,18 +154,39 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         let fallbackDistractors = otherCards
             .filter { !exactCardIDs.contains($0.id) }
             .compactMap { $0.fallbackChoiceText() }
-        let choices = Self.uniqueChoices(
-            correctAnswer: effectiveClozeAnswer,
-            distractors: distractors + exactFormDistractors + fallbackDistractors
-        )
-        return Array(choices.prefix(max(1, targetCount)))
+        return distractors + exactFormDistractors + fallbackDistractors
     }
 
     func clozePromptFilled(with answer: String) -> String {
         if let clozeTemplate {
             return Self.fillTemplate(clozeTemplate, with: answer)
         }
+        if clozePrompt.contains(Self.blankToken) || clozePrompt.contains("___") {
+            return Self.fillTemplate(clozePrompt, with: answer)
+        }
         return Self.clozePromptWithGap(from: clozePrompt, gap: answer)
+    }
+
+    /// Prefix and suffix around the single blank in the example sentence.
+    var clozeSentenceParts: ClozeSentenceParts? {
+        Self.clozeSentenceParts(in: clozeTemplate ?? clozePrompt)
+    }
+
+    static func clozeSentenceParts(in source: String) -> ClozeSentenceParts? {
+        if let range = source.range(of: blankToken) {
+            return parts(prefix: String(source[..<range.lowerBound]), suffix: String(source[range.upperBound...]))
+        }
+        if let range = source.range(of: "___") {
+            return parts(prefix: String(source[..<range.lowerBound]), suffix: String(source[range.upperBound...]))
+        }
+        return nil
+    }
+
+    private static func parts(prefix: String, suffix: String) -> ClozeSentenceParts {
+        ClozeSentenceParts(
+            prefix: plainText(fromHTMLFragment: prefix),
+            suffix: plainText(fromHTMLFragment: suffix)
+        )
     }
 
     /// Semicolon-separated senses in `translation` (trimmed, non-empty).
@@ -144,7 +205,20 @@ struct WordCardContent: Codable, Identifiable, Hashable {
     }
 
     static func fillTemplate(_ template: String, with answer: String) -> String {
-        template.replacingOccurrences(of: blankToken, with: answer)
+        if template.contains(blankToken) {
+            return template.replacingOccurrences(of: blankToken, with: answer)
+        }
+        if let range = template.range(of: "___") {
+            var filled = template
+            filled.replaceSubrange(range, with: answer)
+            return filled
+        }
+        return template
+    }
+
+    /// Plain-text example sentence with the correct answer filled in.
+    var clozeExamplePlainText: String {
+        Self.plainText(fromHTMLFragment: clozePromptFilled(with: effectiveClozeAnswer))
     }
 
     static func boldClozeAnswer(from prompt: String) -> String? {

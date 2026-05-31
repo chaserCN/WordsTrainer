@@ -360,6 +360,7 @@ final class ContentDatabase {
                     clozePrompt: example.template,
                     clozeTemplate: example.template,
                     clozeAnswer: example.answer,
+                    clozeExampleTranslation: example.translation,
                     answerFormKey: example.answerFormKey,
                     shortDefinition: textColumn(statement, index: 5),
                     memoryHint: textColumn(statement, index: 6),
@@ -390,12 +391,13 @@ final class ContentDatabase {
         let template: String
         let answer: String
         let answerFormKey: String?
+        let translation: String?
         let audioExamplePath: String?
     }
 
     private func fetchPrimaryExample(cardID: UUID) throws -> ExampleRow? {
         let sql = """
-        SELECT id, template, answer, answer_form_key, audio_example_path
+        SELECT id, template, answer, answer_form_key, translation, audio_example_path
         FROM card_examples
         WHERE card_id = ?
         ORDER BY sort_order, id
@@ -420,7 +422,8 @@ final class ContentDatabase {
             template: template,
             answer: answer,
             answerFormKey: textColumn(statement, index: 3),
-            audioExamplePath: textColumn(statement, index: 4)
+            translation: textColumn(statement, index: 4),
+            audioExamplePath: textColumn(statement, index: 5)
         )
     }
 

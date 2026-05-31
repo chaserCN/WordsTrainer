@@ -9,6 +9,10 @@ final class StudySession {
     let matchingTotalPairCount: Int
     let matchingStartedAt: Date?
     private(set) var queue: [StudyQueueItem]
+    /// Cards queued at session start — stable MCQ distractor pool for the whole session.
+    let sessionChoicePool: [WordCardContent]
+    /// Full deck — fills remaining distractor slots when the session pool is too small.
+    let deckChoicePool: [WordCardContent]
     private var matchingScheduler: MatchingPairScheduler?
     private var dailyUsage: DeckDailyUsage?
     private let engine: StudySessionEngine
@@ -39,6 +43,7 @@ final class StudySession {
         deckID: UUID,
         mode: StudyMode,
         queue: [StudyQueueItem],
+        deckCards: [WordCardContent] = [],
         dailyUsage: DeckDailyUsage?,
         engine: StudySessionEngine
     ) {
@@ -46,6 +51,8 @@ final class StudySession {
         self.mode = mode
         self.dailyUsage = dailyUsage
         self.engine = engine
+        sessionChoicePool = queue.map(\.card)
+        deckChoicePool = deckCards
         if mode == .matching {
             let pairs = queue.flatMap { MatchingPair.pairs(from: $0) }
             matchingTotalPairCount = pairs.count
