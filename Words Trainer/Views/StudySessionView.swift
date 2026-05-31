@@ -16,7 +16,12 @@ struct StudySessionView: View {
     @State private var finishedDuration: TimeInterval?
 
     var body: some View {
-        StudyScreenChrome {
+        ZStack {
+            if session.mode == .matching {
+                MatchingBackground()
+            } else {
+                AppBackground()
+            }
             Group {
                 if session.mode == .matching {
                     if matchingFinished {
@@ -60,11 +65,11 @@ struct StudySessionView: View {
         }
         .navigationTitle(session.mode.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(session.mode == .matching ? .light : .dark, for: .navigationBar)
         .toolbar {
             if session.mode == .matching {
                 ToolbarItem(placement: .topBarTrailing) {
-                    SoundToggleToolbarButton()
+                    MatchingSettingsMenu()
                 }
             }
         }
@@ -94,7 +99,14 @@ struct StudySessionView: View {
                 Text("Сессия по колоде «\(deckTitle)» завершена.")
             }
         }
-        .foregroundStyle(isNewRecord ? .yellow : .white)
+        .foregroundStyle(finishedTint)
+    }
+
+    private var finishedTint: Color {
+        if session.mode == .matching {
+            return beatRecord ? MatchPalette.accent : MatchPalette.foreground
+        }
+        return .white
     }
 
     private func submit(_ outcome: ReviewOutcome) {
@@ -249,7 +261,7 @@ struct MatchingColumnsStudyView: View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Соедини пары")
                 .font(.largeTitle.bold())
-                .foregroundStyle(.white)
+                .foregroundStyle(MatchPalette.foreground)
                 .padding(.top, 12)
 
             if let startedAt = session.matchingStartedAt {
@@ -261,10 +273,12 @@ struct MatchingColumnsStudyView: View {
                 )
             }
 
-            ForEach(rows, id: \.word.id) { row in
-                HStack(alignment: .center, spacing: 12) {
-                    wordCell(row.word)
-                    translationCell(row.translation)
+            VStack(spacing: 14) {
+                ForEach(rows, id: \.word.id) { row in
+                    HStack(alignment: .center, spacing: 14) {
+                        wordCell(row.word)
+                        translationCell(row.translation)
+                    }
                 }
             }
 
@@ -283,7 +297,6 @@ struct MatchingColumnsStudyView: View {
     @ViewBuilder
     private func wordCell(_ slot: Slot) -> some View {
         MatchingCell(
-            pairID: slot.pairID,
             label: pairCache[slot.pairID]?.card.word ?? "",
             isSelected: selectedWordSlot == slot.id,
             isWrong: wrongWordSlot == slot.id,
@@ -298,7 +311,6 @@ struct MatchingColumnsStudyView: View {
     @ViewBuilder
     private func translationCell(_ slot: Slot) -> some View {
         MatchingCell(
-            pairID: slot.pairID,
             label: pairCache[slot.pairID]?.translation ?? "",
             isSelected: selectedTranslationSlot == slot.id,
             isWrong: wrongTranslationSlot == slot.id,
@@ -530,97 +542,154 @@ struct MatchingColumnsStudyView: View {
 }
 
 private struct MatchingStatusBar: View {
+    @Environment(AppSettings.self) private var settings
     let remainingCount: Int
     let startedAt: Date
     let record: DeckMatchingRecord?
     let pairCount: Int
 
+    private var recordDuration: TimeInterval? {
+        guard settings.isPaceBarEnabled, let record, record.pairCount == pairCount else { return nil }
+        return record.bestDuration
+    }
+
     var body: some View {
         TimelineView(.periodic(from: startedAt, by: 1.0)) { context in
             let elapsed = context.date.timeIntervalSince(startedAt)
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                HStack(spacing: 6) {
-                    Text("\(remainingCount)")
-                        .font(.title2.bold())
-                    Text("осталось")
-                        .font(.subheadline.weight(.semibold))
-                }
-                .foregroundStyle(.white)
-
-                Spacer()
-
-                HStack(spacing: 12) {
-                    if let record, record.pairCount == pairCount {
-                        Text("рек. \(StudyDurationFormat.string(record.bestDuration))")
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("\(remainingCount)")
+                            .font(.title2.bold())
+                            .foregroundStyle(MatchPalette.foreground)
+                        Text("осталось")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(MatchPalette.muted)
                     }
+                    Spacer()
                     Text(StudyDurationFormat.string(elapsed))
                         .font(.title2.bold().monospacedDigit())
-                        .foregroundStyle(.white)
+                        .foregroundStyle(MatchPalette.foreground)
+                }
+
+                if let recordDuration {
+                    paceBar(record: recordDuration, elapsed: elapsed)
                 }
             }
+        }
+    }
+
+    /// Линия-бюджет относительно рекорда: сжимается со временем, цвет — по темпу
+    /// (зелёная — обгоняешь рекорд, коралловая — отстаёшь).
+    @ViewBuilder
+    private func paceBar(record: TimeInterval, elapsed: TimeInterval) -> some View {
+        let budget = max(0, min(1, (record - elapsed) / record))
+        let progress = pairCount > 0 ? Double(pairCount - remainingCount) / Double(pairCount) : 0
+        let ahead = elapsed < record && elapsed / record <= progress
+        let fill = LinearGradient(
+            colors: ahead
+                ? [MatchPalette.paceAheadStart, MatchPalette.paceAheadEnd]
+                : [MatchPalette.progressStart, MatchPalette.progressEnd],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+
+        HStack(spacing: 10) {
+            HStack(spacing: 4) {
+                Image(systemName: "trophy.fill")
+                    .foregroundStyle(MatchPalette.accent)
+                    .imageScale(.small)
+                Text(StudyDurationFormat.string(record))
+                    .foregroundStyle(MatchPalette.muted)
+            }
+            .font(.subheadline.weight(.semibold).monospacedDigit())
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(MatchPalette.shadow.opacity(0.10))
+                    Capsule()
+                        .fill(fill)
+                        .frame(width: geo.size.width * budget)
+                        .animation(.linear(duration: 1), value: budget)
+                }
+            }
+            .frame(height: 7)
         }
     }
 }
 
 private struct MatchingCell: View {
-    let pairID: String
     let label: String
     let isSelected: Bool
     let isWrong: Bool
     let isCorrect: Bool
     let action: () -> Void
 
+    private static let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+
     var body: some View {
         Button(action: action) {
             Text(label)
                 .font(.headline)
-                .foregroundStyle(textColor)
+                .foregroundStyle(MatchPalette.cardForeground)
                 .multilineTextAlignment(.center)
                 .lineLimit(3)
-                .minimumScaleFactor(0.82)
-                .frame(maxWidth: .infinity, minHeight: 58, alignment: .center)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background {
-                    Group {
-                        if isWrong {
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(Color.red.opacity(0.82))
-                        } else if isCorrect {
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(Color.green.opacity(0.85))
-                        } else if isSelected {
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(Color.blue.opacity(0.88))
-                        } else {
-                            LightCardBackground(cornerRadius: 18)
-                        }
-                    }
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(borderColor, lineWidth: isSelected || isWrong || isCorrect ? 2 : 1)
-                }
-                .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 6)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, minHeight: 68, alignment: .center)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(Self.shape.fill(cardFill))
+                .overlay(Self.shape.strokeBorder(ringColor, lineWidth: ringWidth))
+                .shadow(color: primaryShadow.color, radius: primaryShadow.radius, x: 0, y: primaryShadow.y)
+                .shadow(color: secondaryShadow.color, radius: secondaryShadow.radius, x: 0, y: secondaryShadow.y)
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
+        .modifier(ShakeEffect(animatableData: isWrong ? 1 : 0))
+        .animation(.linear(duration: 0.4), value: isWrong)
         .transition(.scale.combined(with: .opacity))
     }
 
-    private var textColor: Color {
-        if isWrong || isCorrect || isSelected {
-            return .white
+    private var cardFill: LinearGradient {
+        if isCorrect {
+            return LinearGradient(
+                colors: [oklch(0.95, 0.04, 160, 0.95), oklch(0.88, 0.08, 160, 0.85)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
         }
-        return Color(red: 0.08, green: 0.08, blue: 0.13)
+        // Сплошная белая карточка (gradient-card непрозрачный).
+        return LinearGradient(
+            colors: [.white, oklch(0.995, 0.003, 250)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 
-    private var borderColor: Color {
-        if isWrong { return .red.opacity(0.95) }
-        if isCorrect { return .green.opacity(0.95) }
-        if isSelected { return .blue.opacity(0.95) }
-        return .white.opacity(0.75)
+    private var ringColor: Color {
+        if isWrong { return MatchPalette.destructive }
+        if isCorrect { return MatchPalette.success }
+        if isSelected { return MatchPalette.primary }
+        return MatchPalette.shadow.opacity(0.10) // тонкая тёмная рамка
+    }
+
+    private var ringWidth: CGFloat {
+        if isCorrect { return 2.5 }
+        if isWrong || isSelected { return 2 }
+        return 0.5
+    }
+
+    // Усиленная двухслойная тень — чтобы карточки не сливались со светлым фоном.
+    private var primaryShadow: (color: Color, radius: CGFloat, y: CGFloat) {
+        if isSelected { return (MatchPalette.primary.opacity(0.35), 12, 8) }
+        if isCorrect { return (MatchPalette.success.opacity(0.40), 16, 6) }
+        if isWrong { return (MatchPalette.destructive.opacity(0.35), 11, 8) }
+        return (MatchPalette.shadow.opacity(0.18), 10, 6)
+    }
+
+    private var secondaryShadow: (color: Color, radius: CGFloat, y: CGFloat) {
+        (isSelected || isCorrect || isWrong)
+            ? (MatchPalette.shadow.opacity(0.06), 4, 2)
+            : (MatchPalette.shadow.opacity(0.08), 4, 2)
     }
 }

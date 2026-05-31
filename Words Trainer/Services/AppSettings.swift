@@ -9,6 +9,7 @@ final class AppSettings {
 
     private enum Keys {
         static let soundEnabled = "settings.soundEnabled"
+        static let paceBarEnabled = "settings.paceBarEnabled"
     }
 
     var isSoundEnabled: Bool {
@@ -20,24 +21,36 @@ final class AppSettings {
         }
     }
 
-    private init() {
-        if UserDefaults.standard.object(forKey: Keys.soundEnabled) != nil {
-            isSoundEnabled = UserDefaults.standard.bool(forKey: Keys.soundEnabled)
-        } else {
-            isSoundEnabled = true
+    /// Показывать ли шкалу рекорда (темп-линию) в matching.
+    var isPaceBarEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(isPaceBarEnabled, forKey: Keys.paceBarEnabled)
         }
+    }
+
+    private init() {
+        let defaults = UserDefaults.standard
+        isSoundEnabled = defaults.object(forKey: Keys.soundEnabled) as? Bool ?? true
+        isPaceBarEnabled = defaults.object(forKey: Keys.paceBarEnabled) as? Bool ?? true
     }
 }
 
-struct SoundToggleToolbarButton: View {
+/// Меню-шестерёнка в тулбаре matching: звук и шкала рекорда.
+struct MatchingSettingsMenu: View {
     @Environment(AppSettings.self) private var settings
 
     var body: some View {
-        Button {
-            settings.isSoundEnabled.toggle()
+        @Bindable var settings = settings
+        Menu {
+            Toggle(isOn: $settings.isSoundEnabled) {
+                Label("Звук", systemImage: "speaker.wave.2.fill")
+            }
+            Toggle(isOn: $settings.isPaceBarEnabled) {
+                Label("Шкала рекорда", systemImage: "trophy.fill")
+            }
         } label: {
-            Image(systemName: settings.isSoundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+            Image(systemName: "gearshape.fill")
         }
-        .accessibilityLabel(settings.isSoundEnabled ? "Выключить звук" : "Включить звук")
+        .accessibilityLabel("Настройки")
     }
 }
