@@ -35,6 +35,20 @@ final class AppSettings {
     }
 }
 
+/// Кнопка вкл/выкл звука в тулбаре.
+struct SoundToggleButton: View {
+    @Environment(AppSettings.self) private var settings
+
+    var body: some View {
+        Button {
+            settings.isSoundEnabled.toggle()
+        } label: {
+            Image(systemName: settings.isSoundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+        }
+        .accessibilityLabel(settings.isSoundEnabled ? "Выключить звук" : "Включить звук")
+    }
+}
+
 /// Меню-шестерёнка в тулбаре matching: звук и шкала рекорда.
 struct MatchingSettingsMenu: View {
     @Environment(AppSettings.self) private var settings

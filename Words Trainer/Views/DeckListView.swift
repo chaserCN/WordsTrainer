@@ -196,6 +196,16 @@ struct DeckDetailView: View {
 
                     StudySection(title: "Упражнения", remaining: remainingSummary) {
                         StudyActionButton(
+                            title: "Карточки",
+                            subtitle: "Слово, перевод и заметки — переворот по тапу",
+                            systemImage: "rectangle.on.rectangle.angled",
+                            accent: .orange,
+                            isEnabled: !deck.cards.isEmpty
+                        ) {
+                            start(.flashcards)
+                        }
+
+                        StudyActionButton(
                             title: "Предложения",
                             subtitle: "Выбери слово для примера с пропуском",
                             systemImage: "text.quote",

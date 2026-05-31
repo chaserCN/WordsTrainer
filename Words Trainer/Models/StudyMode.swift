@@ -2,6 +2,7 @@ import Foundation
 
 enum StudyMode: String, Codable, CaseIterable, Identifiable {
     case recall
+    case flashcards
     case clozeMultipleChoice
     case clozeTyping
     case matching
@@ -11,6 +12,7 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .recall: "Помню / Забыл"
+        case .flashcards: "Карточки"
         case .clozeMultipleChoice: "Предложения"
         case .clozeTyping: "Пропуск — ввод"
         case .matching: "Колонки"

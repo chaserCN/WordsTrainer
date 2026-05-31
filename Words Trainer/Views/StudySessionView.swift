@@ -52,6 +52,14 @@ struct StudySessionView: View {
                         ) { outcome in
                             submit(outcome)
                         }
+                    case .flashcards:
+                        FlashcardStudyView(
+                            card: item.card,
+                            totalCount: session.sessionChoicePool.count,
+                            remainingCount: session.remainingCount
+                        ) { outcome in
+                            submit(outcome)
+                        }
                     case .clozeMultipleChoice:
                         ClozeMCQStudyView(
                             card: item.card,
@@ -79,6 +87,10 @@ struct StudySessionView: View {
             if session.mode == .matching {
                 ToolbarItem(placement: .topBarTrailing) {
                     MatchingSettingsMenu()
+                }
+            } else if session.mode == .flashcards {
+                ToolbarItem(placement: .topBarTrailing) {
+                    SoundToggleButton()
                 }
             }
         }
@@ -119,7 +131,10 @@ struct StudySessionView: View {
     }
 
     private var usesLightStudyTheme: Bool {
-        session.mode == .matching || session.mode == .clozeMultipleChoice || session.mode == .recall
+        session.mode == .matching
+            || session.mode == .clozeMultipleChoice
+            || session.mode == .recall
+            || session.mode == .flashcards
     }
 
     private func submit(_ outcome: ReviewOutcome) {

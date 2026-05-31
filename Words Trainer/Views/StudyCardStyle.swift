@@ -9,6 +9,7 @@ struct RecallOutcomeButton: View {
     let titleColor: Color
     let iconColor: Color
     let iconBackground: Color
+    var verticalPadding: CGFloat = 16
     let action: () -> Void
 
     var body: some View {
@@ -25,7 +26,7 @@ struct RecallOutcomeButton: View {
                     .foregroundStyle(titleColor)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
+            .padding(.vertical, verticalPadding)
             .padding(.horizontal, 10)
             .background(studyActionShape.fill(cardFill))
             .overlay(studyActionShape.strokeBorder(MatchPalette.shadow.opacity(0.08), lineWidth: 0.5))
