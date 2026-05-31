@@ -485,8 +485,7 @@ struct MatchingColumnsStudyView: View {
             return
         }
         selectedWordSlot = slot.id
-        fastForwardTransitions()
-        revealPartner(pairID: slot.pairID, selectedWord: true)
+        accelerateIfPartnerMissing(pairID: slot.pairID, selectedWord: true)
         if let pair = pairCache[slot.pairID] {
             WordAudioPlayer.shared.playWord(from: pair.card)
         }
@@ -500,9 +499,27 @@ struct MatchingColumnsStudyView: View {
             return
         }
         selectedTranslationSlot = slot.id
-        fastForwardTransitions()
-        revealPartner(pairID: slot.pairID, selectedWord: false)
+        accelerateIfPartnerMissing(pairID: slot.pairID, selectedWord: false)
         checkPairIfReady()
+    }
+
+    /// Если пары выбранной ячейки сейчас нет на экране (ещё в пуле или ещё проявляется) —
+    /// ускоряем все зависшие подстановки, чтобы поле досело и пара появилась. Иначе не трогаем.
+    private func accelerateIfPartnerMissing(pairID: String, selectedWord: Bool) {
+        guard !isPartnerReady(pairID: pairID, selectedWord: selectedWord) else { return }
+        fastForwardTransitions()
+        revealPartner(pairID: pairID, selectedWord: selectedWord)
+    }
+
+    /// Пара «готова», если она уже на доске и не в анимации (видима и нажимаема).
+    private func isPartnerReady(pairID: String, selectedWord: Bool) -> Bool {
+        if selectedWord {
+            guard let partner = translationColumn.first(where: { $0.pairID == pairID }) else { return false }
+            return translationSlotOpacity[partner.id] == nil
+        } else {
+            guard let partner = wordColumn.first(where: { $0.pairID == pairID }) else { return false }
+            return wordSlotOpacity[partner.id] == nil
+        }
     }
 
     private func checkPairIfReady() {
