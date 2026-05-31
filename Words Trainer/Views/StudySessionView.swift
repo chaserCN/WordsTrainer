@@ -238,6 +238,14 @@ struct MatchingColumnsStudyView: View {
     @State private var correctWordSlots: Set<UUID> = []
     @State private var correctTranslationSlots: Set<UUID> = []
 
+    /// Ячейки в фазе проявления: контент уже валиден — по ним можно тапать и их можно ускорить.
+    @State private var appearingWordSlots: Set<UUID> = []
+    @State private var appearingTranslationSlots: Set<UUID> = []
+
+    /// Идущие переходы матча (подтверждение → гашение → подстановка) — чтобы ускорять их при выборе.
+    @State private var pendingTransitions: [UUID: MatchTransition] = [:]
+    @State private var transitionTasks: [UUID: Task<Void, Never>] = [:]
+
     /// Общий пул содержимого на подстановку: id пар, чьё слово / перевод ещё ждут пустой ячейки.
     /// Левая ячейка тянет случайное слово, правая — случайный перевод (колонки независимо).
     @State private var pendingWords: [String] = []
@@ -305,7 +313,7 @@ struct MatchingColumnsStudyView: View {
         )
         .opacity(wordSlotOpacity[slot.id] ?? 1)
         .scaleEffect(scale(for: wordSlotOpacity[slot.id]))
-        .allowsHitTesting(wordSlotOpacity[slot.id] == nil)
+        .allowsHitTesting(isWordTappable(slot.id))
     }
 
     @ViewBuilder
@@ -319,12 +327,21 @@ struct MatchingColumnsStudyView: View {
         )
         .opacity(translationSlotOpacity[slot.id] ?? 1)
         .scaleEffect(scale(for: translationSlotOpacity[slot.id]))
-        .allowsHitTesting(translationSlotOpacity[slot.id] == nil)
+        .allowsHitTesting(isTranslationTappable(slot.id))
     }
 
     private func scale(for opacity: Double?) -> Double {
         guard let opacity else { return 1 }
         return 0.9 + (0.1 * opacity)
+    }
+
+    // Тапать можно по свободным ячейкам и по тем, что уже проявляются (контент валиден).
+    private func isWordTappable(_ id: UUID) -> Bool {
+        wordSlotOpacity[id] == nil || appearingWordSlots.contains(id)
+    }
+
+    private func isTranslationTappable(_ id: UUID) -> Bool {
+        translationSlotOpacity[id] == nil || appearingTranslationSlots.contains(id)
     }
 
     /// Первичная раздача: лексика по ячейкам, колонки мешаем независимо.
@@ -340,12 +357,14 @@ struct MatchingColumnsStudyView: View {
     // MARK: - Selection
 
     private func selectWord(_ slot: Slot) {
-        guard wrongWordSlot == nil, wordSlotOpacity[slot.id] == nil else { return }
+        guard wrongWordSlot == nil, isWordTappable(slot.id) else { return }
         if selectedWordSlot == slot.id {
             selectedWordSlot = nil
             return
         }
         selectedWordSlot = slot.id
+        fastForwardTransitions()
+        revealPartner(pairID: slot.pairID, selectedWord: true)
         if let pair = pairCache[slot.pairID] {
             WordAudioPlayer.shared.playWord(from: pair.card)
         }
@@ -353,12 +372,14 @@ struct MatchingColumnsStudyView: View {
     }
 
     private func selectTranslation(_ slot: Slot) {
-        guard wrongWordSlot == nil, translationSlotOpacity[slot.id] == nil else { return }
+        guard wrongWordSlot == nil, isTranslationTappable(slot.id) else { return }
         if selectedTranslationSlot == slot.id {
             selectedTranslationSlot = nil
             return
         }
         selectedTranslationSlot = slot.id
+        fastForwardTransitions()
+        revealPartner(pairID: slot.pairID, selectedWord: false)
         checkPairIfReady()
     }
 
@@ -418,8 +439,16 @@ struct MatchingColumnsStudyView: View {
 
     // MARK: - Match transition
 
+    private struct MatchTransition {
+        let matchedID: String
+        let wordSlotID: UUID
+        let translationSlotID: UUID
+        let shuffle: Bool
+    }
+
     /// Исчезновение одной пары: подтверждение (зелёным) → гашение. Новую пару сразу резервируем
     /// из пула в общий пул подстановки. Появление — в тех же ячейках, по таймеру этого матча.
+    /// Переход живёт в отменяемой Task, чтобы его можно было ускорить при следующем выборе.
     private func beginMatchTransition(
         matchedID: String,
         wordSlotID: UUID,
@@ -427,6 +456,9 @@ struct MatchingColumnsStudyView: View {
         shuffle: Bool
     ) {
         // 1. Блокируем ячейки и подтверждаем правильный выбор зелёным.
+        //    Если ячейка ещё проявлялась — перехватываем её (снимаем флаг проявления).
+        appearingWordSlots.remove(wordSlotID)
+        appearingTranslationSlots.remove(translationSlotID)
         wordSlotOpacity[wordSlotID] = 1
         translationSlotOpacity[translationSlotID] = 1
         correctWordSlots.insert(wordSlotID)
@@ -435,24 +467,55 @@ struct MatchingColumnsStudyView: View {
         // 2. Резервируем замену из пула — чтобы её можно было подмешать к соседним матчам.
         reserveReplacement(for: matchedID)
 
-        // 3. После паузы подтверждения — плавное гашение.
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.confirmHighlightDuration) {
+        // 3. Подтверждение → гашение → подстановка, в отменяемой задаче.
+        let id = UUID()
+        pendingTransitions[id] = MatchTransition(
+            matchedID: matchedID,
+            wordSlotID: wordSlotID,
+            translationSlotID: translationSlotID,
+            shuffle: shuffle
+        )
+        transitionTasks[id] = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(Self.confirmHighlightDuration))
+            guard !Task.isCancelled, pendingTransitions[id] != nil else { return }
             withAnimation(.easeInOut(duration: Self.fadeOutDuration)) {
                 wordSlotOpacity[wordSlotID] = 0
                 translationSlotOpacity[translationSlotID] = 0
             }
+            try? await Task.sleep(for: .seconds(Self.fadeOutDuration))
+            guard !Task.isCancelled else { return }
+            finishTransition(id)
         }
+    }
 
-        // 4. После полного исчезновения — подстановка (или перетасовка) в тех же ячейках.
-        let disappearDuration = Self.confirmHighlightDuration + Self.fadeOutDuration
-        DispatchQueue.main.asyncAfter(deadline: .now() + disappearDuration) {
-            correctWordSlots.remove(wordSlotID)
-            correctTranslationSlots.remove(translationSlotID)
-            if shuffle {
-                applyReshuffle()
-            } else {
-                commitMatch(wordSlotID: wordSlotID, translationSlotID: translationSlotID)
+    /// Завершить переход: убрать подтверждение и подставить новую лексику. Идемпотентно.
+    private func finishTransition(_ id: UUID) {
+        guard let transition = pendingTransitions.removeValue(forKey: id) else { return }
+        transitionTasks.removeValue(forKey: id)?.cancel()
+        correctWordSlots.remove(transition.wordSlotID)
+        correctTranslationSlots.remove(transition.translationSlotID)
+        if transition.shuffle {
+            applyReshuffle()
+        } else {
+            commitMatch(wordSlotID: transition.wordSlotID, translationSlotID: transition.translationSlotID)
+        }
+    }
+
+    /// Ускорить все идущие переходы (при выборе ячейки): быстро гасим и сразу подставляем.
+    private func fastForwardTransitions() {
+        let ids = Array(pendingTransitions.keys)
+        guard !ids.isEmpty else { return }
+        for id in ids { transitionTasks.removeValue(forKey: id)?.cancel() }
+        withAnimation(.easeOut(duration: 0.14)) {
+            for id in ids {
+                if let transition = pendingTransitions[id] {
+                    wordSlotOpacity[transition.wordSlotID] = 0
+                    translationSlotOpacity[transition.translationSlotID] = 0
+                }
             }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) {
+            for id in ids { finishTransition(id) }
         }
     }
 
@@ -503,6 +566,11 @@ struct MatchingColumnsStudyView: View {
         translationSlotOpacity.removeAll()
         correctWordSlots.removeAll()
         correctTranslationSlots.removeAll()
+        appearingWordSlots.removeAll()
+        appearingTranslationSlots.removeAll()
+        for (_, task) in transitionTasks { task.cancel() }
+        transitionTasks.removeAll()
+        pendingTransitions.removeAll()
         selectedWordSlot = nil
         selectedTranslationSlot = nil
 
@@ -528,6 +596,8 @@ struct MatchingColumnsStudyView: View {
     private func startAppearTransition(wordSlotID: UUID, translationSlotID: UUID) {
         wordSlotOpacity[wordSlotID] = 0
         translationSlotOpacity[translationSlotID] = 0
+        appearingWordSlots.insert(wordSlotID)
+        appearingTranslationSlots.insert(translationSlotID)
 
         withAnimation(.easeInOut(duration: Self.fadeInDuration)) {
             wordSlotOpacity[wordSlotID] = 1
@@ -535,8 +605,31 @@ struct MatchingColumnsStudyView: View {
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.fadeInDuration) {
+            finishAppear(wordSlotID: wordSlotID, translationSlotID: translationSlotID)
+        }
+    }
+
+    private func finishAppear(wordSlotID: UUID, translationSlotID: UUID) {
+        // Чистим только если ячейка всё ещё проявляется — иначе её перехватил новый переход (матч).
+        if appearingWordSlots.remove(wordSlotID) != nil {
             wordSlotOpacity.removeValue(forKey: wordSlotID)
+        }
+        if appearingTranslationSlots.remove(translationSlotID) != nil {
             translationSlotOpacity.removeValue(forKey: translationSlotID)
+        }
+    }
+
+    /// При выборе ячейки мгновенно доявляем её пару (если она ещё проявляется), чтобы
+    /// её можно было сразу найти и тапнуть, не дожидаясь конца анимации.
+    private func revealPartner(pairID: String, selectedWord: Bool) {
+        if selectedWord {
+            guard let partner = translationColumn.first(where: { $0.pairID == pairID }),
+                  appearingTranslationSlots.contains(partner.id) else { return }
+            withAnimation(.easeOut(duration: 0.12)) { translationSlotOpacity[partner.id] = 1 }
+        } else {
+            guard let partner = wordColumn.first(where: { $0.pairID == pairID }),
+                  appearingWordSlots.contains(partner.id) else { return }
+            withAnimation(.easeOut(duration: 0.12)) { wordSlotOpacity[partner.id] = 1 }
         }
     }
 }
