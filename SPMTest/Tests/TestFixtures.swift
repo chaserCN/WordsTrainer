@@ -6,14 +6,18 @@ enum TestFixtures {
     static func card(
         id: UUID = UUID(),
         word: String,
-        translation: String
+        translation: String,
+        clozePrompt: String = "___",
+        clozeAnswer: String? = nil,
+        distractors: [String] = []
     ) -> WordCardContent {
         WordCardContent(
             id: id,
             word: word,
             translation: translation,
-            clozePrompt: "___",
-            clozeAnswer: word
+            clozePrompt: clozePrompt,
+            clozeAnswer: clozeAnswer,
+            distractors: distractors
         )
     }
 

@@ -17,7 +17,7 @@ struct StudySessionView: View {
 
     var body: some View {
         ZStack {
-            if session.mode == .matching {
+            if usesLightStudyTheme {
                 MatchingBackground()
             } else {
                 AppBackground()
@@ -49,7 +49,10 @@ struct StudySessionView: View {
                             submit(outcome)
                         }
                     case .clozeMultipleChoice:
-                        ClozeMCQStudyView(card: item.card) { outcome in
+                        ClozeMCQStudyView(
+                            card: item.card,
+                            answerPool: session.queue.map(\.card)
+                        ) { outcome in
                             submit(outcome)
                         }
                     case .matching, .clozeTyping:
@@ -65,7 +68,7 @@ struct StudySessionView: View {
         }
         .navigationTitle(session.mode.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(session.mode == .matching ? .light : .dark, for: .navigationBar)
+        .toolbarColorScheme(usesLightStudyTheme ? .light : .dark, for: .navigationBar)
         .toolbar {
             if session.mode == .matching {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -103,10 +106,14 @@ struct StudySessionView: View {
     }
 
     private var finishedTint: Color {
-        if session.mode == .matching {
+        if usesLightStudyTheme {
             return beatRecord ? MatchPalette.accent : MatchPalette.foreground
         }
         return .white
+    }
+
+    private var usesLightStudyTheme: Bool {
+        session.mode == .matching || session.mode == .clozeMultipleChoice
     }
 
     private func submit(_ outcome: ReviewOutcome) {
@@ -151,55 +158,170 @@ struct RecallStudyView: View {
 }
 
 struct ClozeMCQStudyView: View {
+    private static let answerAdvanceDelay: TimeInterval = 0.65
+
     let card: WordCardContent
+    let answerPool: [WordCardContent]
     let onAnswer: (ReviewOutcome) -> Void
 
+    @State private var displayedCardID: UUID?
     @State private var selected: String?
     @State private var answered = false
     @State private var choices: [String] = []
+    @State private var advanceTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            HTMLText(html: card.clozePrompt)
-                .font(.title2)
-                .foregroundStyle(.white)
-                .padding(.top, 24)
+        VStack(alignment: .leading, spacing: 22) {
+            Text("Выбери слово")
+                .font(.largeTitle.bold())
+                .foregroundStyle(MatchPalette.foreground)
+                .padding(.top, 12)
 
-            ForEach(choices, id: \.self) { option in
-                Button {
-                    guard !answered else { return }
-                    selected = option
-                    answered = true
-                    onAnswer(option == card.effectiveClozeAnswer ? .correct : .incorrect)
-                } label: {
-                    HStack {
-                        Text(option)
-                            .foregroundStyle(.white)
-                        Spacer()
-                        if answered, option == selected {
-                            Image(systemName: option == card.effectiveClozeAnswer ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .foregroundStyle(option == card.effectiveClozeAnswer ? .green : .red)
-                        }
+            HTMLText(html: card.clozePromptWithGap, foregroundColor: MatchPalette.cardForeground)
+                .font(.title2.weight(.semibold))
+                .multilineTextAlignment(.leading)
+                .lineSpacing(5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 22)
+                .background(matchingCardShape.fill(.white.opacity(0.88)))
+                .overlay(matchingCardShape.strokeBorder(MatchPalette.shadow.opacity(0.08), lineWidth: 0.5))
+                .shadow(color: MatchPalette.shadow.opacity(0.10), radius: 10, x: 0, y: 6)
+
+            VStack(spacing: 14) {
+                ForEach(choices, id: \.self) { option in
+                    ClozeChoiceButton(
+                        option: option,
+                        isSelected: selected == option,
+                        isCorrect: answered && option == card.effectiveClozeAnswer,
+                        isWrong: answered && selected == option && option != card.effectiveClozeAnswer,
+                        isDimmed: answered && selected != option && option != card.effectiveClozeAnswer
+                    ) {
+                        select(option)
                     }
-                    .padding()
-                    .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(.white.opacity(0.12), lineWidth: 1)
-                    }
+                    .disabled(answered)
                 }
-                .buttonStyle(.plain)
-                .disabled(answered && option != selected)
             }
-            Spacer()
+
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 20)
+        .padding(.bottom, 12)
         .onAppear {
-            if choices.isEmpty {
-                choices = (card.distractors + [card.effectiveClozeAnswer]).shuffled()
-            }
+            resetRoundIfNeeded()
+        }
+        .onChange(of: card.id) { _, _ in
+            resetRound()
         }
     }
+
+    private func select(_ option: String) {
+        guard !answered else { return }
+        let outcome: ReviewOutcome = option == card.effectiveClozeAnswer ? .correct : .incorrect
+        selected = option
+        answered = true
+        advanceTask?.cancel()
+        advanceTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(Self.answerAdvanceDelay))
+            guard !Task.isCancelled else { return }
+            onAnswer(outcome)
+        }
+    }
+
+    private func resetRoundIfNeeded() {
+        guard displayedCardID != card.id else { return }
+        resetRound()
+    }
+
+    private func resetRound() {
+        advanceTask?.cancel()
+        advanceTask = nil
+        displayedCardID = card.id
+        selected = nil
+        answered = false
+        choices = card.clozeChoices(answerPool: answerPool).shuffled()
+    }
+}
+
+private struct ClozeChoiceButton: View {
+    let option: String
+    let isSelected: Bool
+    let isCorrect: Bool
+    let isWrong: Bool
+    let isDimmed: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            action()
+        } label: {
+            HStack(spacing: 12) {
+                Text(option)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(MatchPalette.cardForeground)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+
+                Spacer(minLength: 12)
+
+                if isSelected {
+                    Image(systemName: isCorrect ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(isCorrect ? MatchPalette.success : MatchPalette.destructive)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .background(matchingCardShape.fill(cardFill))
+            .overlay(matchingCardShape.strokeBorder(ringColor, lineWidth: ringWidth))
+            .shadow(color: primaryShadow.color, radius: primaryShadow.radius, x: 0, y: primaryShadow.y)
+            .shadow(color: MatchPalette.shadow.opacity(0.08), radius: 4, x: 0, y: 2)
+        }
+        .buttonStyle(.plain)
+        .opacity(isDimmed ? 0.62 : 1)
+        .modifier(ShakeEffect(animatableData: isWrong ? 1 : 0))
+        .animation(.linear(duration: 0.4), value: isWrong)
+    }
+
+    private var cardFill: LinearGradient {
+        if isCorrect {
+            return LinearGradient(
+                colors: [oklch(0.95, 0.04, 160, 0.95), oklch(0.88, 0.08, 160, 0.85)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        return LinearGradient(
+            colors: [.white, oklch(0.995, 0.003, 250)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private var ringColor: Color {
+        if isWrong { return MatchPalette.destructive }
+        if isCorrect { return MatchPalette.success }
+        if isSelected { return MatchPalette.primary }
+        return MatchPalette.shadow.opacity(0.10)
+    }
+
+    private var ringWidth: CGFloat {
+        if isCorrect { return 2.5 }
+        if isWrong || isSelected { return 2 }
+        return 0.5
+    }
+
+    private var primaryShadow: (color: Color, radius: CGFloat, y: CGFloat) {
+        if isSelected { return (MatchPalette.primary.opacity(0.35), 12, 8) }
+        if isCorrect { return (MatchPalette.success.opacity(0.40), 16, 6) }
+        if isWrong { return (MatchPalette.destructive.opacity(0.35), 11, 8) }
+        return (MatchPalette.shadow.opacity(0.18), 10, 6)
+    }
+}
+
+private var matchingCardShape: RoundedRectangle {
+    RoundedRectangle(cornerRadius: 24, style: .continuous)
 }
 
 struct MatchingColumnsStudyView: View {

@@ -1,49 +1,131 @@
 import Foundation
 
+struct WordForm: Codable, Hashable {
+    let formKey: String
+    let text: String
+}
+
 /// Card content from server or local seed (no SRS state).
 struct WordCardContent: Codable, Identifiable, Hashable {
+    static let blankToken = "{{blank}}"
+
     let id: UUID
     let word: String
+    let lemma: String
+    let partOfSpeech: String?
     let translation: String
     let clozePrompt: String
+    let clozeTemplate: String?
     /// Override when the gap uses a different form than `word` (e.g. went vs go).
     let clozeAnswer: String?
+    let answerFormKey: String?
+    let shortDefinition: String?
+    let memoryHint: String?
+    let etymology: String?
+    let usageNote: String?
+    let synonymNote: String?
+    let grammarNote: String?
     let explanation: String?
     let imageURL: URL?
     let audioWordURL: URL?
     let audioExampleURL: URL?
     let distractors: [String]
+    let forms: [WordForm]
 
     init(
         id: UUID = UUID(),
         word: String,
+        lemma: String? = nil,
+        partOfSpeech: String? = nil,
         translation: String,
         clozePrompt: String,
+        clozeTemplate: String? = nil,
         clozeAnswer: String? = nil,
+        answerFormKey: String? = nil,
+        shortDefinition: String? = nil,
+        memoryHint: String? = nil,
+        etymology: String? = nil,
+        usageNote: String? = nil,
+        synonymNote: String? = nil,
+        grammarNote: String? = nil,
         explanation: String? = nil,
         imageURL: URL? = nil,
         audioWordURL: URL? = nil,
         audioExampleURL: URL? = nil,
-        distractors: [String] = []
+        distractors: [String] = [],
+        forms: [WordForm] = []
     ) {
         self.id = id
         self.word = word
+        self.lemma = lemma ?? Self.headword(from: word)
+        self.partOfSpeech = partOfSpeech
         self.translation = translation
         self.clozePrompt = clozePrompt
+        self.clozeTemplate = clozeTemplate
         self.clozeAnswer = clozeAnswer
+        self.answerFormKey = answerFormKey
+        self.shortDefinition = shortDefinition
+        self.memoryHint = memoryHint
+        self.etymology = etymology
+        self.usageNote = usageNote
+        self.synonymNote = synonymNote
+        self.grammarNote = grammarNote
         self.explanation = explanation
         self.imageURL = imageURL
         self.audioWordURL = audioWordURL
         self.audioExampleURL = audioExampleURL
         self.distractors = distractors
+        self.forms = forms
     }
 
     /// Answer accepted in cloze exercises when `clozeAnswer` is nil.
     var effectiveClozeAnswer: String {
-        if let clozeAnswer, !clozeAnswer.isEmpty {
-            return clozeAnswer
+        if let explicitAnswer = Self.trimmedNonEmpty(clozeAnswer) {
+            return explicitAnswer
+        }
+        if let promptAnswer = Self.boldClozeAnswer(from: clozePrompt) {
+            return promptAnswer
         }
         return Self.headword(from: word)
+    }
+
+    /// Cloze prompt rendered with the highlighted answer hidden.
+    var clozePromptWithGap: String {
+        if let clozeTemplate {
+            return Self.fillTemplate(clozeTemplate, with: "___")
+        }
+        return Self.clozePromptWithGap(from: clozePrompt)
+    }
+
+    /// Multiple-choice options before presentation-level shuffling.
+    var clozeChoices: [String] {
+        Self.uniqueChoices(correctAnswer: effectiveClozeAnswer, distractors: distractors)
+    }
+
+    func clozeChoices(answerPool: [WordCardContent], targetCount: Int = 4) -> [String] {
+        let otherCards = answerPool
+            .filter { $0.id != id }
+        let exactMatches = otherCards.compactMap { card -> (UUID, String)? in
+            guard let text = card.choiceText(exactlyMatching: answerFormKey) else { return nil }
+            return (card.id, text)
+        }
+        let exactFormDistractors = exactMatches.map(\.1)
+        let exactCardIDs = Set(exactMatches.map(\.0))
+        let fallbackDistractors = otherCards
+            .filter { !exactCardIDs.contains($0.id) }
+            .compactMap { $0.fallbackChoiceText() }
+        let choices = Self.uniqueChoices(
+            correctAnswer: effectiveClozeAnswer,
+            distractors: distractors + exactFormDistractors + fallbackDistractors
+        )
+        return Array(choices.prefix(max(1, targetCount)))
+    }
+
+    func clozePromptFilled(with answer: String) -> String {
+        if let clozeTemplate {
+            return Self.fillTemplate(clozeTemplate, with: answer)
+        }
+        return Self.clozePromptWithGap(from: clozePrompt, gap: answer)
     }
 
     /// Semicolon-separated senses in `translation` (trimmed, non-empty).
@@ -51,6 +133,55 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         translation.split(separator: ";", omittingEmptySubsequences: false)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    static func clozePromptWithGap(from prompt: String, gap: String = "___") -> String {
+        boldTagRegex.stringByReplacingMatches(
+            in: prompt,
+            range: NSRange(prompt.startIndex..., in: prompt),
+            withTemplate: gap
+        )
+    }
+
+    static func fillTemplate(_ template: String, with answer: String) -> String {
+        template.replacingOccurrences(of: blankToken, with: answer)
+    }
+
+    static func boldClozeAnswer(from prompt: String) -> String? {
+        let range = NSRange(prompt.startIndex..., in: prompt)
+        guard let match = boldTagRegex.firstMatch(in: prompt, range: range),
+              match.range(at: 1).location != NSNotFound,
+              let swiftRange = Range(match.range(at: 1), in: prompt)
+        else {
+            return nil
+        }
+
+        let answer = plainText(fromHTMLFragment: String(prompt[swiftRange]))
+        return trimmedNonEmpty(answer)
+    }
+
+    static func uniqueChoices(correctAnswer: String, distractors: [String]) -> [String] {
+        var seen = Set<String>()
+        return ([correctAnswer] + distractors).compactMap { choice in
+            guard let trimmed = trimmedNonEmpty(choice) else { return nil }
+            let key = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            return seen.insert(key).inserted ? trimmed : nil
+        }
+    }
+
+    private func choiceText(exactlyMatching formKey: String?) -> String? {
+        if let formKey,
+           let exact = forms.first(where: { $0.formKey == formKey }) {
+            return exact.text
+        }
+        return nil
+    }
+
+    private func fallbackChoiceText() -> String? {
+        if let base = forms.first(where: { $0.formKey == "base" || $0.formKey == "singular" }) {
+            return base.text
+        }
+        return effectiveClozeAnswer
     }
 
     static func headword(from word: String) -> String {
@@ -66,6 +197,27 @@ struct WordCardContent: Codable, Identifiable, Hashable {
             plain = String(plain.dropFirst(4))
         }
         return plain.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static let boldTagRegex = try! NSRegularExpression(
+        pattern: #"<b\b[^>]*>(.*?)</b>"#,
+        options: [.caseInsensitive, .dotMatchesLineSeparators]
+    )
+
+    private static func plainText(fromHTMLFragment html: String) -> String {
+        html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+    }
+
+    private static func trimmedNonEmpty(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

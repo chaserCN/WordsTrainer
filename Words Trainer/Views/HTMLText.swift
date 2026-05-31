@@ -3,12 +3,14 @@ import SwiftUI
 /// Renders a small HTML fragment (Anki fields: `<b>`, `<br>`, etc.).
 struct HTMLText: View {
     let html: String
+    var foregroundColor: Color?
 
     var body: some View {
         if let attributed = Self.attributedString(from: html) {
-            Text(attributed)
+            Text(Self.applyingStyle(to: attributed, foregroundColor: foregroundColor))
         } else {
             Text(html)
+                .foregroundStyle(foregroundColor ?? .primary)
         }
     }
 
@@ -22,5 +24,12 @@ struct HTMLText: View {
             return nil
         }
         return AttributedString(ns)
+    }
+
+    private static func applyingStyle(to attributedString: AttributedString, foregroundColor: Color?) -> AttributedString {
+        var attributedString = attributedString
+        attributedString.font = nil
+        attributedString.foregroundColor = foregroundColor
+        return attributedString
     }
 }

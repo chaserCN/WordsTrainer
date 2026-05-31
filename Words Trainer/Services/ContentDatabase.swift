@@ -184,18 +184,54 @@ final class ContentDatabase {
         CREATE TABLE IF NOT EXISTS cards (
             id TEXT PRIMARY KEY NOT NULL,
             deck_id TEXT NOT NULL,
-            word TEXT NOT NULL,
+            lemma TEXT NOT NULL,
+            display_word TEXT NOT NULL,
+            part_of_speech TEXT,
             translation TEXT NOT NULL,
-            cloze_prompt TEXT NOT NULL,
-            cloze_answer TEXT,
-            explanation TEXT,
+            short_definition TEXT,
+            memory_hint TEXT,
+            etymology TEXT,
+            usage_note TEXT,
+            synonym_note TEXT,
+            grammar_note TEXT,
+            notes TEXT,
             image_url TEXT,
             audio_word_path TEXT,
-            audio_example_path TEXT,
-            distractors_json TEXT NOT NULL DEFAULT '[]',
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
         CREATE INDEX IF NOT EXISTS idx_cards_deck_id ON cards(deck_id);
+        CREATE TABLE IF NOT EXISTS card_examples (
+            id TEXT PRIMARY KEY NOT NULL,
+            card_id TEXT NOT NULL,
+            template TEXT NOT NULL,
+            answer TEXT NOT NULL,
+            answer_form_key TEXT,
+            translation TEXT,
+            note TEXT,
+            audio_example_path TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (card_id) REFERENCES cards(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_card_examples_card_id ON card_examples(card_id);
+        CREATE TABLE IF NOT EXISTS word_forms (
+            card_id TEXT NOT NULL,
+            form_key TEXT NOT NULL,
+            text TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (card_id, form_key, text),
+            FOREIGN KEY (card_id) REFERENCES cards(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_word_forms_form_key ON word_forms(form_key);
+        CREATE TABLE IF NOT EXISTS example_distractors (
+            id TEXT PRIMARY KEY NOT NULL,
+            example_id TEXT NOT NULL,
+            text TEXT NOT NULL,
+            source_card_id TEXT,
+            priority INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (example_id) REFERENCES card_examples(id),
+            FOREIGN KEY (source_card_id) REFERENCES cards(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_example_distractors_example_id ON example_distractors(example_id);
         CREATE TABLE IF NOT EXISTS card_progress (
             card_id TEXT PRIMARY KEY NOT NULL,
             deck_id TEXT NOT NULL,
@@ -229,6 +265,12 @@ final class ContentDatabase {
             "UPDATE decks SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
             "UPDATE cards SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
             "UPDATE cards SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
+            "UPDATE card_examples SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
+            "UPDATE card_examples SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
+            "UPDATE word_forms SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
+            "UPDATE example_distractors SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
+            "UPDATE example_distractors SET example_id = lower(example_id) WHERE example_id GLOB '*[A-Z]*'",
+            "UPDATE example_distractors SET source_card_id = lower(source_card_id) WHERE source_card_id GLOB '*[A-Z]*'",
             "UPDATE card_progress SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
             "UPDATE card_progress SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
             "UPDATE deck_daily_usage SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
@@ -286,11 +328,12 @@ final class ContentDatabase {
 
     private func fetchCards(deckID: UUID) throws -> [WordCardContent] {
         let sql = """
-        SELECT id, word, translation, cloze_prompt, cloze_answer, explanation,
-               image_url, audio_word_path, audio_example_path, distractors_json
+        SELECT id, lemma, display_word, part_of_speech, translation,
+               short_definition, memory_hint, etymology, usage_note, synonym_note,
+               grammar_note, notes, image_url, audio_word_path
         FROM cards
         WHERE deck_id = ?
-        ORDER BY word
+        ORDER BY display_word
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -302,35 +345,128 @@ final class ContentDatabase {
         var cards: [WordCardContent] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let id = uuidColumn(statement, index: 0),
-                  let word = textColumn(statement, index: 1),
-                  let translation = textColumn(statement, index: 2),
-                  let clozePrompt = textColumn(statement, index: 3) else { continue }
-
-            let distractorsJSON = textColumn(statement, index: 9) ?? "[]"
-            let distractors = (try? JSONDecoder().decode([String].self, from: Data(distractorsJSON.utf8))) ?? []
+                  let lemma = textColumn(statement, index: 1),
+                  let displayWord = textColumn(statement, index: 2),
+                  let translation = textColumn(statement, index: 4),
+                  let example = try fetchPrimaryExample(cardID: id) else { continue }
 
             cards.append(
                 WordCardContent(
                     id: id,
-                    word: word,
+                    word: displayWord,
+                    lemma: lemma,
+                    partOfSpeech: textColumn(statement, index: 3),
                     translation: translation,
-                    clozePrompt: clozePrompt,
-                    clozeAnswer: textColumn(statement, index: 4),
-                    explanation: textColumn(statement, index: 5),
-                    imageURL: textColumn(statement, index: 6).flatMap(URL.init(string:)),
+                    clozePrompt: example.template,
+                    clozeTemplate: example.template,
+                    clozeAnswer: example.answer,
+                    answerFormKey: example.answerFormKey,
+                    shortDefinition: textColumn(statement, index: 5),
+                    memoryHint: textColumn(statement, index: 6),
+                    etymology: textColumn(statement, index: 7),
+                    usageNote: textColumn(statement, index: 8),
+                    synonymNote: textColumn(statement, index: 9),
+                    grammarNote: textColumn(statement, index: 10),
+                    explanation: textColumn(statement, index: 11),
+                    imageURL: textColumn(statement, index: 12).flatMap(URL.init(string:)),
                     audioWordURL: resolveMediaURL(
                         deckID: deckID,
-                        relativePath: textColumn(statement, index: 7)
+                        relativePath: textColumn(statement, index: 13)
                     ),
                     audioExampleURL: resolveMediaURL(
                         deckID: deckID,
-                        relativePath: textColumn(statement, index: 8)
+                        relativePath: example.audioExamplePath
                     ),
-                    distractors: distractors
+                    distractors: try fetchDistractors(exampleID: example.id),
+                    forms: try fetchForms(cardID: id)
                 )
             )
         }
         return cards
+    }
+
+    private struct ExampleRow {
+        let id: UUID
+        let template: String
+        let answer: String
+        let answerFormKey: String?
+        let audioExamplePath: String?
+    }
+
+    private func fetchPrimaryExample(cardID: UUID) throws -> ExampleRow? {
+        let sql = """
+        SELECT id, template, answer, answer_form_key, audio_example_path
+        FROM card_examples
+        WHERE card_id = ?
+        ORDER BY sort_order, id
+        LIMIT 1
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: cardID)
+
+        guard sqlite3_step(statement) == SQLITE_ROW,
+              let id = uuidColumn(statement, index: 0),
+              let template = textColumn(statement, index: 1),
+              let answer = textColumn(statement, index: 2)
+        else {
+            return nil
+        }
+        return ExampleRow(
+            id: id,
+            template: template,
+            answer: answer,
+            answerFormKey: textColumn(statement, index: 3),
+            audioExamplePath: textColumn(statement, index: 4)
+        )
+    }
+
+    private func fetchForms(cardID: UUID) throws -> [WordForm] {
+        let sql = """
+        SELECT form_key, text
+        FROM word_forms
+        WHERE card_id = ?
+        ORDER BY sort_order, form_key, text
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: cardID)
+
+        var forms: [WordForm] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let formKey = textColumn(statement, index: 0),
+                  let text = textColumn(statement, index: 1) else { continue }
+            forms.append(WordForm(formKey: formKey, text: text))
+        }
+        return forms
+    }
+
+    private func fetchDistractors(exampleID: UUID) throws -> [String] {
+        let sql = """
+        SELECT text
+        FROM example_distractors
+        WHERE example_id = ?
+        ORDER BY priority, text
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: exampleID)
+
+        var distractors: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let text = textColumn(statement, index: 0) else { continue }
+            distractors.append(text)
+        }
+        return distractors
     }
 
     private func resolveMediaURL(deckID: UUID, relativePath: String?) -> URL? {
