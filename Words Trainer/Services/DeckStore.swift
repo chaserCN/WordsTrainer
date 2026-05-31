@@ -35,19 +35,29 @@ final class DeckStore {
         let progress = try database.progressMap(deckID: deck.id)
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
         let queue: [StudyQueueItem]
-        if mode == .matching {
-            queue = deck.cards.map { card in
+        if mode == .matching || mode == .recall {
+            let items = deck.cards.map { card in
                 StudyQueueItem(
                     card: card,
                     progress: progress[card.id] ?? CardProgress.newCard(cardID: card.id)
                 )
             }
+            queue = mode == .recall ? items.shuffled() : items
         } else {
-            queue = StudyQueueBuilder.build(
+            var built = StudyQueueBuilder.build(
                 deck: deck,
                 progressByCardID: progress,
                 dailyUsage: usage
             )
+            if built.isEmpty {
+                built = deck.cards.map { card in
+                    StudyQueueItem(
+                        card: card,
+                        progress: progress[card.id] ?? CardProgress.newCard(cardID: card.id)
+                    )
+                }.shuffled()
+            }
+            queue = built
         }
         return StudySession(
             deckID: deck.id,

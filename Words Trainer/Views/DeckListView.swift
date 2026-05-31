@@ -200,7 +200,7 @@ struct DeckDetailView: View {
                             subtitle: "Выбери слово для примера с пропуском",
                             systemImage: "text.quote",
                             accent: .blue,
-                            isEnabled: stats.studyTotal > 0
+                            isEnabled: !deck.cards.isEmpty
                         ) {
                             start(.clozeMultipleChoice)
                         }
@@ -216,13 +216,13 @@ struct DeckDetailView: View {
                         }
                     }
 
-                    StudySection(title: "Помню / Забыл", remaining: queueRemainingLabel) {
+                    StudySection(title: "Помню / Забыл", remaining: recallRemainingLabel) {
                         StudyActionButton(
                             title: "Быстрый проход",
                             subtitle: "Покажи слово и отметь: помню или забыл",
                             systemImage: "eye.fill",
                             accent: .purple,
-                            isEnabled: stats.studyTotal > 0
+                            isEnabled: !deck.cards.isEmpty
                         ) {
                             start(.recall)
                         }
@@ -244,6 +244,15 @@ struct DeckDetailView: View {
         .task(id: deck.id) {
             stats = (try? store.stats(for: deck)) ?? .zero
         }
+        .onChange(of: showStudy) { _, isShowing in
+            guard !isShowing else { return }
+            stats = (try? store.stats(for: deck)) ?? .zero
+        }
+    }
+
+    private var recallRemainingLabel: String? {
+        guard !deck.cards.isEmpty else { return nil }
+        return remainingCardsLabel(deck.cards.count)
     }
 
     private var matchingPairCount: Int {
@@ -253,15 +262,11 @@ struct DeckDetailView: View {
         }
     }
 
-    private var queueRemainingLabel: String? {
-        guard stats.studyTotal > 0 else { return nil }
-        return remainingCardsLabel(stats.studyTotal)
-    }
-
     private var remainingSummary: String? {
+        let clozeCount = stats.studyTotal > 0 ? stats.studyTotal : deck.cards.count
         let parts = [
             matchingPairCount > 0 ? remainingPairsLabel(matchingPairCount) : nil,
-            stats.studyTotal > 0 ? remainingCardsLabel(stats.studyTotal) : nil,
+            !deck.cards.isEmpty ? remainingCardsLabel(clozeCount) : nil,
         ].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

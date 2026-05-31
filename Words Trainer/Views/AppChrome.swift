@@ -86,6 +86,8 @@ enum MatchPalette {
     static let muted = oklch(0.55, 0.015, 260)
     static let primary = oklch(0.62, 0.19, 255)
     static let success = oklch(0.72, 0.12, 160)
+    /// Зелёный для текста на светлой карточке — темнее success, выше контраст.
+    static let successText = oklch(0.55, 0.15, 155)
     static let destructive = oklch(0.62, 0.22, 25)
     static let accent = oklch(0.70, 0.18, 30)
     static let shadow = oklch(0.18, 0.05, 260)

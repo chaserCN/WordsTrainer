@@ -83,7 +83,12 @@ final class StudySession {
     ) throws {
         guard let item = current else { return }
         let wasNew = item.progress.fsrsCard.state == .new
-        let updated = try engine.applyReview(progress: item.progress, outcome: outcome)
+        let updated: CardProgress
+        if mode == .recall, outcome == .forgot {
+            updated = CardProgress.newCard(cardID: item.progress.cardID)
+        } else {
+            updated = try engine.applyReview(progress: item.progress, outcome: outcome)
+        }
         try onSave(updated, wasNew && outcome.passed)
         queue.removeFirst()
     }

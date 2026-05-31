@@ -52,7 +52,8 @@ struct StudySessionView: View {
                         ClozeMCQStudyView(
                             card: item.card,
                             sessionChoicePool: session.sessionChoicePool,
-                            deckChoicePool: session.deckChoicePool
+                            deckChoicePool: session.deckChoicePool,
+                            remainingCount: session.remainingCount
                         ) { outcome in
                             submit(outcome)
                         }

@@ -22,9 +22,6 @@ enum DeckStatsCalculator {
         var learningDue = 0
         var reviewDue = 0
 
-        let studiedToday = dailyUsage?.newCardsStudied ?? 0
-        let newSlotsLeft = max(0, deck.newCardsPerDay - studiedToday)
-
         for card in deck.cards {
             guard let progress = progressByCardID[card.id] else {
                 newCount += 1
@@ -42,7 +39,7 @@ enum DeckStatsCalculator {
         }
 
         return DeckStats(
-            newAvailable: min(newCount, newSlotsLeft),
+            newAvailable: newCount,
             learningDue: learningDue,
             reviewDue: reviewDue
         )
