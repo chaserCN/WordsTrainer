@@ -12,6 +12,7 @@ struct ClozeMCQStudyView: View {
     @State private var selected: String?
     @State private var answered = false
     @State private var choices: [String] = []
+    @State private var shakeCount: CGFloat = 0
 
     private var passed: Bool {
         guard let selected else { return false }
@@ -52,11 +53,13 @@ struct ClozeMCQStudyView: View {
                     VStack(spacing: 16) {
                         if let translation = card.clozeExampleTranslation?.trimmingCharacters(in: .whitespacesAndNewlines),
                            !translation.isEmpty {
-                            Text(translation)
-                                .font(.subheadline)
-                                .foregroundStyle(MatchPalette.foreground)
-                                .multilineTextAlignment(.center)
-                                .frame(maxWidth: .infinity)
+                            HTMLText(
+                                html: translation,
+                                foregroundColor: MatchPalette.foreground,
+                                font: .subheadline
+                            )
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
                         }
 
                         Button("Дальше") {
@@ -68,7 +71,6 @@ struct ClozeMCQStudyView: View {
                         .frame(maxWidth: .infinity)
                     }
                     .padding(.top, 20)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
                 Spacer(minLength: 0)
@@ -78,7 +80,6 @@ struct ClozeMCQStudyView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 10)
-        .animation(.easeInOut(duration: 0.28), value: answered)
         .onAppear {
             resetRoundIfNeeded()
         }
@@ -98,7 +99,7 @@ struct ClozeMCQStudyView: View {
                 } else {
                     HTMLText(
                         html: card.clozePromptWithGap,
-                        foregroundColor: MatchPalette.cardForeground,
+                        foregroundColor: ClozeSentencePalette.text,
                         font: .title3.weight(.semibold)
                     )
                 }
@@ -117,12 +118,10 @@ struct ClozeMCQStudyView: View {
                 } label: {
                     Image(systemName: "speaker.wave.2.fill")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(answered ? MatchPalette.primary : MatchPalette.muted)
+                        .foregroundStyle(ClozeSentencePalette.audioTint)
                         .frame(width: 34, height: 34)
-                        .background(
-                            Circle()
-                                .fill((answered ? MatchPalette.primary : MatchPalette.muted).opacity(0.12))
-                        )
+                        .background(Circle().fill(oklch(0.62, 0.2, 245, 0.18)))
+                        .opacity(answered ? 1 : 0.4)
                 }
                 .buttonStyle(.plain)
                 .disabled(!answered)
@@ -130,18 +129,33 @@ struct ClozeMCQStudyView: View {
                 .accessibilityLabel("Прослушать")
             }
         }
-        .background(clozeCardShape.fill(.white.opacity(0.88)))
-        .overlay(clozeCardShape.strokeBorder(MatchPalette.shadow.opacity(0.08), lineWidth: 0.5))
-        .shadow(color: MatchPalette.shadow.opacity(0.08), radius: 6, x: 0, y: 4)
-        .modifier(ShakeEffect(animatableData: answered && !passed ? 1 : 0))
-        .animation(.linear(duration: 0.4), value: answered && !passed)
+        .background(
+            clozeSentenceShape
+                .fill(clozeSentenceGradient)
+                .overlay {
+                    Circle()
+                        .fill(oklch(0.7, 0.18, 245, 0.25))
+                        .frame(width: 180, height: 180)
+                        .blur(radius: 50)
+                        .offset(x: 80, y: -70)
+                }
+                .clipShape(clozeSentenceShape)
+        )
+        .overlay(clozeSentenceShape.strokeBorder(.white.opacity(0.06), lineWidth: 0.5))
+        .shadow(color: oklch(0.2, 0.12, 265, 0.4), radius: 18, x: 0, y: 12)
+        .modifier(ShakeEffect(animatableData: shakeCount))
+        .animation(.linear(duration: 0.4), value: shakeCount)
     }
 
     private func select(_ option: String) {
         guard !answered else { return }
+        selected = option
+        let isCorrect = optionsMatch(option, card.effectiveClozeAnswer)
         withAnimation(.easeInOut(duration: 0.28)) {
-            selected = option
             answered = true
+        }
+        if !isCorrect {
+            shakeCount += 1
         }
     }
 
@@ -166,6 +180,25 @@ struct ClozeMCQStudyView: View {
 }
 
 private let clozeCardShape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+private let clozeSentenceShape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+
+/// Тёмный сине-фиолетовый градиент карточки предложения (как лицо флешкарты).
+private let clozeSentenceGradient = LinearGradient(
+    gradient: Gradient(stops: [
+        .init(color: oklch(0.25, 0.04, 265), location: 0),
+        .init(color: oklch(0.19, 0.04, 265), location: 0.6),
+        .init(color: oklch(0.15, 0.05, 270), location: 1),
+    ]),
+    startPoint: .topLeading,
+    endPoint: .bottomTrailing
+)
+
+/// Цвета текста предложения на тёмной карточке.
+private enum ClozeSentencePalette {
+    static let text = Color.white.opacity(0.92)
+    static let filled = oklch(0.78, 0.16, 155)
+    static let audioTint = oklch(0.78, 0.18, 245)
+}
 
 private struct ClozeSentenceText: View {
     let parts: ClozeSentenceParts
@@ -181,13 +214,13 @@ private struct ClozeSentenceText: View {
     private var styledSentence: AttributedString {
         var sentence = AttributedString(parts.prefix)
         sentence.font = .title3.weight(.semibold)
-        sentence.foregroundColor = MatchPalette.cardForeground
+        sentence.foregroundColor = ClozeSentencePalette.text
 
         sentence.append(gapSegment)
 
         var suffix = AttributedString(parts.suffix)
         suffix.font = .title3.weight(.semibold)
-        suffix.foregroundColor = MatchPalette.cardForeground
+        suffix.foregroundColor = ClozeSentencePalette.text
 
         sentence.append(suffix)
         return sentence
@@ -196,14 +229,14 @@ private struct ClozeSentenceText: View {
     private var gapSegment: AttributedString {
         if let filledWord {
             var word = AttributedString(filledWord)
-            word.font = .title3.weight(.semibold)
-            word.foregroundColor = MatchPalette.successText
+            word.font = .title3.weight(.bold)
+            word.foregroundColor = ClozeSentencePalette.filled
             return word
         }
 
         var blanks = AttributedString("___")
         blanks.font = .title3.weight(.semibold)
-        blanks.foregroundColor = MatchPalette.cardForeground
+        blanks.foregroundColor = ClozeSentencePalette.text
         return blanks
     }
 }
