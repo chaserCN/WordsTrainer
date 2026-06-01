@@ -10,11 +10,19 @@ struct ClozeSentenceParts: Equatable, Hashable {
     let suffix: String
 }
 
+enum ContentStatus: String, Codable, Hashable, Sendable {
+    case active
+    case inactive
+
+    var isActive: Bool { self == .active }
+}
+
 /// Card content from server or local seed (no SRS state).
 struct WordCardContent: Codable, Identifiable, Hashable {
     static let blankToken = "{{blank}}"
 
     let id: UUID
+    let status: ContentStatus
     let word: String
     let lemma: String
     let partOfSpeech: String?
@@ -41,6 +49,7 @@ struct WordCardContent: Codable, Identifiable, Hashable {
 
     init(
         id: UUID = UUID(),
+        status: ContentStatus = .active,
         word: String,
         lemma: String? = nil,
         partOfSpeech: String? = nil,
@@ -64,6 +73,7 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         forms: [WordForm] = []
     ) {
         self.id = id
+        self.status = status
         self.word = word
         self.lemma = lemma ?? Self.headword(from: word)
         self.partOfSpeech = partOfSpeech
@@ -297,10 +307,34 @@ struct WordCardContent: Codable, Identifiable, Hashable {
 
 struct DeckContent: Identifiable, Hashable {
     let id: UUID
+    var status: ContentStatus
     var title: String
     var avatarSystemName: String?
     var languageCode: String
     var newCardsPerDay: Int
     var reviewCardsPerDay: Int
     var cards: [WordCardContent]
+
+    var isActive: Bool { status.isActive }
+    var activeCards: [WordCardContent] { cards.filter(\.status.isActive) }
+
+    init(
+        id: UUID,
+        status: ContentStatus = .active,
+        title: String,
+        avatarSystemName: String?,
+        languageCode: String,
+        newCardsPerDay: Int,
+        reviewCardsPerDay: Int,
+        cards: [WordCardContent]
+    ) {
+        self.id = id
+        self.status = status
+        self.title = title
+        self.avatarSystemName = avatarSystemName
+        self.languageCode = languageCode
+        self.newCardsPerDay = newCardsPerDay
+        self.reviewCardsPerDay = reviewCardsPerDay
+        self.cards = cards
+    }
 }

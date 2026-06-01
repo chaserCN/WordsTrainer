@@ -23,6 +23,48 @@ struct DeckStatsTests {
         #expect(stats.newAvailable == 1)
     }
 
+    @Test("deck stats ignore inactive cards")
+    func inactiveCardsAreSkippedInStats() {
+        let activeID = UUID()
+        let inactiveID = UUID()
+        let deck = DeckContent(
+            id: UUID(),
+            title: "Test",
+            avatarSystemName: nil,
+            languageCode: "en",
+            newCardsPerDay: 20,
+            reviewCardsPerDay: 200,
+            cards: [
+                TestFixtures.card(id: activeID, word: "cat", translation: "кот"),
+                TestFixtures.card(id: inactiveID, status: .inactive, word: "dog", translation: "собака"),
+            ]
+        )
+
+        let stats = DeckStatsCalculator.compute(deck: deck, progressByCardID: [:], dailyUsage: nil)
+
+        #expect(stats.newAvailable == 1)
+    }
+
+    @Test("deck stats are zero for inactive deck")
+    func inactiveDeckHasZeroStats() {
+        let deck = DeckContent(
+            id: UUID(),
+            status: .inactive,
+            title: "Test",
+            avatarSystemName: nil,
+            languageCode: "en",
+            newCardsPerDay: 20,
+            reviewCardsPerDay: 200,
+            cards: [
+                TestFixtures.card(word: "cat", translation: "кот"),
+            ]
+        )
+
+        let stats = DeckStatsCalculator.compute(deck: deck, progressByCardID: [:], dailyUsage: nil)
+
+        #expect(stats == .zero)
+    }
+
     @Test("deck stats count new cards when daily limit is reached")
     func newCardCountWhenDailyLimitReached() {
         let id = UUID()
@@ -64,6 +106,45 @@ struct DeckStatsTests {
         )
         #expect(queue.isEmpty)
         #expect(deck.cards.count == 1)
+    }
+
+    @Test("study queue skips inactive cards")
+    func studyQueueSkipsInactiveCards() {
+        let active = TestFixtures.card(word: "cat", translation: "кот")
+        let inactive = TestFixtures.card(status: .inactive, word: "dog", translation: "собака")
+        let deck = DeckContent(
+            id: UUID(),
+            title: "Test",
+            avatarSystemName: nil,
+            languageCode: "en",
+            newCardsPerDay: 20,
+            reviewCardsPerDay: 200,
+            cards: [active, inactive]
+        )
+
+        let queue = StudyQueueBuilder.build(deck: deck, progressByCardID: [:], dailyUsage: nil)
+
+        #expect(queue.map(\.card.id) == [active.id])
+    }
+
+    @Test("study queue is empty for inactive deck")
+    func studyQueueSkipsInactiveDeck() {
+        let deck = DeckContent(
+            id: UUID(),
+            status: .inactive,
+            title: "Test",
+            avatarSystemName: nil,
+            languageCode: "en",
+            newCardsPerDay: 20,
+            reviewCardsPerDay: 200,
+            cards: [
+                TestFixtures.card(word: "cat", translation: "кот"),
+            ]
+        )
+
+        let queue = StudyQueueBuilder.build(deck: deck, progressByCardID: [:], dailyUsage: nil)
+
+        #expect(queue.isEmpty)
     }
 
     @Test("binary review updates FSRS card")

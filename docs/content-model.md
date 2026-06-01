@@ -30,12 +30,17 @@ Deck metadata.
 
 ```sql
 id TEXT PRIMARY KEY NOT NULL,
+status TEXT NOT NULL DEFAULT 'active',
 title TEXT NOT NULL,
 avatar_system_name TEXT,
 language_code TEXT NOT NULL,
 new_cards_per_day INTEGER NOT NULL,
 review_cards_per_day INTEGER NOT NULL
 ```
+
+- `status`: deck-level enable/disable switch exposed in the deck detail UI.
+  `active` decks are included in normal study queues; `inactive` decks stay in
+  storage but produce no standard study queue.
 
 ### `cards`
 
@@ -44,6 +49,7 @@ The learning unit: the word or phrase we want the user to learn.
 ```sql
 id TEXT PRIMARY KEY NOT NULL,
 deck_id TEXT NOT NULL,
+status TEXT NOT NULL DEFAULT 'active',
 lemma TEXT NOT NULL,
 display_word TEXT NOT NULL,
 part_of_speech TEXT,
@@ -61,6 +67,10 @@ audio_word_path TEXT
 
 Field meaning:
 
+- `status`: internal content flag for imports/tooling and a future card editor.
+  The current UI does not expose per-card enable/disable controls. `active`
+  cards are included in normal study queues; `inactive` cards stay in the deck
+  but are skipped.
 - `lemma`: canonical dictionary form without article, for example `hip`, `get`.
 - `display_word`: user-facing headword, for example `a hip`, `get`.
 - `part_of_speech`: normalized coarse POS, for example `noun`, `verb`, `adjective`.
@@ -171,6 +181,27 @@ Study state is stored separately from learning content:
 - `card_progress`: FSRS state per card.
 - `deck_daily_usage`: daily new-card counter.
 - `deck_matching_records`: best result for the matching/columns mode.
+- `study_reviews`: append-only review history for activity, accuracy, and weak-card stats.
+
+### `study_reviews`
+
+Each SRS-affecting answer appends one row:
+
+```sql
+id TEXT PRIMARY KEY NOT NULL,
+card_id TEXT NOT NULL,
+deck_id TEXT NOT NULL,
+mode TEXT NOT NULL,
+outcome TEXT NOT NULL,
+reviewed_at REAL NOT NULL,
+duration_ms INTEGER,
+was_new INTEGER NOT NULL,
+previous_state TEXT,
+new_state TEXT
+```
+
+The dashboard treats `remembered` and `correct` as passed outcomes, and
+`forgot` and `incorrect` as mistakes.
 
 ## iOS models
 
@@ -180,8 +211,14 @@ Runtime card model loaded from `cards` plus its primary `card_examples`,
 `word_forms`, and optional `example_distractors`.
 
 ```swift
+enum ContentStatus: String, Codable, Hashable, Sendable {
+    case active
+    case inactive
+}
+
 struct WordCardContent: Codable, Identifiable, Hashable {
     let id: UUID
+    let status: ContentStatus     // cards.status
     let word: String              // cards.display_word
     let lemma: String             // cards.lemma
     let partOfSpeech: String?
@@ -233,6 +270,7 @@ Maps directly to one row in `word_forms`.
 ```swift
 struct DeckContent: Identifiable, Hashable {
     let id: UUID
+    var status: ContentStatus     // decks.status
     var title: String
     var avatarSystemName: String?
     var languageCode: String
@@ -243,6 +281,11 @@ struct DeckContent: Identifiable, Hashable {
 ```
 
 Maps to `decks` plus loaded `cards`.
+
+Normal study queues use only active decks and active cards. The current product
+surface manages activity at the deck level; card-level status is stored for
+imports/tooling and future card management, not for a separate "train all"
+workflow.
 
 ## Sentence mode choice generation
 

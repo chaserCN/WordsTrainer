@@ -52,6 +52,8 @@ enum StudyQueueBuilder {
         dailyUsage: DeckDailyUsage?,
         now: Date = .now
     ) -> [StudyQueueItem] {
+        guard deck.isActive else { return [] }
+
         var learning: [StudyQueueItem] = []
         var review: [StudyQueueItem] = []
         var newCards: [StudyQueueItem] = []
@@ -59,7 +61,7 @@ enum StudyQueueBuilder {
         let studiedToday = dailyUsage?.newCardsStudied ?? 0
         let newSlotsLeft = max(0, deck.newCardsPerDay - studiedToday)
 
-        for content in deck.cards {
+        for content in deck.activeCards {
             let progress = progressByCardID[content.id]
                 ?? CardProgress.newCard(cardID: content.id, now: now)
             let fsrs = progress.fsrsCard

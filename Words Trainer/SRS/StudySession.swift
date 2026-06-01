@@ -79,17 +79,31 @@ final class StudySession {
 
     func advanceAfterReview(
         outcome: ReviewOutcome,
-        onSave: (_ progress: CardProgress, _ wasNew: Bool) throws -> Void
+        onSave: (_ progress: CardProgress, _ wasNew: Bool) throws -> Void,
+        onReview: ((_ event: StudyReviewEvent) throws -> Void)? = nil
     ) throws {
         guard let item = current else { return }
+        let reviewedAt = Date()
         let wasNew = item.progress.fsrsCard.state == .new
         let updated: CardProgress
         if mode == .recall, outcome == .forgot {
-            updated = CardProgress.newCard(cardID: item.progress.cardID)
+            updated = CardProgress.newCard(cardID: item.progress.cardID, now: reviewedAt)
         } else {
-            updated = try engine.applyReview(progress: item.progress, outcome: outcome)
+            updated = try engine.applyReview(progress: item.progress, outcome: outcome, now: reviewedAt)
         }
         try onSave(updated, wasNew && outcome.passed)
+        try onReview?(
+            StudyReviewEvent(
+                cardID: item.card.id,
+                deckID: deckID,
+                mode: mode,
+                outcome: outcome,
+                reviewedAt: reviewedAt,
+                wasNew: wasNew,
+                previousState: String(describing: item.progress.fsrsCard.state),
+                newState: String(describing: updated.fsrsCard.state)
+            )
+        )
         queue.removeFirst()
     }
 }

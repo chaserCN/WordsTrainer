@@ -18,11 +18,13 @@ enum DeckStatsCalculator {
         dailyUsage: DeckDailyUsage?,
         now: Date = .now
     ) -> DeckStats {
+        guard deck.isActive else { return .zero }
+
         var newCount = 0
         var learningDue = 0
         var reviewDue = 0
 
-        for card in deck.cards {
+        for card in deck.activeCards {
             guard let progress = progressByCardID[card.id] else {
                 newCount += 1
                 continue

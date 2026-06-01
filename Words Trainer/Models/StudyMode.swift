@@ -27,7 +27,7 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum ReviewOutcome: Sendable {
+enum ReviewOutcome: Sendable, Hashable {
     case remembered
     case forgot
     case correct
@@ -37,6 +37,15 @@ enum ReviewOutcome: Sendable {
         switch self {
         case .remembered, .correct: true
         case .forgot, .incorrect: false
+        }
+    }
+
+    var databaseValue: String {
+        switch self {
+        case .remembered: "remembered"
+        case .forgot: "forgot"
+        case .correct: "correct"
+        case .incorrect: "incorrect"
         }
     }
 }

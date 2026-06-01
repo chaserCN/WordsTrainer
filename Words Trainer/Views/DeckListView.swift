@@ -25,17 +25,38 @@ struct DeckListView: View {
                 } else if let store {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 20) {
-                            DeckListHeader(deckCount: decks.count)
+                            DeckListHeader(deckCount: activeDecks.count)
 
                             LazyVStack(spacing: 16) {
-                                ForEach(decks) { deck in
+                                ForEach(activeDeckBindings) { $deck in
                                     NavigationLink {
-                                        DeckDetailView(deck: deck, store: store)
+                                        DeckDetailView(deck: $deck, store: store)
                                     } label: {
                                         DeckCardView(deck: deck, store: store)
                                     }
                                     .buttonStyle(.plain)
                                 }
+                            }
+
+                            if !inactiveDecks.isEmpty {
+                                NavigationLink {
+                                    InactiveDecksView(decks: $decks, store: store)
+                                } label: {
+                                    HStack {
+                                        Label("Отключенные колоды", systemImage: "pause.circle")
+                                        Spacer()
+                                        Text("\(inactiveDecks.count)")
+                                            .font(.subheadline.bold())
+                                        Image(systemName: "chevron.right")
+                                            .font(.footnote.bold())
+                                            .foregroundStyle(.white.opacity(0.35))
+                                    }
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(16)
+                                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                         .padding(.horizontal, 20)
@@ -51,6 +72,18 @@ struct DeckListView: View {
         .task {
             await bootstrap()
         }
+    }
+
+    private var activeDecks: [DeckContent] {
+        decks.filter(\.isActive)
+    }
+
+    private var inactiveDecks: [DeckContent] {
+        decks.filter { !$0.isActive }
+    }
+
+    private var activeDeckBindings: [Binding<DeckContent>] {
+        $decks.filter(\.wrappedValue.isActive)
     }
 
     private var emptyDecksMessage: String {
@@ -72,7 +105,108 @@ struct DeckListView: View {
     }
 }
 
-private struct DataPlaceholderView: View {
+struct InactiveDecksView: View {
+    @Binding var decks: [DeckContent]
+    let store: DeckStore
+
+    @State private var statusError: String?
+
+    private var inactiveDecks: [Binding<DeckContent>] {
+        $decks.filter { !$0.wrappedValue.isActive }
+    }
+
+    var body: some View {
+        ZStack {
+            AppBackground()
+
+            if inactiveDecks.isEmpty {
+                DataPlaceholderView(
+                    title: "Нет отключенных колод",
+                    systemImage: "checkmark.circle",
+                    message: "Все колоды сейчас участвуют в обучении."
+                )
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 14) {
+                        ForEach(inactiveDecks) { $deck in
+                            InactiveDeckRow(deck: deck) {
+                                enable(deckID: deck.id)
+                            }
+                        }
+                    }
+                    .padding(20)
+                }
+            }
+        }
+        .navigationTitle("Отключенные")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .alert("Не удалось включить колоду", isPresented: statusErrorBinding) {
+            Button("ОК", role: .cancel) {
+                statusError = nil
+            }
+        } message: {
+            Text(statusError ?? "")
+        }
+    }
+
+    private var statusErrorBinding: Binding<Bool> {
+        Binding(
+            get: { statusError != nil },
+            set: { isPresented in
+                if !isPresented { statusError = nil }
+            }
+        )
+    }
+
+    private func enable(deckID: UUID) {
+        do {
+            try store.setDeckStatus(.active, for: deckID)
+            guard let index = decks.firstIndex(where: { $0.id == deckID }) else { return }
+            decks[index].status = .active
+        } catch {
+            statusError = error.localizedDescription
+        }
+    }
+}
+
+private struct InactiveDeckRow: View {
+    let deck: DeckContent
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            DeckIcon(symbolName: deck.avatarSystemName, size: 48)
+                .opacity(0.65)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(deck.title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text("\(deck.activeCards.count) карточек")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.58))
+            }
+
+            Spacer()
+
+            Button("Включить", action: action)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.green)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.white.opacity(0.1), in: Capsule())
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.white.opacity(0.08), lineWidth: 1)
+        }
+    }
+}
+
+struct DataPlaceholderView: View {
     let title: String
     let systemImage: String
     let message: String
@@ -102,10 +236,10 @@ private struct DeckListHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Сегодня")
+            Text("Колоды")
                 .font(.largeTitle.bold())
                 .foregroundStyle(.white)
-            Text("Выбери колоду и продолжай интервальные повторения.")
+            Text("Выбери активную колоду или верни отключенную в обучение.")
                 .font(.body)
                 .foregroundStyle(.white.opacity(0.68))
 
@@ -132,6 +266,7 @@ struct DeckCardView: View {
     var showsChevron: Bool = true
 
     @State private var stats: DeckStats = .zero
+    private var activeCardCount: Int { deck.activeCards.count }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -143,9 +278,15 @@ struct DeckCardView: View {
                         .font(.title3.bold())
                         .foregroundStyle(Color(red: 0.08, green: 0.08, blue: 0.13))
 
-                    Text("\(deck.cards.count) карточек · \(deck.languageCode.uppercased())")
-                        .font(.subheadline)
-                        .foregroundStyle(Color(red: 0.45, green: 0.46, blue: 0.55))
+                    HStack(spacing: 8) {
+                        Text("\(activeCardCount) карточек · \(deck.languageCode.uppercased())")
+                            .font(.subheadline)
+                            .foregroundStyle(Color(red: 0.45, green: 0.46, blue: 0.55))
+
+                        if !deck.isActive {
+                            DeckStatusBadge()
+                        }
+                    }
                 }
 
                 Spacer()
@@ -171,20 +312,31 @@ struct DeckCardView: View {
         }
         .shadow(color: .black.opacity(0.28), radius: 26, x: 0, y: 16)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(deck.title), новых \(stats.newAvailable), повторить \(stats.dueTotal), всего \(deck.cards.count)")
-        .task(id: deck.id) {
+        .accessibilityLabel(accessibilityLabel)
+        .task(id: statsTaskID) {
             stats = (try? store.stats(for: deck)) ?? .zero
         }
+    }
+
+    private var statsTaskID: String {
+        "\(deck.id.databaseString)-\(deck.status.rawValue)"
+    }
+
+    private var accessibilityLabel: String {
+        let statusText = deck.isActive ? "включена" : "отключена"
+        return "\(deck.title), \(statusText), новых \(stats.newAvailable), повторить \(stats.dueTotal), всего \(activeCardCount)"
     }
 }
 
 struct DeckDetailView: View {
-    let deck: DeckContent
+    @Binding var deck: DeckContent
     let store: DeckStore
 
     @State private var stats: DeckStats = .zero
     @State private var session: StudySession?
     @State private var showStudy = false
+    @State private var statusError: String?
+    private var studyCards: [WordCardContent] { deck.isActive ? deck.activeCards : [] }
 
     var body: some View {
         ZStack {
@@ -193,6 +345,9 @@ struct DeckDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     DeckCardView(deck: deck, store: store, showsChevron: false)
+                    DeckStatusControl(deck: deck) {
+                        toggleDeckStatus()
+                    }
 
                     StudySection(title: "Упражнения", remaining: remainingSummary) {
                         StudyActionButton(
@@ -200,7 +355,7 @@ struct DeckDetailView: View {
                             subtitle: "Слово, перевод и заметки — переворот по тапу",
                             systemImage: "rectangle.on.rectangle.angled",
                             accent: .orange,
-                            isEnabled: !deck.cards.isEmpty
+                            isEnabled: !studyCards.isEmpty
                         ) {
                             start(.flashcards)
                         }
@@ -210,7 +365,7 @@ struct DeckDetailView: View {
                             subtitle: "Выбери слово для примера с пропуском",
                             systemImage: "text.quote",
                             accent: .blue,
-                            isEnabled: !deck.cards.isEmpty
+                            isEnabled: !studyCards.isEmpty
                         ) {
                             start(.clozeMultipleChoice)
                         }
@@ -220,7 +375,7 @@ struct DeckDetailView: View {
                             subtitle: "Соедини слово и перевод",
                             systemImage: "rectangle.split.2x1.fill",
                             accent: .green,
-                            isEnabled: !deck.cards.isEmpty
+                            isEnabled: !studyCards.isEmpty
                         ) {
                             start(.matching)
                         }
@@ -232,7 +387,7 @@ struct DeckDetailView: View {
                             subtitle: "Покажи слово и отметь: помню или забыл",
                             systemImage: "eye.fill",
                             accent: .purple,
-                            isEnabled: !deck.cards.isEmpty
+                            isEnabled: !studyCards.isEmpty
                         ) {
                             start(.recall)
                         }
@@ -251,32 +406,39 @@ struct DeckDetailView: View {
                 StudySessionView(session: session, store: store, deckTitle: deck.title)
             }
         }
-        .task(id: deck.id) {
+        .task(id: statsTaskID) {
             stats = (try? store.stats(for: deck)) ?? .zero
         }
         .onChange(of: showStudy) { _, isShowing in
             guard !isShowing else { return }
             stats = (try? store.stats(for: deck)) ?? .zero
         }
+        .alert("Не удалось обновить колоду", isPresented: statusErrorBinding) {
+            Button("ОК", role: .cancel) {
+                statusError = nil
+            }
+        } message: {
+            Text(statusError ?? "")
+        }
     }
 
     private var recallRemainingLabel: String? {
-        guard !deck.cards.isEmpty else { return nil }
-        return remainingCardsLabel(deck.cards.count)
+        guard !studyCards.isEmpty else { return nil }
+        return remainingCardsLabel(studyCards.count)
     }
 
     private var matchingPairCount: Int {
-        deck.cards.reduce(0) { total, card in
+        studyCards.reduce(0) { total, card in
             let senses = WordCardContent.translationSenses(card.translation)
             return total + (senses.isEmpty ? 1 : senses.count)
         }
     }
 
     private var remainingSummary: String? {
-        let clozeCount = stats.studyTotal > 0 ? stats.studyTotal : deck.cards.count
+        let clozeCount = stats.studyTotal > 0 ? stats.studyTotal : studyCards.count
         let parts = [
             matchingPairCount > 0 ? remainingPairsLabel(matchingPairCount) : nil,
-            !deck.cards.isEmpty ? remainingCardsLabel(clozeCount) : nil,
+            !studyCards.isEmpty ? remainingCardsLabel(clozeCount) : nil,
         ].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
@@ -314,8 +476,85 @@ struct DeckDetailView: View {
     }
 
     private func start(_ mode: StudyMode) {
+        guard deck.isActive else { return }
         session = try? store.startSession(deck: deck, mode: mode)
         showStudy = session != nil
+    }
+
+    private var statsTaskID: String {
+        "\(deck.id.databaseString)-\(deck.status.rawValue)"
+    }
+
+    private var statusErrorBinding: Binding<Bool> {
+        Binding(
+            get: { statusError != nil },
+            set: { isPresented in
+                if !isPresented { statusError = nil }
+            }
+        )
+    }
+
+    private func toggleDeckStatus() {
+        let newStatus: ContentStatus = deck.isActive ? .inactive : .active
+        do {
+            try store.setDeckStatus(newStatus, for: deck.id)
+            deck.status = newStatus
+            stats = (try? store.stats(for: deck)) ?? .zero
+        } catch {
+            statusError = error.localizedDescription
+        }
+    }
+}
+
+private struct DeckStatusControl: View {
+    let deck: DeckContent
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: deck.isActive ? "checkmark.circle.fill" : "pause.circle.fill")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(deck.isActive ? .green : .orange)
+                .frame(width: 36, height: 36)
+                .background(.white.opacity(0.1), in: Circle())
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(deck.isActive ? "Колода включена" : "Колода отключена")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text(deck.isActive ? "Карточки участвуют в повторениях." : "Карточки не попадают в учебные очереди.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.62))
+            }
+
+            Spacer()
+
+            Button(deck.isActive ? "Отключить" : "Включить", action: action)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(deck.isActive ? .orange : .green)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.white.opacity(0.1), in: Capsule())
+                .accessibilityLabel(deck.isActive ? "Отключить колоду" : "Включить колоду")
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(.white.opacity(0.1), lineWidth: 1)
+        }
+    }
+}
+
+private struct DeckStatusBadge: View {
+    var body: some View {
+        Text("Отключена")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.orange)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.orange.opacity(0.14), in: Capsule())
     }
 }
 

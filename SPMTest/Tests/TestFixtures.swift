@@ -5,6 +5,7 @@ import Testing
 enum TestFixtures {
     static func card(
         id: UUID = UUID(),
+        status: ContentStatus = .active,
         word: String,
         translation: String,
         clozePrompt: String = "___",
@@ -13,6 +14,7 @@ enum TestFixtures {
     ) -> WordCardContent {
         WordCardContent(
             id: id,
+            status: status,
             word: word,
             translation: translation,
             clozePrompt: clozePrompt,

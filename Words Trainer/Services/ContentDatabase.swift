@@ -35,6 +35,7 @@ final class ContentDatabase {
         return try deckRows.map { row in
             DeckContent(
                 id: row.id,
+                status: row.status,
                 title: row.title,
                 avatarSystemName: row.avatarSystemName,
                 languageCode: row.languageCode,
@@ -42,6 +43,24 @@ final class ContentDatabase {
                 reviewCardsPerDay: row.reviewCardsPerDay,
                 cards: try fetchCards(deckID: row.id)
             )
+        }
+    }
+
+    func updateDeckStatus(deckID: UUID, status: ContentStatus) throws {
+        let sql = """
+        UPDATE decks
+        SET status = ?
+        WHERE id = ?
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, text: status.rawValue)
+        try bind(statement, index: 2, uuid: deckID)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
         }
     }
 
@@ -118,6 +137,157 @@ final class ContentDatabase {
         try exec(sql, uuid: deckID, text: usage.dayKey, int: usage.newCardsStudied)
     }
 
+    func saveStudyReview(_ event: StudyReviewEvent) throws {
+        let sql = """
+        INSERT INTO study_reviews (
+            id, card_id, deck_id, mode, outcome, reviewed_at,
+            duration_ms, was_new, previous_state, new_state
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: event.id)
+        try bind(statement, index: 2, uuid: event.cardID)
+        try bind(statement, index: 3, uuid: event.deckID)
+        try bind(statement, index: 4, text: event.mode.rawValue)
+        try bind(statement, index: 5, text: event.outcome.databaseValue)
+        guard sqlite3_bind_double(statement, 6, event.reviewedAt.timeIntervalSince1970) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        if let durationMS = event.durationMS {
+            guard sqlite3_bind_int(statement, 7, Int32(durationMS)) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+        } else {
+            guard sqlite3_bind_null(statement, 7) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+        }
+        guard sqlite3_bind_int(statement, 8, event.wasNew ? 1 : 0) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        try bind(statement, index: 9, text: event.previousState)
+        try bind(statement, index: 10, text: event.newState)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
+        }
+    }
+
+    func studyActivity(since startDate: Date) throws -> [StudyActivityDay] {
+        let sql = """
+        SELECT
+            strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime') AS day_key,
+            COUNT(*),
+            SUM(CASE WHEN outcome IN ('remembered', 'correct') THEN 1 ELSE 0 END)
+        FROM study_reviews
+        WHERE reviewed_at >= ?
+        GROUP BY day_key
+        ORDER BY day_key
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_bind_double(statement, 1, startDate.timeIntervalSince1970) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+
+        var days: [StudyActivityDay] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let dayKey = textColumn(statement, index: 0) else { continue }
+            days.append(
+                StudyActivityDay(
+                    dayKey: dayKey,
+                    reviewedCount: Int(sqlite3_column_int(statement, 1)),
+                    passedCount: Int(sqlite3_column_int(statement, 2))
+                )
+            )
+        }
+        return days
+    }
+
+    func studyReviewCount(since startDate: Date) throws -> StudyReviewCount {
+        let sql = """
+        SELECT
+            COUNT(*),
+            SUM(CASE WHEN outcome IN ('remembered', 'correct') THEN 1 ELSE 0 END)
+        FROM study_reviews
+        WHERE reviewed_at >= ?
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_bind_double(statement, 1, startDate.timeIntervalSince1970) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        guard sqlite3_step(statement) == SQLITE_ROW else { return .zero }
+        return StudyReviewCount(
+            total: Int(sqlite3_column_int(statement, 0)),
+            passed: Int(sqlite3_column_int(statement, 1))
+        )
+    }
+
+    func weakCards(limit: Int = 10) throws -> [WeakCardStat] {
+        let sql = """
+        SELECT
+            cards.id,
+            cards.deck_id,
+            cards.display_word,
+            cards.translation,
+            SUM(CASE WHEN study_reviews.outcome IN ('forgot', 'incorrect') THEN 1 ELSE 0 END) AS failed_count,
+            COUNT(study_reviews.id) AS reviewed_count,
+            MAX(CASE WHEN study_reviews.outcome IN ('forgot', 'incorrect') THEN study_reviews.reviewed_at ELSE NULL END) AS last_failed_at
+        FROM study_reviews
+        JOIN cards ON cards.id = study_reviews.card_id
+        JOIN decks ON decks.id = study_reviews.deck_id
+        WHERE cards.status = 'active' AND decks.status = 'active'
+        GROUP BY cards.id, cards.deck_id, cards.display_word, cards.translation
+        HAVING failed_count > 0
+        ORDER BY failed_count DESC, CAST(failed_count AS REAL) / reviewed_count DESC, last_failed_at DESC
+        LIMIT ?
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_bind_int(statement, 1, Int32(limit)) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+
+        var cards: [WeakCardStat] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let cardID = uuidColumn(statement, index: 0),
+                  let deckID = uuidColumn(statement, index: 1),
+                  let word = textColumn(statement, index: 2),
+                  let translation = textColumn(statement, index: 3) else { continue }
+            let lastFailedAt: Date?
+            if sqlite3_column_type(statement, 6) == SQLITE_NULL {
+                lastFailedAt = nil
+            } else {
+                lastFailedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 6))
+            }
+            cards.append(
+                WeakCardStat(
+                    cardID: cardID,
+                    deckID: deckID,
+                    word: word,
+                    translation: translation,
+                    failedCount: Int(sqlite3_column_int(statement, 4)),
+                    reviewedCount: Int(sqlite3_column_int(statement, 5)),
+                    lastFailedAt: lastFailedAt
+                )
+            )
+        }
+        return cards
+    }
+
     func matchingRecord(deckID: UUID) throws -> DeckMatchingRecord? {
         let sql = """
         SELECT best_duration_seconds, pair_count, achieved_at
@@ -175,6 +345,7 @@ final class ContentDatabase {
         let sql = """
         CREATE TABLE IF NOT EXISTS decks (
             id TEXT PRIMARY KEY NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
             title TEXT NOT NULL,
             avatar_system_name TEXT,
             language_code TEXT NOT NULL,
@@ -184,6 +355,7 @@ final class ContentDatabase {
         CREATE TABLE IF NOT EXISTS cards (
             id TEXT PRIMARY KEY NOT NULL,
             deck_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
             lemma TEXT NOT NULL,
             display_word TEXT NOT NULL,
             part_of_speech TEXT,
@@ -254,6 +426,23 @@ final class ContentDatabase {
             achieved_at REAL NOT NULL,
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
+        CREATE TABLE IF NOT EXISTS study_reviews (
+            id TEXT PRIMARY KEY NOT NULL,
+            card_id TEXT NOT NULL,
+            deck_id TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            reviewed_at REAL NOT NULL,
+            duration_ms INTEGER,
+            was_new INTEGER NOT NULL,
+            previous_state TEXT,
+            new_state TEXT,
+            FOREIGN KEY (card_id) REFERENCES cards(id),
+            FOREIGN KEY (deck_id) REFERENCES decks(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_study_reviews_card_id ON study_reviews(card_id);
+        CREATE INDEX IF NOT EXISTS idx_study_reviews_reviewed_at ON study_reviews(reviewed_at);
+        CREATE INDEX IF NOT EXISTS idx_study_reviews_deck_reviewed ON study_reviews(deck_id, reviewed_at);
         """
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw ContentDatabaseError.migrationFailed
@@ -275,6 +464,9 @@ final class ContentDatabase {
             "UPDATE card_progress SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
             "UPDATE deck_daily_usage SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
             "UPDATE deck_matching_records SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
+            "UPDATE study_reviews SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
+            "UPDATE study_reviews SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
+            "UPDATE study_reviews SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
         ]
         for sql in statements {
             guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
@@ -287,6 +479,7 @@ final class ContentDatabase {
 
     private struct DeckRow {
         let id: UUID
+        let status: ContentStatus
         let title: String
         let avatarSystemName: String?
         let languageCode: String
@@ -296,7 +489,7 @@ final class ContentDatabase {
 
     private func fetchDeckRows() throws -> [DeckRow] {
         let sql = """
-        SELECT id, title, avatar_system_name, language_code,
+        SELECT id, status, title, avatar_system_name, language_code,
                new_cards_per_day, review_cards_per_day
         FROM decks
         ORDER BY title
@@ -310,16 +503,17 @@ final class ContentDatabase {
         var rows: [DeckRow] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let id = uuidColumn(statement, index: 0),
-                  let title = textColumn(statement, index: 1),
-                  let languageCode = textColumn(statement, index: 3) else { continue }
+                  let title = textColumn(statement, index: 2),
+                  let languageCode = textColumn(statement, index: 4) else { continue }
             rows.append(
                 DeckRow(
                     id: id,
+                    status: statusColumn(statement, index: 1),
                     title: title,
-                    avatarSystemName: textColumn(statement, index: 2),
+                    avatarSystemName: textColumn(statement, index: 3),
                     languageCode: languageCode,
-                    newCardsPerDay: Int(sqlite3_column_int(statement, 4)),
-                    reviewCardsPerDay: Int(sqlite3_column_int(statement, 5))
+                    newCardsPerDay: Int(sqlite3_column_int(statement, 5)),
+                    reviewCardsPerDay: Int(sqlite3_column_int(statement, 6))
                 )
             )
         }
@@ -328,7 +522,7 @@ final class ContentDatabase {
 
     private func fetchCards(deckID: UUID) throws -> [WordCardContent] {
         let sql = """
-        SELECT id, lemma, display_word, part_of_speech, translation,
+        SELECT id, status, lemma, display_word, part_of_speech, translation,
                short_definition, memory_hint, etymology, usage_note, synonym_note,
                grammar_note, notes, image_url, audio_word_path
         FROM cards
@@ -345,34 +539,35 @@ final class ContentDatabase {
         var cards: [WordCardContent] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let id = uuidColumn(statement, index: 0),
-                  let lemma = textColumn(statement, index: 1),
-                  let displayWord = textColumn(statement, index: 2),
-                  let translation = textColumn(statement, index: 4),
+                  let lemma = textColumn(statement, index: 2),
+                  let displayWord = textColumn(statement, index: 3),
+                  let translation = textColumn(statement, index: 5),
                   let example = try fetchPrimaryExample(cardID: id) else { continue }
 
             cards.append(
                 WordCardContent(
                     id: id,
+                    status: statusColumn(statement, index: 1),
                     word: displayWord,
                     lemma: lemma,
-                    partOfSpeech: textColumn(statement, index: 3),
+                    partOfSpeech: textColumn(statement, index: 4),
                     translation: translation,
                     clozePrompt: example.template,
                     clozeTemplate: example.template,
                     clozeAnswer: example.answer,
                     clozeExampleTranslation: example.translation,
                     answerFormKey: example.answerFormKey,
-                    shortDefinition: textColumn(statement, index: 5),
-                    memoryHint: textColumn(statement, index: 6),
-                    etymology: textColumn(statement, index: 7),
-                    usageNote: textColumn(statement, index: 8),
-                    synonymNote: textColumn(statement, index: 9),
-                    grammarNote: textColumn(statement, index: 10),
-                    explanation: textColumn(statement, index: 11),
-                    imageURL: textColumn(statement, index: 12).flatMap(URL.init(string:)),
+                    shortDefinition: textColumn(statement, index: 6),
+                    memoryHint: textColumn(statement, index: 7),
+                    etymology: textColumn(statement, index: 8),
+                    usageNote: textColumn(statement, index: 9),
+                    synonymNote: textColumn(statement, index: 10),
+                    grammarNote: textColumn(statement, index: 11),
+                    explanation: textColumn(statement, index: 12),
+                    imageURL: textColumn(statement, index: 13).flatMap(URL.init(string:)),
                     audioWordURL: resolveMediaURL(
                         deckID: deckID,
-                        relativePath: textColumn(statement, index: 13)
+                        relativePath: textColumn(statement, index: 14)
                     ),
                     audioExampleURL: resolveMediaURL(
                         deckID: deckID,
@@ -552,6 +747,14 @@ final class ContentDatabase {
     private func uuidColumn(_ statement: OpaquePointer?, index: Int32) -> UUID? {
         guard let text = textColumn(statement, index: index) else { return nil }
         return UUID(databaseString: text)
+    }
+
+    private func statusColumn(_ statement: OpaquePointer?, index: Int32) -> ContentStatus {
+        guard let text = textColumn(statement, index: index),
+              let status = ContentStatus(rawValue: text) else {
+            return .active
+        }
+        return status
     }
 }
 

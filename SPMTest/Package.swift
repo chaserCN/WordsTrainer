@@ -27,6 +27,7 @@ let package = Package(
             ],
             sources: [
                 "Models/StudyMode.swift",
+                "Models/StudyStats.swift",
                 "Models/WordCardContent.swift",
                 "SRS/BinaryFSRS.swift",
                 "SRS/CardProgress.swift",
