@@ -1,4 +1,5 @@
 import SwiftUI
+import OSLog
 
 struct AppRootView: View {
     @Environment(AppUserStore.self) private var userStore
@@ -30,6 +31,8 @@ struct AppRootView: View {
 }
 
 struct TodayView: View {
+    private static let syncLogger = Logger(subsystem: "com.uniweb.wordtrainer.Words-Trainer", category: "TodaySync")
+
     @Environment(AppUserStore.self) private var userStore
     @State private var store: DeckStore?
     @State private var storeUserID: UUID?
@@ -42,6 +45,7 @@ struct TodayView: View {
     @State private var showTodayModes = false
     @State private var showStudy = false
     @State private var isSyncing = false
+    @State private var syncTask: Task<Void, Never>?
     @State private var toast: TodayToast?
     @State private var toastDismissTask: Task<Void, Never>?
     @State private var loadError: String?
@@ -271,21 +275,39 @@ struct TodayView: View {
 
     @MainActor
     private func syncNow() async {
-        guard !isSyncing else { return }
-        isSyncing = true
-        presentToast(
-            status: TodaySyncStatus(
-                title: "Синхронизация",
-                message: "Проверяем сервер и загружаем данные.",
-                systemImage: "arrow.clockwise",
-                tint: LovableSurface.primary
-            ),
-            autoDismiss: false
-        )
-        let result = await userStore.refreshFromServer()
-        await reload()
-        isSyncing = false
-        presentToast(for: result)
+        Self.syncLogger.info("syncNow invoked isSyncing=\(self.isSyncing, privacy: .public)")
+        let task = startSyncTask()
+        await task.value
+    }
+
+    @MainActor
+    private func startSyncTask() -> Task<Void, Never> {
+        if let syncTask {
+            Self.syncLogger.info("syncNow joined existing sync task")
+            return syncTask
+        }
+        let task = Task { @MainActor in
+            isSyncing = true
+            defer {
+                isSyncing = false
+                syncTask = nil
+            }
+            presentToast(
+                status: TodaySyncStatus(
+                    title: "Синхронизация",
+                    message: "Проверяем сервер и загружаем данные.",
+                    systemImage: "arrow.clockwise",
+                    tint: LovableSurface.primary
+                ),
+                autoDismiss: false
+            )
+            let result = await userStore.refreshFromServer()
+            Self.syncLogger.info("syncNow refresh finished")
+            await reload()
+            presentToast(for: result)
+        }
+        syncTask = task
+        return task
     }
 
     private func presentToast(for result: AppUserRefreshResult) {
@@ -538,6 +560,13 @@ private struct TodaySyncStatus: Equatable {
                 message: message,
                 systemImage: "person.2.slash",
                 tint: oklch(0.64, 0.19, 35)
+            )
+        case .cancelled:
+            self.init(
+                title: "Синхронизация отменена",
+                message: message,
+                systemImage: "xmark.circle.fill",
+                tint: LovableSurface.muted
             )
         case .failed:
             self.init(

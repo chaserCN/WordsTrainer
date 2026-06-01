@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 struct AppUser: Identifiable, Codable, Hashable, Sendable {
     static let defaultID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
@@ -45,6 +46,7 @@ enum AppUserRefreshResult: Equatable {
     case loaded(userCount: Int, assignmentCount: Int, activeAssignmentCount: Int)
     case missingConfiguration
     case emptyServer
+    case cancelled
     case failed(String)
 
     var message: String? {
@@ -63,6 +65,8 @@ enum AppUserRefreshResult: Equatable {
             "Нужно настроить SERVER_BASE_URL и HOUSEHOLD_SYNC_TOKEN."
         case .emptyServer:
             "Сервер доступен, но пользователей пока нет."
+        case .cancelled:
+            "Синхронизация была прервана. Попробуйте ещё раз."
         case .failed(let message):
             message
         }
@@ -73,6 +77,7 @@ enum AppUserRefreshResult: Equatable {
 @Observable
 final class AppUserStore {
     static let shared = AppUserStore(defaults: .standard, syncClient: ServerSyncClient.shared)
+    private static let logger = Logger(subsystem: "com.uniweb.wordtrainer.Words-Trainer", category: "AppUserStore")
 
     private enum Keys {
         static let users = "app.users"
@@ -124,15 +129,19 @@ final class AppUserStore {
 
     @discardableResult
     func refreshFromServer() async -> AppUserRefreshResult {
+        Self.logger.info("refreshFromServer started selectedUserID=\(self.selectedUserID?.uuidString ?? "nil", privacy: .public)")
         guard syncClient.isConfigured else {
+            Self.logger.warning("refreshFromServer skipped: missing sync configuration")
             bootstrapState = .missingConfiguration
             return .missingConfiguration
         }
 
+        let previousState = bootstrapState
         bootstrapState = .loading
         do {
             let bootstrap = try await syncClient.bootstrap(selectedUserID: selectedUserID)
             let serverUsers = bootstrap.users.map(\.appUser)
+            Self.logger.info("bootstrap loaded users=\(serverUsers.count, privacy: .public) assignments=\(bootstrap.assignments.count, privacy: .public)")
             users = serverUsers
             let preferredID = bootstrap.user?.id ?? selectedUserID
             if let preferredID, serverUsers.contains(where: { $0.id == preferredID }) {
@@ -154,8 +163,17 @@ final class AppUserStore {
                     assignmentCount: bootstrap.assignments.count,
                     activeAssignmentCount: activeAssignmentCount
                 )
+        } catch ServerSyncError.cancelled {
+            Self.logger.info("refreshFromServer cancelled")
+            bootstrapState = previousState
+            return .cancelled
+        } catch is CancellationError {
+            Self.logger.info("refreshFromServer cancelled by task cancellation")
+            bootstrapState = previousState
+            return .cancelled
         } catch {
             let message = error.localizedDescription
+            Self.logger.error("refreshFromServer failed: \(message, privacy: .public)")
             bootstrapState = .failed(message)
             return .failed(message)
         }

@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 struct ServerBootstrap: Decodable, Sendable {
     let user: ServerUser?
@@ -278,6 +279,7 @@ enum ServerSyncError: LocalizedError {
     case cannotConnect
     case cannotFindHost
     case secureConnectionFailed
+    case cancelled
     case httpStatus(Int)
 
     var errorDescription: String? {
@@ -298,6 +300,8 @@ enum ServerSyncError: LocalizedError {
             "Не удалось найти сервер. Проверьте SERVER_BASE_URL."
         case .secureConnectionFailed:
             "Не удалось установить защищённое соединение с сервером."
+        case .cancelled:
+            "Синхронизация отменена."
         case .httpStatus(let code):
             Self.httpStatusMessage(code)
         }
@@ -319,6 +323,7 @@ enum ServerSyncError: LocalizedError {
 
 final class ServerSyncClient {
     static let shared = ServerSyncClient()
+    private static let logger = Logger(subsystem: "com.uniweb.wordtrainer.Words-Trainer", category: "ServerSync")
 
     private enum Keys {
         static let baseURL = "server.baseURL"
@@ -411,25 +416,32 @@ final class ServerSyncClient {
         if let selectedUserID {
             request.setValue(selectedUserID.uuidString.lowercased(), forHTTPHeaderField: "X-FlashGame-User-Id")
         }
+        Self.logger.info("HTTP \(method, privacy: .public) \(endpoint.absoluteString, privacy: .public) selectedUserID=\(selectedUserID?.uuidString ?? "nil", privacy: .public)")
 
         let data: Data
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
         } catch let error as URLError {
+            Self.logger.error("HTTP \(method, privacy: .public) \(endpoint.absoluteString, privacy: .public) failed urlError=\(error.code.rawValue, privacy: .public) \(error.localizedDescription, privacy: .public)")
             throw Self.syncError(from: error)
         }
         guard let http = response as? HTTPURLResponse else {
+            Self.logger.error("HTTP \(method, privacy: .public) \(endpoint.absoluteString, privacy: .public) invalid non-HTTP response")
             throw ServerSyncError.invalidResponse
         }
         guard (200..<300).contains(http.statusCode) else {
+            Self.logger.error("HTTP \(method, privacy: .public) \(endpoint.absoluteString, privacy: .public) status=\(http.statusCode, privacy: .public)")
             throw ServerSyncError.httpStatus(http.statusCode)
         }
+        Self.logger.info("HTTP \(method, privacy: .public) \(endpoint.absoluteString, privacy: .public) status=\(http.statusCode, privacy: .public) bytes=\(data.count, privacy: .public)")
         return data
     }
 
     private static func syncError(from error: URLError) -> ServerSyncError {
         switch error.code {
+        case .cancelled:
+            .cancelled
         case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
             .networkUnavailable
         case .timedOut:
