@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct AppRootView: View {
+    @Environment(AppUserStore.self) private var userStore
+
     var body: some View {
         TabView {
             Tab("Сегодня", systemImage: "calendar") {
@@ -14,15 +16,22 @@ struct AppRootView: View {
             }
         }
         .tint(.cyan)
+        .task {
+            await userStore.refreshFromServer()
+        }
     }
 }
 
 struct TodayView: View {
+    @Environment(AppUserStore.self) private var userStore
     @State private var store: DeckStore?
+    @State private var storeUserID: UUID?
     @State private var decks: [DeckContent] = []
     @State private var statsByDeckID: [UUID: DeckStats] = [:]
+    @State private var streakDays = 0
     @State private var session: StudySession?
     @State private var sessionDeckTitle = ""
+    @State private var showUserSwitcher = false
     @State private var showTodayModes = false
     @State private var showStudy = false
     @State private var loadError: String?
@@ -45,7 +54,17 @@ struct TodayView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    TodayHeader()
+                    TodayTitleBar()
+
+                    if let selectedUser = userStore.selectedUser {
+                        TodayHeader(
+                            user: selectedUser,
+                            streakDays: streakDays,
+                            showUserSwitcher: { showUserSwitcher = true }
+                        )
+                    } else {
+                        TodayServerConnectionCard(message: userStore.bootstrapState.message)
+                    }
 
                     StudyTodayCard(
                         stats: totalStats,
@@ -81,6 +100,11 @@ struct TodayView: View {
                     StudySessionView(session: session, store: store, deckTitle: sessionDeckTitle)
                 }
             }
+            .sheet(isPresented: $showUserSwitcher) {
+                UserSwitcherSheet()
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+            }
             .overlay {
                 if let loadError {
                     DataPlaceholderView(
@@ -98,16 +122,29 @@ struct TodayView: View {
             guard !isShowing else { return }
             Task { await reload() }
         }
+        .onChange(of: userStore.selectedUserID) {
+            store = nil
+            storeUserID = nil
+            Task { await reload() }
+        }
     }
 
     private func reload() async {
         do {
+            guard let selectedUserID = userStore.selectedUserID else {
+                decks = []
+                statsByDeckID = [:]
+                streakDays = 0
+                loadError = nil
+                return
+            }
             let deckStore: DeckStore
-            if let store {
+            if let store, storeUserID == selectedUserID {
                 deckStore = store
             } else {
-                deckStore = try DeckStore()
+                deckStore = try DeckStore(userID: selectedUserID)
                 store = deckStore
+                storeUserID = selectedUserID
             }
             decks = try deckStore.allDecks()
             var nextStats: [UUID: DeckStats] = [:]
@@ -115,6 +152,7 @@ struct TodayView: View {
                 nextStats[deck.id] = try deckStore.stats(for: deck)
             }
             statsByDeckID = nextStats
+            streakDays = currentStreakDays(from: try deckStore.studyActivity(days: 90))
             loadError = nil
         } catch {
             loadError = error.localizedDescription
@@ -135,7 +173,9 @@ struct TodayView: View {
 }
 
 struct StatisticsView: View {
+    @Environment(AppUserStore.self) private var userStore
     @State private var store: DeckStore?
+    @State private var storeUserID: UUID?
     @State private var todayCount: StudyReviewCount = .zero
     @State private var weekCount: StudyReviewCount = .zero
     @State private var monthCount: StudyReviewCount = .zero
@@ -166,7 +206,7 @@ struct StatisticsView: View {
                     ActivityHeatmap(days: activity)
                     ForecastSection(days: scheduledDays)
                     WeakCardsSection(
-                        cards: Array(weakCardsPool.prefix(DeckStore.weakCardsDisplayLimit)),
+                        cards: Array(weakCardsPool.prefix(WeakCardsPractice.displayLimit)),
                         onPractice: startWeakGame
                     )
                 }
@@ -195,16 +235,32 @@ struct StatisticsView: View {
         .task {
             await reload()
         }
+        .onChange(of: userStore.selectedUserID) {
+            store = nil
+            storeUserID = nil
+            Task { await reload() }
+        }
     }
 
     private func reload() async {
         do {
+            guard let selectedUserID = userStore.selectedUserID else {
+                todayCount = .zero
+                weekCount = .zero
+                monthCount = .zero
+                activity = []
+                scheduledDays = []
+                weakCardsPool = []
+                loadError = nil
+                return
+            }
             let deckStore: DeckStore
-            if let store {
+            if let store, storeUserID == selectedUserID {
                 deckStore = store
             } else {
-                deckStore = try DeckStore()
+                deckStore = try DeckStore(userID: selectedUserID)
                 store = deckStore
+                storeUserID = selectedUserID
             }
             let calendar = Calendar.current
             let todayStart = calendar.startOfDay(for: .now)
@@ -215,7 +271,7 @@ struct StatisticsView: View {
             monthCount = try deckStore.studyReviewCount(since: monthStart)
             activity = try deckStore.studyActivity(days: 120)
             scheduledDays = try deckStore.scheduledReviewDays(days: 7)
-            weakCardsPool = try deckStore.weakCards(limit: DeckStore.weakCardsFetchLimit)
+            weakCardsPool = try deckStore.weakCards(limit: WeakCardsPractice.fetchLimit)
             loadError = nil
         } catch {
             loadError = error.localizedDescription
@@ -230,12 +286,34 @@ struct StatisticsView: View {
     }
 }
 
-private struct TodayHeader: View {
+private struct TodayTitleBar: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        ZStack {
+            Text("Сегодня")
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(LovableSurface.foreground)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 34)
+    }
+}
+
+private struct TodayHeader: View {
+    let user: AppUser
+    let streakDays: Int
+    let showUserSwitcher: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
             Text("Сегодня")
                 .font(.system(size: 40, weight: .bold))
                 .foregroundStyle(LovableSurface.foreground)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+
+            Spacer(minLength: 12)
+
+            UserAvatarButton(user: user, streakDays: streakDays, action: showUserSwitcher)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -249,6 +327,185 @@ private struct StatisticsHeader: View {
                 .foregroundStyle(LovableSurface.foreground)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct TodayServerConnectionCard: View {
+    let message: String?
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "person.crop.circle.badge.exclamationmark")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(LovableSurface.primary)
+                .frame(width: 52, height: 52)
+                .background(.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Нет пользователя")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(LovableSurface.foreground)
+                Text(message ?? "Загружаем профиль с сервера.")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(LovableSurface.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .background(.white.opacity(0.48), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(.white.opacity(0.5), lineWidth: 0.5)
+        }
+    }
+}
+
+private struct UserAvatarButton: View {
+    let user: AppUser
+    let streakDays: Int
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            UserAvatar(user: user, size: 56)
+                .overlay(alignment: .bottomTrailing) {
+                    if streakDays > 3 {
+                        StreakBadge(days: streakDays)
+                            .offset(x: 7, y: 7)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Выбрать пользователя")
+        .accessibilityValue(user.displayName)
+    }
+}
+
+private struct UserAvatar: View {
+    let user: AppUser
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            oklch(0.84, 0.14, user.accentHue),
+                            oklch(0.72, 0.18, user.accentHue + 35),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            if let url = user.avatarImageURL {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Text(user.initials)
+                            .font(.system(size: size * 0.34, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+            } else {
+                Text(user.initials)
+                    .font(.system(size: size * 0.34, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .stroke(.white.opacity(0.92), lineWidth: 2)
+        }
+        .shadow(color: oklch(0.18, 0.05, 260, 0.16), radius: 12, x: 0, y: 7)
+    }
+}
+
+private struct StreakBadge: View {
+    let days: Int
+
+    private var colors: [Color] {
+        if days > 7 {
+            [oklch(0.66, 0.24, 25), oklch(0.56, 0.24, 15)]
+        } else {
+            [oklch(0.74, 0.18, 42), oklch(0.64, 0.22, 25)]
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "flame.fill")
+                .font(.system(size: 11, weight: .black))
+            Text("\(days)")
+                .font(.system(size: 16, weight: .bold))
+                .monospacedDigit()
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 9)
+        .frame(height: 25)
+        .background(
+            LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: Capsule()
+        )
+        .overlay {
+            Capsule()
+                .stroke(.white, lineWidth: 2)
+        }
+        .shadow(color: colors.last?.opacity(0.35) ?? .clear, radius: 8, x: 0, y: 4)
+        .accessibilityLabel("Серия \(days) дней")
+    }
+}
+
+private struct UserSwitcherSheet: View {
+    @Environment(AppUserStore.self) private var userStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if userStore.users.isEmpty {
+                    ContentUnavailableView(
+                        "Пользователи не загружены",
+                        systemImage: "person.2.slash",
+                        description: Text(userStore.bootstrapState.message ?? "Нужно выполнить bootstrap с сервера.")
+                    )
+                } else {
+                    Section {
+                        ForEach(userStore.users) { user in
+                            Button {
+                                userStore.select(user)
+                                dismiss()
+                            } label: {
+                                HStack(spacing: 12) {
+                                    UserAvatar(user: user, size: 44)
+                                    Text(user.displayName)
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    if user.id == userStore.selectedUserID {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 20, weight: .semibold))
+                                            .foregroundStyle(LovableSurface.primary)
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Пользователь")
+            .navigationBarTitleDisplayMode(.inline)
+        }
     }
 }
 
@@ -419,21 +676,7 @@ private struct QueueSummaryCard: View {
 
     @ViewBuilder private var deckOrDateAvatar: some View {
         if let deck {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [oklch(0.8, 0.12, 280), oklch(0.75, 0.15, 310), oklch(0.7, 0.2, 340)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 56, height: 56)
-                .overlay {
-                    Image(systemName: deckSymbol(deck.avatarSystemName))
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-                .shadow(color: oklch(0.5, 0.2, 320, 0.4), radius: 10, x: 0, y: 8)
+            DeckAvatarView(deck: deck, size: 56)
         } else {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(
@@ -802,21 +1045,7 @@ private struct TodayDeckCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [oklch(0.8, 0.12, 280), oklch(0.75, 0.15, 310), oklch(0.7, 0.2, 340)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 56, height: 56)
-                    .overlay {
-                        Image(systemName: deckSymbol(deck.avatarSystemName))
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                    .shadow(color: oklch(0.5, 0.2, 320, 0.45), radius: 9, x: 0, y: 8)
+                DeckAvatarView(deck: deck, size: 56)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(deck.title)
@@ -845,6 +1074,45 @@ private struct TodayDeckCard: View {
         }
         .padding(16)
         .lovablePanel(cornerRadius: 24)
+    }
+}
+
+private struct DeckAvatarView: View {
+    let deck: DeckContent
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [oklch(0.8, 0.12, 280), oklch(0.75, 0.15, 310), oklch(0.7, 0.2, 340)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            if let url = deck.avatarImageURL {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        Image(systemName: deckSymbol(deck.avatarSystemName))
+                            .font(.system(size: size * 0.38, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+            } else {
+                Image(systemName: deckSymbol(deck.avatarSystemName))
+                    .font(.system(size: size * 0.38, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+        .shadow(color: oklch(0.5, 0.2, 320, 0.45), radius: 9, x: 0, y: 8)
     }
 }
 
@@ -986,6 +1254,33 @@ private struct WeakCardsSection: View {
 
 private func shortDay(_ dayKey: String) -> String {
     String(dayKey.suffix(5))
+}
+
+private func currentStreakDays(from activity: [StudyActivityDay]) -> Int {
+    let activeDayKeys = Set(activity.filter { $0.reviewedCount > 0 }.map(\.dayKey))
+    guard !activeDayKeys.isEmpty else { return 0 }
+
+    let calendar = Calendar.current
+    let today = calendar.startOfDay(for: .now)
+    let todayKey = DeckDailyUsage.dayKey(for: today, calendar: calendar)
+    let startDate: Date
+    if activeDayKeys.contains(todayKey) {
+        startDate = today
+    } else if let yesterday = calendar.date(byAdding: .day, value: -1, to: today),
+              activeDayKeys.contains(DeckDailyUsage.dayKey(for: yesterday, calendar: calendar)) {
+        startDate = yesterday
+    } else {
+        return 0
+    }
+
+    var streak = 0
+    var date = startDate
+    while activeDayKeys.contains(DeckDailyUsage.dayKey(for: date, calendar: calendar)) {
+        streak += 1
+        guard let previous = calendar.date(byAdding: .day, value: -1, to: date) else { break }
+        date = previous
+    }
+    return streak
 }
 
 private func cardsLabel(_ count: Int) -> String {

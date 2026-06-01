@@ -1,6 +1,25 @@
 import Foundation
 import FSRS
 
+enum DeckStoreError: LocalizedError {
+    case missingSelectedUser
+
+    var errorDescription: String? {
+        switch self {
+        case .missingSelectedUser:
+            "Пользователь ещё не загружен с сервера."
+        }
+    }
+}
+
+enum WeakCardsPractice {
+    /// Синтетический id для игры «Забытые слова» — у неё нет реальной колоды.
+    static let deckID = UUID(uuidString: "00000000-0000-0000-0000-0000DEADBEEF")!
+    static let fetchLimit = 30
+    static let displayLimit = 10
+    static let gamePairLimit = 12
+}
+
 @MainActor
 @Observable
 final class DeckStore {
@@ -12,7 +31,14 @@ final class DeckStore {
     }
 
     convenience init() throws {
-        try self.init(database: ContentDatabase())
+        guard let selectedUserID = AppUserStore.shared.selectedUserID else {
+            throw DeckStoreError.missingSelectedUser
+        }
+        try self.init(database: ContentDatabase(userID: selectedUserID))
+    }
+
+    convenience init(userID: UUID) throws {
+        try self.init(database: ContentDatabase(userID: userID))
     }
 
     static var databaseExists: Bool { ContentDatabase.databaseExists() }
@@ -38,14 +64,7 @@ final class DeckStore {
         try database.studyReviewCount(since: startDate)
     }
 
-    /// Синтетический id для игры «Забытые слова» — у неё нет реальной колоды.
-    static let weakCardsPracticeDeckID = UUID(uuidString: "00000000-0000-0000-0000-0000DEADBEEF")!
-
-    static let weakCardsFetchLimit = 30
-    static let weakCardsDisplayLimit = 10
-    static let weakCardsGamePairLimit = 12
-
-    func weakCards(limit: Int = weakCardsFetchLimit) throws -> [WeakCardStat] {
+    func weakCards(limit: Int = 30) throws -> [WeakCardStat] {
         try database.weakCards(limit: limit)
     }
 
@@ -53,7 +72,7 @@ final class DeckStore {
     /// Чистая практика: ничего не сохраняем (`savesProgress: false`).
     func weakCardsMatchingSession(
         from weakStats: [WeakCardStat],
-        limit: Int = weakCardsGamePairLimit
+        limit: Int = 12
     ) throws -> StudySession? {
         let weak = Array(weakStats.shuffled().prefix(limit))
         guard !weak.isEmpty else { return nil }
@@ -69,7 +88,7 @@ final class DeckStore {
             StudyQueueItem(card: card, progress: CardProgress.newCard(cardID: card.id))
         }
         return StudySession(
-            deckID: Self.weakCardsPracticeDeckID,
+            deckID: WeakCardsPractice.deckID,
             mode: .matching,
             queue: queue,
             deckCards: cards,

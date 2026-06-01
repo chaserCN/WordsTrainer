@@ -7,8 +7,10 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 /// Read/write access to `Documents/Data/flashgame.db` (content + study progress).
 final class ContentDatabase {
     private var db: OpaquePointer?
+    private let userID: UUID
 
-    init() throws {
+    init(userID: UUID = AppUser.defaultID) throws {
+        self.userID = userID
         _ = try AppDataPaths.dataDirectoryURL()
         let path = try AppDataPaths.databaseURL().path
         guard sqlite3_open(path, &db) == SQLITE_OK, db != nil else {
@@ -69,14 +71,15 @@ final class ContentDatabase {
         let sql = """
         SELECT card_id, fsrs_data, updated_at
         FROM card_progress
-        WHERE deck_id = ?
+        WHERE user_id = ? AND deck_id = ?
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
         defer { sqlite3_finalize(statement) }
-        try bind(statement, index: 1, uuid: deckID)
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, uuid: deckID)
 
         var map: [UUID: CardProgress] = [:]
         while sqlite3_step(statement) == SQLITE_ROW {
@@ -94,15 +97,16 @@ final class ContentDatabase {
     func dailyUsage(deckID: UUID, dayKey: String) throws -> DeckDailyUsage? {
         let sql = """
         SELECT new_cards_studied FROM deck_daily_usage
-        WHERE deck_id = ? AND day_key = ?
+        WHERE user_id = ? AND deck_id = ? AND day_key = ?
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
         defer { sqlite3_finalize(statement) }
-        try bind(statement, index: 1, uuid: deckID)
-        try bind(statement, index: 2, text: dayKey)
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, uuid: deckID)
+        try bind(statement, index: 3, text: dayKey)
 
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
         let count = Int(sqlite3_column_int(statement, 0))
@@ -112,38 +116,59 @@ final class ContentDatabase {
     func saveProgress(deckID: UUID, progress: CardProgress) throws {
         let fsrsData = try JSONEncoder().encode(progress.fsrsCard)
         let sql = """
-        INSERT INTO card_progress (card_id, deck_id, fsrs_data, updated_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(card_id) DO UPDATE SET
+        INSERT INTO card_progress (user_id, card_id, deck_id, fsrs_data, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, card_id) DO UPDATE SET
             deck_id = excluded.deck_id,
             fsrs_data = excluded.fsrs_data,
             updated_at = excluded.updated_at
         """
-        try exec(
-            sql,
-            uuid: progress.cardID,
-            uuid2: deckID,
-            blob: fsrsData,
-            double: progress.updatedAt.timeIntervalSince1970
-        )
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, uuid: progress.cardID)
+        try bind(statement, index: 3, uuid: deckID)
+        try fsrsData.withUnsafeBytes { raw in
+            guard sqlite3_bind_blob(statement, 4, raw.baseAddress, Int32(fsrsData.count), sqliteTransient) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+        }
+        guard sqlite3_bind_double(statement, 5, progress.updatedAt.timeIntervalSince1970) == SQLITE_OK,
+              sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
+        }
     }
 
     func saveDailyUsage(deckID: UUID, usage: DeckDailyUsage) throws {
         let sql = """
-        INSERT INTO deck_daily_usage (deck_id, day_key, new_cards_studied)
-        VALUES (?, ?, ?)
-        ON CONFLICT(deck_id, day_key) DO UPDATE SET
+        INSERT INTO deck_daily_usage (user_id, deck_id, day_key, new_cards_studied)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(user_id, deck_id, day_key) DO UPDATE SET
             new_cards_studied = excluded.new_cards_studied
         """
-        try exec(sql, uuid: deckID, text: usage.dayKey, int: usage.newCardsStudied)
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, uuid: deckID)
+        try bind(statement, index: 3, text: usage.dayKey)
+        guard sqlite3_bind_int(statement, 4, Int32(usage.newCardsStudied)) == SQLITE_OK,
+              sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
+        }
     }
 
     func saveStudyReview(_ event: StudyReviewEvent) throws {
         let sql = """
         INSERT INTO study_reviews (
-            id, card_id, deck_id, mode, outcome, reviewed_at,
+            id, user_id, card_id, deck_id, mode, outcome, reviewed_at,
             duration_ms, was_new, previous_state, new_state
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -151,27 +176,28 @@ final class ContentDatabase {
         }
         defer { sqlite3_finalize(statement) }
         try bind(statement, index: 1, uuid: event.id)
-        try bind(statement, index: 2, uuid: event.cardID)
-        try bind(statement, index: 3, uuid: event.deckID)
-        try bind(statement, index: 4, text: event.mode.rawValue)
-        try bind(statement, index: 5, text: event.outcome.databaseValue)
-        guard sqlite3_bind_double(statement, 6, event.reviewedAt.timeIntervalSince1970) == SQLITE_OK else {
+        try bind(statement, index: 2, uuid: userID)
+        try bind(statement, index: 3, uuid: event.cardID)
+        try bind(statement, index: 4, uuid: event.deckID)
+        try bind(statement, index: 5, text: event.mode.rawValue)
+        try bind(statement, index: 6, text: event.outcome.databaseValue)
+        guard sqlite3_bind_double(statement, 7, event.reviewedAt.timeIntervalSince1970) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
         if let durationMS = event.durationMS {
-            guard sqlite3_bind_int(statement, 7, Int32(durationMS)) == SQLITE_OK else {
+            guard sqlite3_bind_int(statement, 8, Int32(durationMS)) == SQLITE_OK else {
                 throw ContentDatabaseError.queryFailed
             }
         } else {
-            guard sqlite3_bind_null(statement, 7) == SQLITE_OK else {
+            guard sqlite3_bind_null(statement, 8) == SQLITE_OK else {
                 throw ContentDatabaseError.queryFailed
             }
         }
-        guard sqlite3_bind_int(statement, 8, event.wasNew ? 1 : 0) == SQLITE_OK else {
+        guard sqlite3_bind_int(statement, 9, event.wasNew ? 1 : 0) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
-        try bind(statement, index: 9, text: event.previousState)
-        try bind(statement, index: 10, text: event.newState)
+        try bind(statement, index: 10, text: event.previousState)
+        try bind(statement, index: 11, text: event.newState)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw ContentDatabaseError.queryFailed
         }
@@ -184,7 +210,7 @@ final class ContentDatabase {
             COUNT(*),
             SUM(CASE WHEN outcome IN ('remembered', 'correct') THEN 1 ELSE 0 END)
         FROM study_reviews
-        WHERE reviewed_at >= ?
+        WHERE user_id = ? AND reviewed_at >= ?
         GROUP BY day_key
         ORDER BY day_key
         """
@@ -193,7 +219,8 @@ final class ContentDatabase {
             throw ContentDatabaseError.queryFailed
         }
         defer { sqlite3_finalize(statement) }
-        guard sqlite3_bind_double(statement, 1, startDate.timeIntervalSince1970) == SQLITE_OK else {
+        try bind(statement, index: 1, uuid: userID)
+        guard sqlite3_bind_double(statement, 2, startDate.timeIntervalSince1970) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
 
@@ -217,14 +244,15 @@ final class ContentDatabase {
             COUNT(*),
             SUM(CASE WHEN outcome IN ('remembered', 'correct') THEN 1 ELSE 0 END)
         FROM study_reviews
-        WHERE reviewed_at >= ?
+        WHERE user_id = ? AND reviewed_at >= ?
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
         defer { sqlite3_finalize(statement) }
-        guard sqlite3_bind_double(statement, 1, startDate.timeIntervalSince1970) == SQLITE_OK else {
+        try bind(statement, index: 1, uuid: userID)
+        guard sqlite3_bind_double(statement, 2, startDate.timeIntervalSince1970) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
         guard sqlite3_step(statement) == SQLITE_ROW else { return .zero }
@@ -247,7 +275,7 @@ final class ContentDatabase {
         FROM study_reviews
         JOIN cards ON cards.id = study_reviews.card_id
         JOIN decks ON decks.id = study_reviews.deck_id
-        WHERE cards.status = 'active' AND decks.status = 'active'
+        WHERE study_reviews.user_id = ? AND cards.status = 'active' AND decks.status = 'active'
         GROUP BY cards.id, cards.deck_id, cards.display_word, cards.translation
         HAVING failed_count > 0
         ORDER BY failed_count DESC, CAST(failed_count AS REAL) / reviewed_count DESC, last_failed_at DESC
@@ -258,7 +286,8 @@ final class ContentDatabase {
             throw ContentDatabaseError.queryFailed
         }
         defer { sqlite3_finalize(statement) }
-        guard sqlite3_bind_int(statement, 1, Int32(limit)) == SQLITE_OK else {
+        try bind(statement, index: 1, uuid: userID)
+        guard sqlite3_bind_int(statement, 2, Int32(limit)) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
 
@@ -293,14 +322,15 @@ final class ContentDatabase {
         let sql = """
         SELECT best_duration_seconds, pair_count, achieved_at
         FROM deck_matching_records
-        WHERE deck_id = ?
+        WHERE user_id = ? AND deck_id = ?
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
         defer { sqlite3_finalize(statement) }
-        try bind(statement, index: 1, uuid: deckID)
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, uuid: deckID)
 
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
         return DeckMatchingRecord(
@@ -313,9 +343,9 @@ final class ContentDatabase {
 
     func saveMatchingRecord(_ record: DeckMatchingRecord) throws {
         let sql = """
-        INSERT INTO deck_matching_records (deck_id, best_duration_seconds, pair_count, achieved_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(deck_id) DO UPDATE SET
+        INSERT INTO deck_matching_records (user_id, deck_id, best_duration_seconds, pair_count, achieved_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, deck_id) DO UPDATE SET
             best_duration_seconds = excluded.best_duration_seconds,
             pair_count = excluded.pair_count,
             achieved_at = excluded.achieved_at
@@ -325,14 +355,15 @@ final class ContentDatabase {
             throw ContentDatabaseError.queryFailed
         }
         defer { sqlite3_finalize(statement) }
-        try bind(statement, index: 1, uuid: record.deckID)
-        guard sqlite3_bind_double(statement, 2, record.bestDuration) == SQLITE_OK else {
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, uuid: record.deckID)
+        guard sqlite3_bind_double(statement, 3, record.bestDuration) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
-        guard sqlite3_bind_int(statement, 3, Int32(record.pairCount)) == SQLITE_OK else {
+        guard sqlite3_bind_int(statement, 4, Int32(record.pairCount)) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
-        guard sqlite3_bind_double(statement, 4, record.achievedAt.timeIntervalSince1970) == SQLITE_OK else {
+        guard sqlite3_bind_double(statement, 5, record.achievedAt.timeIntervalSince1970) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
         guard sqlite3_step(statement) == SQLITE_DONE else {
@@ -419,29 +450,35 @@ final class ContentDatabase {
         );
         CREATE INDEX IF NOT EXISTS idx_example_distractors_example_id ON example_distractors(example_id);
         CREATE TABLE IF NOT EXISTS card_progress (
-            card_id TEXT PRIMARY KEY NOT NULL,
+            user_id TEXT NOT NULL,
+            card_id TEXT NOT NULL,
             deck_id TEXT NOT NULL,
             fsrs_data BLOB NOT NULL,
             updated_at REAL NOT NULL,
+            PRIMARY KEY (user_id, card_id),
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
         CREATE INDEX IF NOT EXISTS idx_card_progress_deck_id ON card_progress(deck_id);
         CREATE TABLE IF NOT EXISTS deck_daily_usage (
+            user_id TEXT NOT NULL,
             deck_id TEXT NOT NULL,
             day_key TEXT NOT NULL,
             new_cards_studied INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (deck_id, day_key),
+            PRIMARY KEY (user_id, deck_id, day_key),
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
         CREATE TABLE IF NOT EXISTS deck_matching_records (
-            deck_id TEXT PRIMARY KEY NOT NULL,
+            user_id TEXT NOT NULL,
+            deck_id TEXT NOT NULL,
             best_duration_seconds REAL NOT NULL,
             pair_count INTEGER NOT NULL,
             achieved_at REAL NOT NULL,
+            PRIMARY KEY (user_id, deck_id),
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
         CREATE TABLE IF NOT EXISTS study_reviews (
             id TEXT PRIMARY KEY NOT NULL,
+            user_id TEXT NOT NULL,
             card_id TEXT NOT NULL,
             deck_id TEXT NOT NULL,
             mode TEXT NOT NULL,
@@ -466,6 +503,96 @@ final class ContentDatabase {
         try addColumnIfMissing(table: "cards", column: "audio_word_media_id", definition: "TEXT")
         try addColumnIfMissing(table: "card_examples", column: "image_media_id", definition: "TEXT")
         try addColumnIfMissing(table: "card_examples", column: "audio_example_media_id", definition: "TEXT")
+        try migrateUserScopedTablesIfNeeded()
+    }
+
+    private func migrateUserScopedTablesIfNeeded() throws {
+        let defaultUserID = AppUser.defaultID.databaseString
+        if try !hasColumn("user_id", inTable: "card_progress") {
+            try executeMigrationStatements([
+                "ALTER TABLE card_progress RENAME TO card_progress_legacy",
+                """
+                CREATE TABLE card_progress (
+                    user_id TEXT NOT NULL,
+                    card_id TEXT NOT NULL,
+                    deck_id TEXT NOT NULL,
+                    fsrs_data BLOB NOT NULL,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (user_id, card_id),
+                    FOREIGN KEY (deck_id) REFERENCES decks(id)
+                )
+                """,
+                """
+                INSERT INTO card_progress (user_id, card_id, deck_id, fsrs_data, updated_at)
+                SELECT '\(defaultUserID)', card_id, deck_id, fsrs_data, updated_at
+                FROM card_progress_legacy
+                """,
+                "DROP TABLE card_progress_legacy",
+                "CREATE INDEX IF NOT EXISTS idx_card_progress_deck_id ON card_progress(deck_id)",
+            ])
+        }
+
+        if try !hasColumn("user_id", inTable: "deck_daily_usage") {
+            try executeMigrationStatements([
+                "ALTER TABLE deck_daily_usage RENAME TO deck_daily_usage_legacy",
+                """
+                CREATE TABLE deck_daily_usage (
+                    user_id TEXT NOT NULL,
+                    deck_id TEXT NOT NULL,
+                    day_key TEXT NOT NULL,
+                    new_cards_studied INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (user_id, deck_id, day_key),
+                    FOREIGN KEY (deck_id) REFERENCES decks(id)
+                )
+                """,
+                """
+                INSERT INTO deck_daily_usage (user_id, deck_id, day_key, new_cards_studied)
+                SELECT '\(defaultUserID)', deck_id, day_key, new_cards_studied
+                FROM deck_daily_usage_legacy
+                """,
+                "DROP TABLE deck_daily_usage_legacy",
+            ])
+        }
+
+        if try !hasColumn("user_id", inTable: "deck_matching_records") {
+            try executeMigrationStatements([
+                "ALTER TABLE deck_matching_records RENAME TO deck_matching_records_legacy",
+                """
+                CREATE TABLE deck_matching_records (
+                    user_id TEXT NOT NULL,
+                    deck_id TEXT NOT NULL,
+                    best_duration_seconds REAL NOT NULL,
+                    pair_count INTEGER NOT NULL,
+                    achieved_at REAL NOT NULL,
+                    PRIMARY KEY (user_id, deck_id),
+                    FOREIGN KEY (deck_id) REFERENCES decks(id)
+                )
+                """,
+                """
+                INSERT INTO deck_matching_records (user_id, deck_id, best_duration_seconds, pair_count, achieved_at)
+                SELECT '\(defaultUserID)', deck_id, best_duration_seconds, pair_count, achieved_at
+                FROM deck_matching_records_legacy
+                """,
+                "DROP TABLE deck_matching_records_legacy",
+            ])
+        }
+
+        try addColumnIfMissing(
+            table: "study_reviews",
+            column: "user_id",
+            definition: "TEXT NOT NULL DEFAULT '\(defaultUserID)'"
+        )
+        try executeMigrationStatements([
+            "CREATE INDEX IF NOT EXISTS idx_study_reviews_user_reviewed ON study_reviews(user_id, reviewed_at)",
+        ])
+    }
+
+    private func executeMigrationStatements(_ statements: [String]) throws {
+        for sql in statements {
+            guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.migrationFailed
+            }
+        }
     }
 
     private func addColumnIfMissing(table: String, column: String, definition: String) throws {
@@ -509,11 +636,15 @@ final class ContentDatabase {
             "UPDATE example_distractors SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
             "UPDATE example_distractors SET example_id = lower(example_id) WHERE example_id GLOB '*[A-Z]*'",
             "UPDATE example_distractors SET source_card_id = lower(source_card_id) WHERE source_card_id GLOB '*[A-Z]*'",
+            "UPDATE card_progress SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
             "UPDATE card_progress SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
             "UPDATE card_progress SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
+            "UPDATE deck_daily_usage SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
             "UPDATE deck_daily_usage SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
+            "UPDATE deck_matching_records SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
             "UPDATE deck_matching_records SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
             "UPDATE study_reviews SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
+            "UPDATE study_reviews SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
             "UPDATE study_reviews SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
             "UPDATE study_reviews SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
         ]

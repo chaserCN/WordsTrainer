@@ -1,13 +1,17 @@
 import SwiftUI
 
 struct DeckListView: View {
+    @Environment(AppUserStore.self) private var userStore
     @State private var decks: [DeckContent] = []
     @State private var store: DeckStore?
+    @State private var storeUserID: UUID?
     @State private var loadError: String?
 
     var body: some View {
         NavigationStack {
             ZStack {
+                LovableBackground(variant: .decks)
+
                 if let loadError {
                     DataPlaceholderView(
                         title: "Ошибка",
@@ -44,11 +48,16 @@ struct DeckListView: View {
                     }
                 }
             }
-            .background { LovableBackground(variant: .decks) }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .toolbar(.hidden, for: .navigationBar)
         }
         .task {
             await bootstrap()
+        }
+        .onChange(of: userStore.selectedUserID) {
+            store = nil
+            storeUserID = nil
+            Task { await bootstrap() }
         }
     }
 
@@ -71,9 +80,18 @@ struct DeckListView: View {
 
     private func bootstrap() async {
         do {
-            let deckStore = try DeckStore()
+            guard let selectedUserID = userStore.selectedUserID else {
+                decks = []
+                store = nil
+                storeUserID = nil
+                loadError = nil
+                return
+            }
+            let deckStore = try DeckStore(userID: selectedUserID)
+            storeUserID = selectedUserID
             store = deckStore
             decks = try deckStore.allDecks()
+            loadError = nil
         } catch {
             loadError = error.localizedDescription
         }
