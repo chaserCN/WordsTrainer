@@ -1,7 +1,7 @@
 import SwiftUI
 
 let studyCardShape = RoundedRectangle(cornerRadius: 24, style: .continuous)
-private let studyActionShape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+private let studyActionShape = RoundedRectangle(cornerRadius: 16, style: .continuous)
 
 struct RecallOutcomeButton: View {
     let title: String
@@ -14,23 +14,23 @@ struct RecallOutcomeButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 10) {
+            HStack(spacing: 10) {
                 Image(systemName: systemImage)
-                    .font(.subheadline.weight(.bold))
+                    .font(.system(size: 15, weight: .heavy))
                     .foregroundStyle(iconColor)
-                    .frame(width: 34, height: 34)
+                    .frame(width: 28, height: 28)
                     .background(Circle().fill(iconBackground))
 
                 Text(title)
-                    .font(.headline.weight(.semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(titleColor)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, verticalPadding)
             .padding(.horizontal, 10)
             .background(studyActionShape.fill(cardFill))
-            .overlay(studyActionShape.strokeBorder(MatchPalette.shadow.opacity(0.08), lineWidth: 0.5))
-            .shadow(color: MatchPalette.shadow.opacity(0.10), radius: 8, x: 0, y: 4)
+            .overlay(studyActionShape.strokeBorder(.white.opacity(0.7), lineWidth: 0.5))
+            .shadow(color: MatchPalette.shadow.opacity(0.12), radius: 10, x: 0, y: 6)
         }
         .buttonStyle(.plain)
     }
@@ -90,8 +90,19 @@ struct StudyProgressHeader: View {
         max(0, totalCount - remainingCount)
     }
 
+    private var currentIndex: Int {
+        guard totalCount > 0 else { return 0 }
+        return min(completedCount + 1, totalCount)
+    }
+
     var body: some View {
-        StudySessionProgressBar(completed: completedCount, total: totalCount)
+        HStack(spacing: 12) {
+            StudySessionProgressBar(completed: completedCount, total: totalCount)
+            Text("\(currentIndex) / \(totalCount)")
+                .font(.system(size: 13, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(oklch(0.55, 0.03, 260))
+        }
     }
 }
 

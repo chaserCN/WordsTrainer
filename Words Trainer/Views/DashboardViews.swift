@@ -426,11 +426,9 @@ private struct QueueSummaryCard: View {
                 )
                 .frame(width: 56, height: 56)
                 .overlay {
-                    if let symbol = deck.avatarSystemName {
-                        Image(systemName: symbol)
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
+                    Image(systemName: deckSymbol(deck.avatarSystemName))
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(.white)
                 }
                 .shadow(color: oklch(0.5, 0.2, 320, 0.4), radius: 10, x: 0, y: 8)
         } else {
@@ -811,11 +809,9 @@ private struct TodayDeckCard: View {
                     )
                     .frame(width: 56, height: 56)
                     .overlay {
-                        if let symbol = deck.avatarSystemName {
-                            Image(systemName: symbol)
-                                .font(.system(size: 22, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
+                        Image(systemName: deckSymbol(deck.avatarSystemName))
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(.white)
                     }
                     .shadow(color: oklch(0.5, 0.2, 320, 0.45), radius: 9, x: 0, y: 8)
 

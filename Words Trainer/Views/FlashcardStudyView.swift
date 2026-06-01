@@ -74,7 +74,7 @@ struct FlashcardStudyView: View {
         ReviewOutcomeControls(
             forgotTitle: "Снова",
             rememberedTitle: "Хорошо",
-            verticalPadding: 20,
+            verticalPadding: 14,
             isEnabled: isAnswerEnabled,
             onAnswer: answer
         )
@@ -128,7 +128,12 @@ struct FlashcardStudyView: View {
         }
         .background(cardHeightMeasurementViews(baseHeight: baseHeight))
         .frame(maxWidth: .infinity, alignment: .top)
-        .background(flashcardShape.fill(cardBackground))
+        .background(
+            flashcardShape
+                .fill(cardGradient)
+                .overlay { cardGlow }
+                .clipShape(flashcardShape)
+        )
         .overlay(flashcardShape.strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
         .rotation3DEffect(
             .degrees(cardRotation),
@@ -140,8 +145,34 @@ struct FlashcardStudyView: View {
         .shadow(color: MatchPalette.shadow.opacity(0.08), radius: 4, x: 0, y: 2)
     }
 
-    private var cardBackground: Color {
-        isFlipped ? FlashcardPalette.backCardBackground : FlashcardPalette.frontCardBackground
+    /// Передняя сторона — холодный сине-фиолетовый, обратная — мягкая сирень (как в Lovable).
+    private var cardGradient: LinearGradient {
+        let stops: [Gradient.Stop] = isFlipped
+            ? [
+                .init(color: oklch(0.26, 0.05, 300), location: 0),
+                .init(color: oklch(0.19, 0.05, 300), location: 0.6),
+                .init(color: oklch(0.15, 0.06, 305), location: 1),
+            ]
+            : [
+                .init(color: oklch(0.25, 0.04, 265), location: 0),
+                .init(color: oklch(0.19, 0.04, 265), location: 0.6),
+                .init(color: oklch(0.15, 0.05, 270), location: 1),
+            ]
+        return LinearGradient(gradient: Gradient(stops: stops), startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    /// Цвет точки-индикатора перед словом: синий спереди, сиреневый на обороте.
+    private var wordDotColor: Color {
+        isFlipped ? oklch(0.72, 0.14, 300) : oklch(0.65, 0.2, 245)
+    }
+
+    /// Мягкое цветное свечение в углу карты.
+    private var cardGlow: some View {
+        Circle()
+            .fill(isFlipped ? oklch(0.65, 0.18, 300, 0.22) : oklch(0.7, 0.18, 245, 0.25))
+            .frame(width: 200, height: 200)
+            .blur(radius: 55)
+            .offset(x: isFlipped ? -70 : 80, y: isFlipped ? 90 : -70)
     }
 
     private func cardHeightMeasurementViews(baseHeight: CGFloat) -> some View {
@@ -272,13 +303,20 @@ struct FlashcardStudyView: View {
     @ViewBuilder
     private func flipLabelContent(isBack: Bool, layout: CardBodyLayout) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(card.word)
-                .font(.title2.bold())
-                .foregroundStyle(FlashcardPalette.primaryText)
-                .lineLimit(nil)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.trailing, hasWordAudio ? 40 : 0)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Circle()
+                    .fill(wordDotColor)
+                    .frame(width: 10, height: 10)
+                    .shadow(color: wordDotColor.opacity(0.7), radius: 5)
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                Text(card.word)
+                    .font(.title2.bold())
+                    .foregroundStyle(FlashcardPalette.primaryText)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.trailing, hasWordAudio ? 40 : 0)
+            }
 
             if isBack {
                 Text(card.translation)
@@ -449,15 +487,13 @@ private struct ExpandedFlashcardHeightKey: PreferenceKey {
 }
 
 private enum FlashcardPalette {
-    static let frontCardBackground = oklch(0.27, 0.014, 260)
-    static let backCardBackground = oklch(0.32, 0.016, 260)
     static let primaryText = Color.white
     static let secondaryText = oklch(0.92, 0.01, 260)
     static let mutedText = oklch(0.72, 0.015, 260)
-    static let audioTint = oklch(0.72, 0.14, 250)
+    static let audioTint = oklch(0.78, 0.18, 245)
 }
 
-private let flashcardShape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+private let flashcardShape = RoundedRectangle(cornerRadius: 28, style: .continuous)
 
 private extension String {
     var nonEmpty: String? {

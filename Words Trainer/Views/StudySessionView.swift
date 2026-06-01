@@ -93,10 +93,12 @@ struct StudySessionView: View {
             if session.mode == .matching {
                 ToolbarItem(placement: .topBarTrailing) {
                     MatchingSettingsMenu()
+                        .tint(navbarButtonTint)
                 }
             } else if session.mode == .flashcards {
                 ToolbarItem(placement: .topBarTrailing) {
                     SoundToggleButton()
+                        .tint(navbarButtonTint)
                 }
             }
         }
@@ -134,6 +136,11 @@ struct StudySessionView: View {
             return beatRecord ? MatchPalette.accent : MatchPalette.foreground
         }
         return .white
+    }
+
+    /// Кнопки навбара — единообразно тёмные на светлой теме (как договаривались).
+    private var navbarButtonTint: Color {
+        usesLightStudyTheme ? LovableSurface.foreground : .white
     }
 
     private var usesLightStudyTheme: Bool {

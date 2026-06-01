@@ -1,4 +1,12 @@
 import SwiftUI
+import UIKit
+
+/// Возвращает имя SF Symbol, если он есть в системе, иначе fallback.
+/// Защита от устаревших/невалидных имён в данных колод (например «character.book.fill»).
+func deckSymbol(_ name: String?, fallback: String = "books.vertical.fill") -> String {
+    guard let name, !name.isEmpty, UIImage(systemName: name) != nil else { return fallback }
+    return name
+}
 
 struct AppBackground: View {
     var body: some View {
