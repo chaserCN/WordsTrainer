@@ -134,7 +134,8 @@ final class DeckStore {
         )
     }
 
-    private func startTodaySession(deck: DeckContent, mode: StudyMode) throws -> StudySession {
+    /// Сессия только из карт, попавших в очередь на сегодня (вкладка «Сегодня»).
+    func startTodaySession(deck: DeckContent, mode: StudyMode) throws -> StudySession {
         let studyCards = deck.isActive ? deck.activeCards : []
         let progress = try database.progressMap(deckID: deck.id)
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
@@ -143,6 +144,29 @@ final class DeckStore {
             progressByCardID: progress,
             dailyUsage: usage
         )
+
+        return StudySession(
+            deckID: deck.id,
+            mode: mode,
+            queue: queue,
+            deckCards: studyCards,
+            dailyUsage: usage,
+            engine: engine
+        )
+    }
+
+    /// Сессия из всех активных карт колоды независимо от расписания (вкладка «Колоды»).
+    func startAllCardsSession(deck: DeckContent, mode: StudyMode) throws -> StudySession {
+        let studyCards = deck.isActive ? deck.activeCards : []
+        let progress = try database.progressMap(deckID: deck.id)
+        let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
+        let items = studyCards.map { card in
+            StudyQueueItem(
+                card: card,
+                progress: progress[card.id] ?? CardProgress.newCard(cardID: card.id)
+            )
+        }
+        let queue = (mode == .recall || mode == .clozeMultipleChoice) ? items.shuffled() : items
 
         return StudySession(
             deckID: deck.id,

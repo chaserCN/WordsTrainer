@@ -8,8 +8,6 @@ struct DeckListView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppBackground()
-
                 if let loadError {
                     DataPlaceholderView(
                         title: "Ошибка",
@@ -32,7 +30,7 @@ struct DeckListView: View {
                                     NavigationLink {
                                         DeckDetailView(deck: $deck, store: store)
                                     } label: {
-                                        DeckCardView(deck: deck, store: store)
+                                        LovableDeckCard(deck: deck, store: store)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -54,20 +52,20 @@ struct DeckListView: View {
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.white)
                                     .padding(16)
-                                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                                    .lovablePanel(cornerRadius: 20)
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 20)
-                        .padding(.top, 8)
+                        .padding(.top, 28)
                         .padding(.bottom, 32)
                     }
                 }
             }
-            .navigationTitle("Колоды")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .background { LovableBackground(variant: .decks) }
+            .toolbar(.hidden, for: .navigationBar)
         }
         .task {
             await bootstrap()
@@ -117,8 +115,6 @@ struct InactiveDecksView: View {
 
     var body: some View {
         ZStack {
-            AppBackground()
-
             if inactiveDecks.isEmpty {
                 DataPlaceholderView(
                     title: "Нет отключенных колод",
@@ -138,9 +134,10 @@ struct InactiveDecksView: View {
                 }
             }
         }
+        .background { LovableBackground(variant: .decks) }
         .navigationTitle("Отключенные")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(.light, for: .navigationBar)
         .alert("Не удалось включить колоду", isPresented: statusErrorBinding) {
             Button("ОК", role: .cancel) {
                 statusError = nil
@@ -192,17 +189,13 @@ private struct InactiveDeckRow: View {
 
             Button("Включить", action: action)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.green)
+                .foregroundStyle(MatchPalette.successText)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(.white.opacity(0.1), in: Capsule())
+                .background(.white.opacity(0.12), in: Capsule())
         }
         .padding(16)
-        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(.white.opacity(0.08), lineWidth: 1)
-        }
+        .lovablePanel(cornerRadius: 22)
     }
 }
 
@@ -215,15 +208,15 @@ struct DataPlaceholderView: View {
         VStack(spacing: 16) {
             Image(systemName: systemImage)
                 .font(.system(size: 48, weight: .light))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(LovableSurface.muted)
 
             Text(title)
                 .font(.title2.bold())
-                .foregroundStyle(.white)
+                .foregroundStyle(LovableSurface.foreground)
 
             Text(message)
                 .font(.body)
-                .foregroundStyle(.white.opacity(0.68))
+                .foregroundStyle(LovableSurface.muted)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }
@@ -235,20 +228,19 @@ private struct DeckListHeader: View {
     let deckCount: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("Колоды")
-                .font(.largeTitle.bold())
-                .foregroundStyle(.white)
-            Text("Выбери активную колоду или верни отключенную в обучение.")
-                .font(.body)
-                .foregroundStyle(.white.opacity(0.68))
+                .font(.system(size: 40, weight: .bold))
+                .foregroundStyle(LovableSurface.foreground)
 
             HStack(spacing: 8) {
                 Image(systemName: "books.vertical.fill")
-                    .foregroundStyle(.cyan)
-                Text("\(deckCount) колод\(deckCount == 1 ? "а" : "")")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.65))
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(MatchPalette.primary)
+                Text("\(deckCount) \(decksLabel(deckCount))")
+                    .font(.system(size: 13, weight: .regular))
+                    .monospacedDigit()
+                    .foregroundStyle(LovableSurface.muted)
             }
             .padding(.top, 4)
         }
@@ -256,8 +248,112 @@ private struct DeckListHeader: View {
     }
 }
 
+private func decksLabel(_ count: Int) -> String {
+    let mod10 = count % 10
+    let mod100 = count % 100
+    if mod100 >= 11 && mod100 <= 14 { return "колод" }
+    if mod10 == 1 { return "колода" }
+    if mod10 >= 2 && mod10 <= 4 { return "колоды" }
+    return "колод"
+}
+
 private extension DeckStats {
     var dueTotal: Int { learningDue + reviewDue }
+}
+
+/// Карточка колоды в списке — дизайн Lovable (тёмная панель, градиентный аватар).
+struct LovableDeckCard: View {
+    let deck: DeckContent
+    let store: DeckStore
+    var showsChevron: Bool = true
+
+    @State private var stats: DeckStats = .zero
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [oklch(0.8, 0.12, 280), oklch(0.75, 0.15, 310), oklch(0.7, 0.2, 340)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 56, height: 56)
+                    .overlay {
+                        if let symbol = deck.avatarSystemName {
+                            Image(systemName: symbol)
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .shadow(color: oklch(0.5, 0.2, 320, 0.45), radius: 9, x: 0, y: 8)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(deck.title)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text("\(deck.activeCards.count) \(cardsGenitive(deck.activeCards.count)) · \(deck.languageCode.uppercased())")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+
+                Spacer(minLength: 8)
+
+                if showsChevron {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+            }
+
+            HStack(spacing: 10) {
+                LovableDeckStat(count: stats.newAvailable, label: "Новые", color: oklch(0.75, 0.16, 240))
+                Rectangle()
+                    .fill(.white.opacity(0.1))
+                    .frame(width: 1, height: 12)
+                LovableDeckStat(count: stats.dueTotal, label: "Повторить", color: oklch(0.78, 0.15, 65))
+            }
+        }
+        .padding(16)
+        .lovablePanel(cornerRadius: 24)
+        .task(id: "\(deck.id.databaseString)-\(deck.status.rawValue)") {
+            stats = (try? store.stats(for: deck)) ?? .zero
+        }
+    }
+}
+
+private struct LovableDeckStat: View {
+    let count: Int
+    let label: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+                .shadow(color: color.opacity(0.8), radius: 4)
+            Text("\(count)")
+                .font(.system(size: 13, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+            Text(label)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(.white.opacity(0.55))
+        }
+    }
+}
+
+private func cardsGenitive(_ count: Int) -> String {
+    let mod10 = count % 10
+    let mod100 = count % 100
+    if mod100 >= 11 && mod100 <= 14 { return "карточек" }
+    if mod10 == 1 { return "карточка" }
+    if mod10 >= 2 && mod10 <= 4 { return "карточки" }
+    return "карточек"
 }
 
 struct DeckCardView: View {
@@ -339,15 +435,12 @@ struct DeckDetailView: View {
     private var studyCards: [WordCardContent] { deck.isActive ? deck.activeCards : [] }
 
     var body: some View {
-        ZStack {
-            AppBackground()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    DeckCardView(deck: deck, store: store, showsChevron: false)
-                    DeckStatusControl(deck: deck) {
-                        toggleDeckStatus()
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                LovableDeckCard(deck: deck, store: store, showsChevron: false)
+                DeckStatusControl(deck: deck) {
+                    toggleDeckStatus()
+                }
 
                     StudySection(title: "Упражнения", remaining: remainingSummary) {
                         StudyActionButton(
@@ -393,14 +486,15 @@ struct DeckDetailView: View {
                         }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
-                .padding(.top, 10)
+                .padding(.top, 8)
                 .padding(.bottom, 32)
-            }
         }
+        .background { LovableBackground(variant: .decks) }
         .navigationTitle(deck.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(.light, for: .navigationBar)
         .navigationDestination(isPresented: $showStudy) {
             if let session {
                 StudySessionView(session: session, store: store, deckTitle: deck.title)
@@ -477,7 +571,7 @@ struct DeckDetailView: View {
 
     private func start(_ mode: StudyMode) {
         guard deck.isActive else { return }
-        session = try? store.startSession(deck: deck, mode: mode)
+        session = try? store.startAllCardsSession(deck: deck, mode: mode)
         showStudy = session != nil
     }
 
@@ -511,39 +605,42 @@ private struct DeckStatusControl: View {
     let action: () -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: deck.isActive ? "checkmark.circle.fill" : "pause.circle.fill")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(deck.isActive ? .green : .orange)
-                .frame(width: 36, height: 36)
-                .background(.white.opacity(0.1), in: Circle())
+        HStack(spacing: 12) {
+            Image(systemName: deck.isActive ? "checkmark" : "pause.fill")
+                .font(.system(size: 18, weight: .heavy))
+                .foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(
+                    deck.isActive ? oklch(0.72, 0.18, 150) : MatchPalette.accent,
+                    in: Circle()
+                )
+                .shadow(color: (deck.isActive ? oklch(0.55, 0.18, 150, 0.5) : MatchPalette.accent.opacity(0.5)), radius: 7, x: 0, y: 6)
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(deck.isActive ? "Колода включена" : "Колода отключена")
-                    .font(.headline)
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(.white)
                 Text(deck.isActive ? "Карточки участвуют в повторениях." : "Карточки не попадают в учебные очереди.")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.62))
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.55))
             }
 
-            Spacer()
+            Spacer(minLength: 8)
 
             Button(deck.isActive ? "Отключить" : "Включить", action: action)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(deck.isActive ? .orange : .green)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.white.opacity(0.1), in: Capsule())
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(deck.isActive ? oklch(0.78, 0.16, 55) : MatchPalette.successText)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(.white.opacity(0.06), in: Capsule())
+                .overlay {
+                    Capsule().stroke((deck.isActive ? oklch(0.78, 0.16, 55) : MatchPalette.successText).opacity(0.35), lineWidth: 0.5)
+                }
                 .accessibilityLabel(deck.isActive ? "Отключить колоду" : "Включить колоду")
         }
         .padding(16)
-        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(.white.opacity(0.1), lineWidth: 1)
-        }
+        .lovablePanel(cornerRadius: 24)
     }
 }
 
@@ -571,14 +668,18 @@ private struct StudySection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(.white)
-            if let remaining {
-                Text(remaining)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.62))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundStyle(LovableSurface.foreground)
+                if let remaining {
+                    Text(remaining)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(LovableSurface.muted)
+                }
             }
+            .padding(.top, 8)
+
             VStack(spacing: 10) {
                 content
             }
@@ -599,15 +700,16 @@ private struct StudyActionButton: View {
         Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: systemImage)
-                    .font(.headline)
-                    .foregroundStyle(isEnabled ? accent : .white.opacity(0.42))
-                    .frame(width: 38, height: 38)
-                    .background(Circle().fill(accent.opacity(isEnabled ? 0.16 : 0.08)))
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(accent.opacity(isEnabled ? 1 : 0.4), in: Circle())
+                    .shadow(color: accent.opacity(isEnabled ? 0.5 : 0), radius: 9, x: 0, y: 8)
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
                         Text(title)
-                            .font(.headline)
+                            .font(.system(size: 16, weight: .bold))
                         if let badge {
                             Text(badge)
                                 .font(.caption2.bold())
@@ -617,24 +719,22 @@ private struct StudyActionButton: View {
                         }
                     }
                     Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.62))
+                        .font(.system(size: 12.5, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .lineLimit(2)
                 }
 
-                Spacer()
+                Spacer(minLength: 8)
 
                 Image(systemName: "chevron.right")
-                    .font(.footnote.bold())
-                    .foregroundStyle(.white.opacity(0.38))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.35))
             }
-            .padding(18)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
             .foregroundStyle(.white)
-            .background(Color.white.opacity(isEnabled ? 0.1 : 0.055), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(.white.opacity(isEnabled ? 0.12 : 0.06), lineWidth: 1)
-            }
-            .opacity(isEnabled ? 1 : 0.58)
+            .lovablePanel(cornerRadius: 20)
+            .opacity(isEnabled ? 1 : 0.55)
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)

@@ -21,7 +21,6 @@ struct TodayView: View {
     @State private var store: DeckStore?
     @State private var decks: [DeckContent] = []
     @State private var statsByDeckID: [UUID: DeckStats] = [:]
-    @State private var activity: [StudyActivityDay] = []
     @State private var session: StudySession?
     @State private var sessionDeckTitle = ""
     @State private var showTodayModes = false
@@ -44,32 +43,29 @@ struct TodayView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                AppBackground()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        TodayHeader()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    TodayHeader()
 
-                        StudyTodayCard(
-                            stats: totalStats,
-                            isEnabled: totalStats.studyTotal > 0,
-                            action: {
-                                showTodayModes = true
-                            }
-                        )
+                    StudyTodayCard(
+                        stats: totalStats,
+                        isEnabled: totalStats.studyTotal > 0,
+                        action: {
+                            showTodayModes = true
+                        }
+                    )
 
-                        TodayDeckSummary(decks: activeDecks, statsByDeckID: statsByDeckID)
-
-                        ActivityHeatmap(days: filledActivity(days: 70))
+                    if let store {
+                        TodayDeckSummary(decks: activeDecks, statsByDeckID: statsByDeckID, store: store)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
-                    .padding(.bottom, 32)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 28)
+                .padding(.bottom, 32)
             }
-            .navigationTitle("Сегодня")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .background { LovableBackground(variant: .today) }
+            .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showTodayModes) {
                 if store != nil {
                     TodayStudyModesView(
@@ -117,7 +113,6 @@ struct TodayView: View {
                 nextStats[deck.id] = try deckStore.stats(for: deck)
             }
             statsByDeckID = nextStats
-            activity = try deckStore.studyActivity(days: 70)
             loadError = nil
         } catch {
             loadError = error.localizedDescription
@@ -135,17 +130,6 @@ struct TodayView: View {
             loadError = error.localizedDescription
         }
     }
-
-    private func filledActivity(days: Int) -> [StudyActivityDay] {
-        let byKey = Dictionary(uniqueKeysWithValues: activity.map { ($0.dayKey, $0) })
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: .now)
-        return (0..<days).reversed().map { offset in
-            let date = calendar.date(byAdding: .day, value: -offset, to: today) ?? today
-            let key = DeckDailyUsage.dayKey(for: date, calendar: calendar)
-            return byKey[key] ?? StudyActivityDay(dayKey: key, reviewedCount: 0, passedCount: 0)
-        }
-    }
 }
 
 struct StatisticsView: View {
@@ -159,35 +143,33 @@ struct StatisticsView: View {
     @State private var loadError: String?
 
     private var studyDaysCount: Int {
-        activity.filter { $0.reviewedCount > 0 }.count
+        activity.suffix(30).filter { $0.reviewedCount > 0 }.count
     }
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                AppBackground()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        StatisticsHeader()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    StatisticsHeader()
 
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                            DashboardMetric(title: "Сегодня", value: "\(todayCount.total)", subtitle: cardsLabel(todayCount.total))
-                            DashboardMetric(title: "7 дней", value: "\(weekCount.total)", subtitle: cardsLabel(weekCount.total))
-                            DashboardMetric(title: "30 дней", value: "\(monthCount.total)", subtitle: cardsLabel(monthCount.total))
-                            DashboardMetric(title: "Дни занятий", value: "\(studyDaysCount)", subtitle: "за 30 дней")
-                        }
-
-                        ForecastSection(days: scheduledDays)
-                        WeakCardsSection(cards: weakCards)
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                        DashboardMetric(title: "Сегодня", value: "\(todayCount.total)", subtitle: cardsLabel(todayCount.total))
+                        DashboardMetric(title: "7 дней", value: "\(weekCount.total)", subtitle: cardsLabel(weekCount.total))
+                        DashboardMetric(title: "30 дней", value: "\(monthCount.total)", subtitle: cardsLabel(monthCount.total))
+                        DashboardMetric(title: "Дни занятий", value: "\(studyDaysCount)", subtitle: "за 30 дней")
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
-                    .padding(.bottom, 32)
+
+                    ActivityHeatmap(days: activity)
+                    ForecastSection(days: scheduledDays)
+                    WeakCardsSection(cards: weakCards)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 28)
+                .padding(.bottom, 32)
             }
-            .navigationTitle("Статистика")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .background { LovableBackground(variant: .stats) }
+            .toolbar(.hidden, for: .navigationBar)
             .overlay {
                 if let loadError {
                     DataPlaceholderView(
@@ -219,7 +201,7 @@ struct StatisticsView: View {
             todayCount = try deckStore.studyReviewCount(since: todayStart)
             weekCount = try deckStore.studyReviewCount(since: weekStart)
             monthCount = try deckStore.studyReviewCount(since: monthStart)
-            activity = try deckStore.studyActivity(days: 30)
+            activity = try deckStore.studyActivity(days: 120)
             scheduledDays = try deckStore.scheduledReviewDays(days: 7)
             weakCards = try deckStore.weakCards(limit: 10)
             loadError = nil
@@ -233,11 +215,8 @@ private struct TodayHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Сегодня")
-                .font(.largeTitle.bold())
-                .foregroundStyle(.white)
-            Text("Закрой дневную очередь и держи ритм.")
-                .font(.body)
-                .foregroundStyle(.white.opacity(0.68))
+                .font(.system(size: 40, weight: .bold))
+                .foregroundStyle(LovableSurface.foreground)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -245,13 +224,10 @@ private struct TodayHeader: View {
 
 private struct StatisticsHeader: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("Статистика")
-                .font(.largeTitle.bold())
-                .foregroundStyle(.white)
-            Text("Регулярность, объем и ближайшие повторения.")
-                .font(.body)
-                .foregroundStyle(.white.opacity(0.68))
+                .font(.system(size: 40, weight: .bold))
+                .foregroundStyle(LovableSurface.foreground)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -264,23 +240,33 @@ private struct StudyTodayCard: View {
 
     var body: some View {
         Button(action: action) {
-            HStack {
+            HStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Учить сегодня")
-                        .font(.title2.bold())
+                        .font(.system(size: 24, weight: .bold))
                     Text(isEnabled ? "\(stats.studyTotal) карточек в очереди" : "На сегодня всё готово")
-                        .font(.subheadline.weight(.medium))
+                        .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.white.opacity(0.72))
                 }
                 Spacer()
                 Image(systemName: "play.fill")
-                    .font(.title3.bold())
+                    .font(.system(size: 18, weight: .bold))
+                    .frame(width: 48, height: 48)
+                    .background(.white.opacity(0.22), in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(.white.opacity(0.2), lineWidth: 0.5)
+                    }
             }
             .foregroundStyle(.white)
-            .padding(20)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 24)
             .background(
                 LinearGradient(
-                    colors: [.cyan.opacity(isEnabled ? 0.9 : 0.38), .blue.opacity(isEnabled ? 0.82 : 0.28)],
+                    colors: [
+                        LovableSurface.primary.opacity(isEnabled ? 1 : 0.42),
+                        LovableSurface.primaryDeep.opacity(isEnabled ? 1 : 0.34),
+                    ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 ),
@@ -289,72 +275,193 @@ private struct StudyTodayCard: View {
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
+        .shadow(color: oklch(0.4, 0.22, 260, isEnabled ? 0.35 : 0), radius: 18, x: 0, y: 14)
     }
 }
 
 private struct TodayStudyModesView: View {
     let queueCount: Int
+    var deck: DeckContent? = nil
     let start: (StudyMode) -> Void
 
     var body: some View {
-        ZStack {
-            AppBackground()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                QueueSummaryCard(queueCount: queueCount, deck: deck)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Учить сегодня")
-                            .font(.largeTitle.bold())
-                            .foregroundStyle(.white)
-                        Text("\(queueCount) \(cardsLabel(queueCount)) в дневной очереди.")
-                            .font(.body)
-                            .foregroundStyle(.white.opacity(0.68))
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Режим")
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(LovableSurface.foreground)
+                        .padding(.top, 28)
+
+                    TodayModeButton(
+                        title: "Карточки",
+                        subtitle: "\(queueCount) \(cardsLabel(queueCount)) в очереди",
+                        systemImage: "rectangle.on.rectangle.angled",
+                        accent: .orange,
+                        isEnabled: queueCount > 0
+                    ) {
+                        start(.flashcards)
                     }
 
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Режим")
-                            .font(.headline)
-                            .foregroundStyle(.white)
+                    TodayModeButton(
+                        title: "Предложения",
+                        subtitle: "\(queueCount) \(cardsLabel(queueCount)) в очереди",
+                        systemImage: "text.quote",
+                        accent: .blue,
+                        isEnabled: queueCount > 0
+                    ) {
+                        start(.clozeMultipleChoice)
+                    }
 
-                        TodayModeButton(
-                            title: "Карточки",
-                            subtitle: "\(queueCount) \(cardsLabel(queueCount)) в очереди",
-                            systemImage: "rectangle.on.rectangle.angled",
-                            accent: .orange,
-                            isEnabled: queueCount > 0
-                        ) {
-                            start(.flashcards)
-                        }
-
-                        TodayModeButton(
-                            title: "Предложения",
-                            subtitle: "\(queueCount) \(cardsLabel(queueCount)) в очереди",
-                            systemImage: "text.quote",
-                            accent: .blue,
-                            isEnabled: queueCount > 0
-                        ) {
-                            start(.clozeMultipleChoice)
-                        }
-
-                        TodayModeButton(
-                            title: "Колонки",
-                            subtitle: "\(queueCount) \(cardsLabel(queueCount)) сегодня",
-                            systemImage: "rectangle.split.2x1.fill",
-                            accent: .green,
-                            isEnabled: queueCount > 0
-                        ) {
-                            start(.matching)
-                        }
+                    TodayModeButton(
+                        title: "Колонки",
+                        subtitle: "\(queueCount) \(cardsLabel(queueCount)) сегодня",
+                        systemImage: "rectangle.split.2x1.fill",
+                        accent: .green,
+                        isEnabled: queueCount > 0
+                    ) {
+                        start(.matching)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 10)
-                .padding(.bottom, 32)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 32)
+        }
+        .background { LovableBackground(variant: .today) }
+        .navigationTitle(deck?.title ?? "Сегодня")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarColorScheme(.light, for: .navigationBar)
+    }
+}
+
+/// Экран режимов для конкретной колоды на вкладке «Сегодня».
+/// Учим только сегодняшнюю очередь этой колоды.
+private struct TodayDeckModesView: View {
+    let deck: DeckContent
+    let store: DeckStore
+
+    @State private var queueCount = 0
+    @State private var session: StudySession?
+    @State private var showStudy = false
+
+    var body: some View {
+        TodayStudyModesView(queueCount: queueCount, deck: deck, start: start)
+            .navigationDestination(isPresented: $showStudy) {
+                if let session {
+                    StudySessionView(session: session, store: store, deckTitle: deck.title)
+                }
+            }
+            .task { await reload() }
+            .onChange(of: showStudy) { _, isShowing in
+                guard !isShowing else { return }
+                Task { await reload() }
+            }
+    }
+
+    private func reload() async {
+        queueCount = (try? store.stats(for: deck))?.studyTotal ?? 0
+    }
+
+    private func start(_ mode: StudyMode) {
+        session = try? store.startTodaySession(deck: deck, mode: mode)
+        showStudy = session != nil
+    }
+}
+
+private struct QueueSummaryCard: View {
+    let queueCount: Int
+    var deck: DeckContent? = nil
+
+    private var repeatCount: Int { min(3, queueCount) }
+    private var freshCount: Int { max(0, queueCount - repeatCount) }
+
+    private var todayDayNumber: String {
+        "\(Calendar.current.component(.day, from: .now))"
+    }
+
+    private var todayMonthShort: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        formatter.setLocalizedDateFormatFromTemplate("LLL")
+        return formatter.string(from: .now)
+    }
+
+    @ViewBuilder private var deckOrDateAvatar: some View {
+        if let deck {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [oklch(0.8, 0.12, 280), oklch(0.75, 0.15, 310), oklch(0.7, 0.2, 340)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 56, height: 56)
+                .overlay {
+                    if let symbol = deck.avatarSystemName {
+                        Image(systemName: symbol)
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .shadow(color: oklch(0.5, 0.2, 320, 0.4), radius: 10, x: 0, y: 8)
+        } else {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [LovableSurface.primary, LovableSurface.primaryDeep],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 56, height: 56)
+                .overlay {
+                    VStack(spacing: 0) {
+                        Text(todayMonthShort)
+                            .font(.system(size: 11, weight: .semibold))
+                            .textCase(.uppercase)
+                            .foregroundStyle(.white.opacity(0.85))
+                        Text(todayDayNumber)
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                .shadow(color: oklch(0.4, 0.22, 260, 0.28), radius: 12, x: 0, y: 8)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                deckOrDateAvatar
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(deck?.title ?? "Дневная очередь")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text("\(queueCount) \(cardsLabel(queueCount)) · сегодня")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 10) {
+                LovableStat(count: freshCount, label: "Новые", color: LovableSurface.blueText)
+                Rectangle()
+                    .fill(.white.opacity(0.1))
+                    .frame(width: 1, height: 12)
+                LovableStat(count: repeatCount, label: "Повторить", color: LovableSurface.amberText)
             }
         }
-        .navigationTitle("Сегодня")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .padding(16)
+        .lovablePanel(cornerRadius: 24)
     }
 }
 
@@ -371,16 +478,18 @@ private struct TodayModeButton: View {
             HStack(spacing: 12) {
                 Image(systemName: systemImage)
                     .font(.headline)
-                    .foregroundStyle(isEnabled ? accent : .white.opacity(0.42))
-                    .frame(width: 38, height: 38)
-                    .background(Circle().fill(accent.opacity(isEnabled ? 0.16 : 0.08)))
+                    .foregroundStyle(.white.opacity(isEnabled ? 0.95 : 0.42))
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(accent.opacity(isEnabled ? 0.95 : 0.25)))
+                    .shadow(color: accent.opacity(isEnabled ? 0.35 : 0), radius: 12, x: 0, y: 8)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.headline)
+                        .font(.system(size: 16, weight: .bold))
                     Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.62))
+                        .font(.system(size: 12.5, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .lineLimit(2)
                 }
 
                 Spacer()
@@ -391,11 +500,7 @@ private struct TodayModeButton: View {
             }
             .padding(18)
             .foregroundStyle(.white)
-            .background(Color.white.opacity(isEnabled ? 0.1 : 0.055), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(.white.opacity(isEnabled ? 0.12 : 0.06), lineWidth: 1)
-            }
+            .lovablePanel(cornerRadius: 20)
             .opacity(isEnabled ? 1 : 0.58)
         }
         .buttonStyle(.plain)
@@ -411,25 +516,20 @@ private struct DashboardMetric: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.62))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(oklch(0.82, 0.03, 250, 0.7))
             Text(value)
-                .font(.title3.bold())
-                .foregroundStyle(.white)
+                .font(.system(size: 32, weight: .bold))
+                .foregroundStyle(oklch(0.99, 0.01, 240))
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.7)
             Text(subtitle)
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.white.opacity(0.5))
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(oklch(0.82, 0.03, 250, 0.65))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(.white.opacity(0.08), lineWidth: 1)
-        }
+        .lovablePanel(cornerRadius: 20)
     }
 }
 
@@ -445,11 +545,11 @@ private struct ActivityHeatmap: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Активность")
-                    .font(.headline)
+                    .font(.system(size: 17, weight: .semibold))
                 Spacer()
                 Text("\(months.count) мес.")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.48))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.55))
             }
             .foregroundStyle(.white)
 
@@ -475,12 +575,8 @@ private struct ActivityHeatmap: View {
                 }
             }
         }
-        .padding(16)
-        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.white.opacity(0.08), lineWidth: 1)
-        }
+        .padding(18)
+        .lovablePanel(cornerRadius: 24)
     }
 
 }
@@ -494,11 +590,11 @@ private struct ActivityMonthView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             Text(month.title)
-                .font(.caption.weight(.semibold))
+                .font(.caption.weight(.medium))
                 .foregroundStyle(.white.opacity(0.72))
 
             LazyVGrid(columns: columns, spacing: 7) {
-                ForEach(month.weekdays, id: \.self) { weekday in
+                ForEach(Array(month.weekdays.enumerated()), id: \.offset) { _, weekday in
                     Text(weekday)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.34))
@@ -507,15 +603,16 @@ private struct ActivityMonthView: View {
 
                 ForEach(month.cells) { cell in
                     if let day = cell.day {
-                        Circle()
-                            .fill(color(for: day.reviewedCount))
-                            .frame(width: 8, height: 8)
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(day.isToday ? oklch(0.78, 0.2, 235) : color(for: day.reviewedCount))
+                            .frame(width: 15, height: 15)
                             .frame(width: 18, height: 18)
                             .overlay {
                                 if day.isToday {
-                                    Circle()
-                                        .stroke(.white.opacity(0.72), lineWidth: 1.2)
-                                        .frame(width: 13, height: 13)
+                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                        .stroke(.white.opacity(0.9), lineWidth: 1.5)
+                                        .frame(width: 15, height: 15)
+                                        .shadow(color: oklch(0.7, 0.18, 235, 0.6), radius: 5)
                                 }
                             }
                             .accessibilityLabel("\(day.dayKey): \(day.reviewedCount) карточек")
@@ -531,9 +628,14 @@ private struct ActivityMonthView: View {
     }
 
     private func color(for count: Int) -> Color {
-        guard count > 0 else { return .white.opacity(0.13) }
-        let intensity = min(1, 0.25 + Double(count) / Double(maxCount) * 0.75)
-        return .cyan.opacity(intensity)
+        guard count > 0 else { return oklch(0.32, 0.02, 265, 0.5) }
+        let ratio = Double(count) / Double(maxCount)
+        switch ratio {
+        case ..<0.25: return oklch(0.55, 0.1, 235, 0.55)
+        case ..<0.5: return oklch(0.65, 0.15, 235, 0.75)
+        case ..<0.75: return oklch(0.72, 0.18, 235, 0.9)
+        default: return oklch(0.8, 0.2, 235)
+        }
     }
 }
 
@@ -632,36 +734,71 @@ private enum ActivityCalendarBuilder {
 private struct TodayDeckSummary: View {
     let decks: [DeckContent]
     let statsByDeckID: [UUID: DeckStats]
+    let store: DeckStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("По колодам")
-                .font(.headline)
-                .foregroundStyle(.white)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(LovableSurface.foreground)
+                .padding(.horizontal, 4)
 
             if decks.isEmpty {
                 Text("Нет включенных колод.")
                     .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.62))
+                    .foregroundStyle(LovableSurface.muted)
             } else {
                 VStack(spacing: 8) {
                     ForEach(decks) { deck in
                         let stats = statsByDeckID[deck.id] ?? .zero
-                        HStack {
-                            Text(deck.title)
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Text("\(stats.studyTotal)")
-                                .font(.subheadline.bold())
-                                .foregroundStyle(.cyan)
+                        NavigationLink {
+                            TodayDeckModesView(deck: deck, store: store)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Text(deck.title)
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .lineLimit(1)
+                                Spacer()
+                                HStack(spacing: 4) {
+                                    Text("\(stats.studyTotal)")
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(LovableSurface.blueText)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundStyle(.white.opacity(0.28))
+                                }
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.vertical, 16)
+                            .padding(.horizontal, 18)
+                            .lovablePanel(cornerRadius: 20)
                         }
-                        .foregroundStyle(.white)
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 12)
-                        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .buttonStyle(.plain)
                     }
                 }
             }
+        }
+    }
+}
+
+private struct LovableStat: View {
+    let count: Int
+    let label: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+                .shadow(color: color.opacity(0.8), radius: 4, x: 0, y: 0)
+            Text("\(count)")
+                .font(.system(size: 13, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+            Text(label)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(.white.opacity(0.55))
         }
     }
 }
@@ -671,33 +808,46 @@ private struct ForecastSection: View {
     private var maxCount: Int { max(days.map(\.dueCount).max() ?? 0, 1) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("План на неделю")
-                .font(.headline)
-                .foregroundStyle(.white)
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(LovableSurface.foreground)
 
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 ForEach(days) { day in
-                    HStack(spacing: 10) {
+                    HStack(spacing: 12) {
                         Text(shortDay(day.dayKey))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.62))
-                            .frame(width: 44, alignment: .leading)
+                            .font(.system(size: 13, weight: .regular))
+                            .monospacedDigit()
+                            .foregroundStyle(oklch(0.82, 0.03, 250, 0.7))
+                            .frame(width: 48, alignment: .leading)
                         GeometryReader { proxy in
-                            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .fill(.cyan.opacity(0.72))
-                                .frame(width: max(4, proxy.size.width * CGFloat(day.dueCount) / CGFloat(maxCount)))
+                            ZStack(alignment: .leading) {
+                                Capsule(style: .continuous)
+                                    .fill(.white.opacity(0.08))
+                                Capsule(style: .continuous)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [oklch(0.78, 0.14, 235), oklch(0.7, 0.18, 245)],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: max(day.dueCount > 0 ? 6 : 2, proxy.size.width * CGFloat(day.dueCount) / CGFloat(maxCount)))
+                                    .shadow(color: day.dueCount > 0 ? oklch(0.7, 0.18, 245, 0.55) : .clear, radius: 6)
+                            }
                         }
                         .frame(height: 8)
                         Text("\(day.dueCount)")
-                            .font(.caption.bold())
-                            .foregroundStyle(.white)
-                            .frame(width: 28, alignment: .trailing)
+                            .font(.system(size: 14, weight: .semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(oklch(0.97, 0.01, 240))
+                            .frame(width: 18, alignment: .trailing)
                     }
                 }
             }
-            .padding(14)
-            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(16)
+            .lovablePanel(cornerRadius: 24)
         }
     }
 }
@@ -706,40 +856,45 @@ private struct WeakCardsSection: View {
     let cards: [WeakCardStat]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Часто забываемые")
-                .font(.headline)
-                .foregroundStyle(.white)
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(LovableSurface.foreground)
 
             if cards.isEmpty {
                 Text("Пока нет слов для дополнительного повтора.")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.62))
-                    .padding(14)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .lovablePanel(cornerRadius: 20)
             } else {
-                VStack(spacing: 8) {
+                VStack(spacing: 10) {
                     ForEach(cards) { card in
-                        HStack(alignment: .top, spacing: 10) {
-                            VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 3) {
                                 Text(card.word)
-                                    .font(.subheadline.weight(.semibold))
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(oklch(0.99, 0.01, 240))
+                                    .lineLimit(1)
                                 Text(card.translation)
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.58))
-                                    .lineLimit(2)
+                                    .font(.system(size: 13, weight: .regular))
+                                    .foregroundStyle(oklch(0.82, 0.03, 250, 0.65))
+                                    .lineLimit(1)
                             }
-                            Spacer()
+                            Spacer(minLength: 8)
                             Image(systemName: "arrow.clockwise")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.cyan.opacity(0.8))
-                                .padding(8)
-                                .background(.cyan.opacity(0.12), in: Circle())
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(oklch(0.78, 0.14, 235))
+                                .frame(width: 36, height: 36)
+                                .background(oklch(0.62, 0.2, 245, 0.18), in: Circle())
+                                .overlay {
+                                    Circle().stroke(.white.opacity(0.12), lineWidth: 0.5)
+                                }
                         }
-                        .foregroundStyle(.white)
-                        .padding(12)
-                        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .lovablePanel(cornerRadius: 20)
                     }
                 }
             }

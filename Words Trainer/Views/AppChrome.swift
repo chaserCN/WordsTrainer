@@ -58,6 +58,152 @@ struct StudyScreenChrome<Content: View>: View {
     }
 }
 
+enum LovableSurface {
+    static let foreground = oklch(0.18, 0.015, 260)
+    static let muted = oklch(0.55, 0.03, 260)
+    static let panelTop = oklch(0.25, 0.04, 265, 0.7)
+    static let panelBottom = oklch(0.18, 0.04, 270, 0.6)
+    static let primary = oklch(0.62, 0.17, 248)
+    static let primaryDeep = oklch(0.5, 0.19, 258)
+    static let blueText = oklch(0.78, 0.18, 235)
+    static let amberText = oklch(0.78, 0.15, 65)
+}
+
+enum LovableBackgroundVariant {
+    case today
+    case decks
+    case stats
+    case flashcards
+}
+
+struct LovableBackground: View {
+    let variant: LovableBackgroundVariant
+
+    var body: some View {
+        ZStack {
+            MeshGradient(
+                width: 3,
+                height: 3,
+                points: [
+                    .init(0, 0), .init(0.5, 0), .init(1, 0),
+                    .init(0, 0.5), .init(0.5, 0.5), .init(1, 0.5),
+                    .init(0, 1), .init(0.5, 1), .init(1, 1),
+                ],
+                colors: meshColors
+            )
+
+            ForEach(Array(orbs.enumerated()), id: \.offset) { _, orb in
+                Circle()
+                    .fill(orb.color)
+                    .frame(width: orb.size.width, height: orb.size.height)
+                    .blur(radius: 60)
+                    .offset(orb.offset)
+                    .accessibilityHidden(true)
+            }
+        }
+        // Орбы статичны: один раз растеризуем размытие в текстуру и кэшируем,
+        // вместо перерисовки blur каждый кадр. Это убирает постоянную нагрузку
+        // на CPU/GPU (особенно в симуляторе, где blur считается на CPU).
+        .drawingGroup()
+        .ignoresSafeArea()
+    }
+
+    /// Цвет фона с учётом случайного оттенка текущего запуска.
+    /// Поворачиваем H на общий угол → гармония между углами сохраняется,
+    /// меняется только общий тон. Серединки (низкая chroma) визуально не меняются.
+    private func amb(_ l: Double, _ c: Double, _ h: Double, _ a: Double = 1) -> Color {
+        oklch(l, c, h + LovableAmbience.hueShift, a)
+    }
+
+    private var meshColors: [Color] {
+        switch variant {
+        case .today, .flashcards:
+            [
+                amb(0.92, 0.08, 30), amb(0.93, 0.05, 5), amb(0.90, 0.10, 350),
+                amb(0.985, 0.005, 240), amb(0.985, 0.005, 240), amb(0.985, 0.005, 240),
+                amb(0.92, 0.08, 145), amb(0.92, 0.05, 250), amb(0.90, 0.09, 250),
+            ]
+        case .decks:
+            [
+                amb(0.88, 0.10, 280), amb(0.91, 0.08, 310), amb(0.90, 0.09, 340),
+                amb(0.985, 0.005, 240), amb(0.985, 0.005, 240), amb(0.98, 0.006, 250),
+                amb(0.93, 0.05, 250), amb(0.91, 0.07, 275), amb(0.90, 0.08, 315),
+            ]
+        case .stats:
+            [
+                amb(0.90, 0.08, 220), amb(0.91, 0.08, 200), amb(0.92, 0.07, 185),
+                amb(0.985, 0.005, 240), amb(0.985, 0.005, 240), amb(0.98, 0.006, 250),
+                amb(0.91, 0.07, 180), amb(0.91, 0.07, 220), amb(0.90, 0.08, 240),
+            ]
+        }
+    }
+
+    private var orbs: [LovableOrb] {
+        switch variant {
+        case .today, .flashcards:
+            [
+                LovableOrb(size: .init(width: 420, height: 420), offset: .init(width: -150, height: -310), color: amb(0.9, 0.1, 30, 0.5)),
+                LovableOrb(size: .init(width: 460, height: 460), offset: .init(width: 180, height: -150), color: amb(0.88, 0.12, 350, 0.45)),
+                LovableOrb(size: .init(width: 480, height: 480), offset: .init(width: -150, height: 330), color: amb(0.9, 0.1, 160, 0.4)),
+                LovableOrb(size: .init(width: 420, height: 420), offset: .init(width: 160, height: 320), color: amb(0.88, 0.1, 250, 0.5)),
+            ]
+        case .decks:
+            [
+                LovableOrb(size: .init(width: 400, height: 400), offset: .init(width: -140, height: -300), color: amb(0.85, 0.12, 280, 0.5)),
+                LovableOrb(size: .init(width: 440, height: 440), offset: .init(width: 175, height: -130), color: amb(0.82, 0.14, 310, 0.45)),
+                LovableOrb(size: .init(width: 460, height: 460), offset: .init(width: -150, height: 330), color: amb(0.8, 0.15, 340, 0.4)),
+                LovableOrb(size: .init(width: 400, height: 400), offset: .init(width: 160, height: 320), color: amb(0.85, 0.1, 250, 0.5)),
+            ]
+        case .stats:
+            [
+                LovableOrb(size: .init(width: 420, height: 420), offset: .init(width: -150, height: -300), color: amb(0.86, 0.1, 220, 0.5)),
+                LovableOrb(size: .init(width: 460, height: 460), offset: .init(width: 180, height: -140), color: amb(0.84, 0.12, 200, 0.45)),
+                LovableOrb(size: .init(width: 480, height: 480), offset: .init(width: -140, height: 330), color: amb(0.82, 0.1, 180, 0.4)),
+                LovableOrb(size: .init(width: 420, height: 420), offset: .init(width: 170, height: 320), color: amb(0.86, 0.1, 240, 0.5)),
+            ]
+        }
+    }
+}
+
+/// Случайный сдвиг оттенка фона, выбирается один раз за запуск приложения
+/// и не меняется при переходах между экранами (стабильно в пределах сессии).
+enum LovableAmbience {
+    static let hueShift: Double = .random(in: 0..<360)
+}
+
+private struct LovableOrb {
+    let size: CGSize
+    let offset: CGSize
+    let color: Color
+}
+
+struct LovablePanel: ViewModifier {
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                LinearGradient(
+                    colors: [LovableSurface.panelTop, LovableSurface.panelBottom],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(.white.opacity(0.06), lineWidth: 0.5)
+            }
+            .shadow(color: oklch(0.1, 0.05, 265, 0.32), radius: 18, x: 0, y: 10)
+    }
+}
+
+extension View {
+    func lovablePanel(cornerRadius: CGFloat = 24) -> some View {
+        modifier(LovablePanel(cornerRadius: cornerRadius))
+    }
+}
+
 // MARK: - iOS pretty palette (matching screen)
 
 /// oklch(L C H) → sRGB. Позволяет задавать палитру ровно по дизайн-токенам (CSS oklch).

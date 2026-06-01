@@ -65,23 +65,84 @@ struct DeckStatsTests {
         #expect(stats == .zero)
     }
 
-    @Test("deck stats count new cards when daily limit is reached")
-    func newCardCountWhenDailyLimitReached() {
-        let id = UUID()
+    @Test("deck stats cap new cards by daily limit")
+    func newCardCountIsCappedByDailyLimit() {
+        let firstID = UUID()
+        let secondID = UUID()
         let deck = DeckContent(
             id: UUID(),
             title: "Test",
             avatarSystemName: nil,
             languageCode: "en",
-            newCardsPerDay: 5,
+            newCardsPerDay: 1,
             reviewCardsPerDay: 200,
             cards: [
-                TestFixtures.card(id: id, word: "cat", translation: "кот"),
+                TestFixtures.card(id: firstID, word: "cat", translation: "кот"),
+                TestFixtures.card(id: secondID, word: "dog", translation: "собака"),
             ]
         )
-        let usage = DeckDailyUsage(dayKey: DeckDailyUsage.todayKey(), newCardsStudied: 5)
+        let usage = DeckDailyUsage(dayKey: DeckDailyUsage.todayKey(), newCardsStudied: 0)
         let stats = DeckStatsCalculator.compute(deck: deck, progressByCardID: [:], dailyUsage: usage)
         #expect(stats.newAvailable == 1)
+    }
+
+    @Test("deck stats show no new cards after daily limit is used")
+    func newCardCountIsZeroWhenDailyLimitReached() {
+        let deck = DeckContent(
+            id: UUID(),
+            title: "Test",
+            avatarSystemName: nil,
+            languageCode: "en",
+            newCardsPerDay: 1,
+            reviewCardsPerDay: 200,
+            cards: [
+                TestFixtures.card(word: "cat", translation: "кот"),
+                TestFixtures.card(word: "dog", translation: "собака"),
+            ]
+        )
+        let usage = DeckDailyUsage(dayKey: DeckDailyUsage.todayKey(), newCardsStudied: 1)
+        let stats = DeckStatsCalculator.compute(deck: deck, progressByCardID: [:], dailyUsage: usage)
+        #expect(stats.newAvailable == 0)
+    }
+
+    @Test("deck stats cap reviews by daily limit")
+    func reviewCountIsCappedByDailyLimit() {
+        let firstID = UUID()
+        let secondID = UUID()
+        let now = Date()
+        let deck = DeckContent(
+            id: UUID(),
+            title: "Test",
+            avatarSystemName: nil,
+            languageCode: "en",
+            newCardsPerDay: 20,
+            reviewCardsPerDay: 1,
+            cards: [
+                TestFixtures.card(id: firstID, word: "cat", translation: "кот"),
+                TestFixtures.card(id: secondID, word: "dog", translation: "собака"),
+            ]
+        )
+        let dueCard = Card(
+            due: now.addingTimeInterval(-60),
+            stability: 1,
+            difficulty: 1,
+            reps: 1,
+            state: .review,
+            lastReview: now.addingTimeInterval(-86_400)
+        )
+        let progressByCardID = [
+            firstID: CardProgress(cardID: firstID, fsrsCard: dueCard),
+            secondID: CardProgress(cardID: secondID, fsrsCard: dueCard),
+        ]
+
+        let stats = DeckStatsCalculator.compute(
+            deck: deck,
+            progressByCardID: progressByCardID,
+            dailyUsage: nil,
+            now: now
+        )
+
+        #expect(stats.reviewDue == 1)
     }
 
     @Test("cloze queue falls back to full deck when SRS queue is empty")
