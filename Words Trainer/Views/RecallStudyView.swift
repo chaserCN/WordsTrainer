@@ -14,20 +14,65 @@ struct RecallStudyView: View {
 
             Spacer()
 
-            VStack(spacing: 32) {
-                Text(card.word)
-                    .font(.largeTitle.bold())
-                    .foregroundStyle(MatchPalette.cardForeground)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-
-                ReviewOutcomeControls(onAnswer: onAnswer)
-            }
-            .padding(.horizontal, 16)
+            wordCard
+                .padding(.horizontal, 16)
+                .studyCardChangeTransition(cardID: card.id)
 
             Spacer()
-            Spacer(minLength: 56)
+
+            ReviewOutcomeControls(onAnswer: onAnswer)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
         }
-        .padding(.bottom, 10)
+    }
+
+    private var wordCard: some View {
+        ZStack {
+            // Синее свечение-гало за словом
+            Ellipse()
+                .fill(oklch(0.7, 0.18, 245, 0.28))
+                .frame(width: 260, height: 120)
+                .blur(radius: 50)
+
+            VStack(spacing: 12) {
+                Text(card.word)
+                    .font(.system(size: 48, weight: .semibold))
+                    .foregroundStyle(oklch(0.99, 0.01, 240))
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(2)
+
+                if !card.translation.isEmpty {
+                    Text(card.translation)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(oklch(0.82, 0.03, 250, 0.75))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                }
+            }
+            .padding(.horizontal, 32)
+            .padding(.vertical, 56)
+            .frame(maxWidth: .infinity)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        gradient: Gradient(stops: [
+                            .init(color: oklch(0.27, 0.05, 265), location: 0),
+                            .init(color: oklch(0.18, 0.05, 270), location: 0.6),
+                            .init(color: oklch(0.14, 0.05, 275), location: 1),
+                        ]),
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
+                .strokeBorder(.white.opacity(0.07), lineWidth: 0.5)
+        )
+        .shadow(color: oklch(0.1, 0.05, 270, 0.5), radius: 24, x: 0, y: 16)
+        .shadow(color: oklch(0.1, 0.05, 270, 0.3), radius: 8, x: 0, y: 6)
     }
 }

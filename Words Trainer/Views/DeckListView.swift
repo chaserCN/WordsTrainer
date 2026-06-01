@@ -365,6 +365,7 @@ struct DeckDetailView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+                .tint(LovableSurface.foreground)
             }
         }
         .navigationDestination(isPresented: $showStudy) {
