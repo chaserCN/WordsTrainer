@@ -18,6 +18,12 @@ struct DeckListView: View {
                         systemImage: "exclamationmark.triangle",
                         message: loadError
                     )
+                } else if userStore.selectedUserID == nil {
+                    DataPlaceholderView(
+                        title: noUserTitle,
+                        systemImage: noUserSystemImage,
+                        message: noUserMessage
+                    )
                 } else if decks.isEmpty, store != nil {
                     DataPlaceholderView(
                         title: "Нет колод",
@@ -71,10 +77,45 @@ struct DeckListView: View {
     }
 
     private var emptyDecksMessage: String {
-        if DeckStore.databaseExists {
-            "В базе нет колод."
-        } else {
-            "Скопируйте test_data/Data в Documents/Data/ (см. test_data/README.md)."
+        "Для выбранного пользователя пока нет колод в локальной базе. Проверьте назначения на сервере и выполните синхронизацию."
+    }
+
+    private var noUserTitle: String {
+        switch userStore.bootstrapState {
+        case .loading:
+            "Синхронизация"
+        case .emptyServer:
+            "Сервер пуст"
+        case .failed:
+            "Синхронизация не удалась"
+        case .missingConfiguration:
+            "Сервер не настроен"
+        default:
+            "Нет пользователя"
+        }
+    }
+
+    private var noUserSystemImage: String {
+        switch userStore.bootstrapState {
+        case .loading:
+            "arrow.clockwise"
+        case .emptyServer:
+            "person.2.slash"
+        case .failed:
+            "wifi.exclamationmark"
+        case .missingConfiguration:
+            "link.badge.plus"
+        default:
+            "person.crop.circle.badge.exclamationmark"
+        }
+    }
+
+    private var noUserMessage: String {
+        switch userStore.bootstrapState {
+        case .loading:
+            "Подключаемся к серверу и загружаем пользователей."
+        default:
+            userStore.bootstrapState.message ?? "Сначала синхронизируйте пользователей с сервером."
         }
     }
 

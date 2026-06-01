@@ -3,6 +3,26 @@ import Foundation
 struct ServerBootstrap: Decodable, Sendable {
     let user: ServerUser?
     let users: [ServerUser]
+    let assignments: [ServerDeckAssignment]
+    let content: ServerContentPayload
+    let media: [ServerMediaObject]
+
+    private enum CodingKeys: String, CodingKey {
+        case user
+        case users
+        case assignments
+        case content
+        case media
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        user = try container.decodeIfPresent(ServerUser.self, forKey: .user)
+        users = try container.decodeIfPresent([ServerUser].self, forKey: .users) ?? []
+        assignments = try container.decodeIfPresent([ServerDeckAssignment].self, forKey: .assignments) ?? []
+        content = try container.decodeIfPresent(ServerContentPayload.self, forKey: .content) ?? .empty
+        media = try container.decodeIfPresent([ServerMediaObject].self, forKey: .media) ?? []
+    }
 }
 
 struct ServerUser: Decodable, Sendable {
@@ -28,18 +48,270 @@ struct ServerUser: Decodable, Sendable {
     }
 }
 
+struct ServerDeckManifest: Decodable, Sendable {
+    let newCardsPerDay: Int?
+    let reviewCardsPerDay: Int?
+}
+
+struct ServerDeckAssignment: Decodable, Sendable {
+    let userId: UUID
+    let deckId: UUID
+    let deckVersionId: UUID?
+    let assignmentStatus: String
+    let title: String
+    let avatarSystemName: String?
+    let avatarMediaId: UUID?
+    let languageCode: String
+    let currentVersionId: UUID?
+    let versionNumber: Int?
+    let versionStatus: String?
+    let manifest: ServerDeckManifest?
+}
+
+struct ServerContentPayload: Decodable, Sendable {
+    static let empty = ServerContentPayload(cards: [], examples: [], forms: [], distractors: [])
+
+    let cards: [ServerCardContent]
+    let examples: [ServerExampleContent]
+    let forms: [ServerWordFormContent]
+    let distractors: [ServerDistractorContent]
+}
+
+struct ServerCardContent: Decodable, Sendable {
+    let deckVersionId: UUID
+    let cardId: UUID
+    let status: String
+    let lemma: String
+    let displayWord: String
+    let partOfSpeech: String?
+    let translation: String
+    let shortDefinition: String?
+    let memoryHint: String?
+    let etymology: String?
+    let usageNote: String?
+    let synonymNote: String?
+    let grammarNote: String?
+    let notes: String?
+    let imageMediaId: UUID?
+    let audioWordMediaId: UUID?
+    let sortOrder: Int?
+}
+
+struct ServerExampleContent: Decodable, Sendable {
+    let deckVersionId: UUID
+    let exampleId: UUID
+    let cardId: UUID
+    let template: String
+    let answer: String
+    let answerFormKey: String?
+    let translation: String?
+    let note: String?
+    let imageMediaId: UUID?
+    let audioExampleMediaId: UUID?
+    let sortOrder: Int?
+}
+
+struct ServerWordFormContent: Decodable, Sendable {
+    let deckVersionId: UUID
+    let cardId: UUID
+    let formKey: String
+    let text: String
+    let sortOrder: Int?
+}
+
+struct ServerDistractorContent: Decodable, Sendable {
+    let id: UUID
+    let deckVersionId: UUID
+    let exampleId: UUID
+    let text: String
+    let sourceCardId: UUID?
+    let priority: Int?
+}
+
+struct ServerMediaObject: Decodable, Sendable {
+    let id: UUID
+    let storageKey: String?
+    let sha256: String?
+    let mimeType: String?
+    let byteSize: Int?
+    let width: Int?
+    let height: Int?
+}
+
+struct ServerSyncEventsPayload: Encodable, Sendable {
+    var reviews: [ServerReviewEventPayload] = []
+    var progress: [ServerProgressPayload] = []
+    var matchingRecords: [ServerMatchingRecordPayload] = []
+
+    var isEmpty: Bool {
+        reviews.isEmpty && progress.isEmpty && matchingRecords.isEmpty
+    }
+}
+
+struct ServerReviewEventPayload: Encodable, Sendable {
+    let clientEventId: UUID
+    let deckId: UUID
+    let deckVersionId: UUID?
+    let cardId: UUID
+    let mode: String
+    let outcome: String
+    let reviewedAt: String
+    let durationMs: Int?
+    let wasNew: Bool
+    let previousState: String?
+    let newState: String?
+}
+
+struct ServerProgressPayload: Encodable, Sendable {
+    let cardId: UUID
+    let deckId: UUID
+    let fsrsData: JSONValue
+    let dueAt: String?
+    let state: String?
+    let updatedAt: String?
+}
+
+struct ServerMatchingRecordPayload: Encodable, Sendable {
+    let deckId: UUID
+    let deckVersionId: UUID?
+    let bestDurationSeconds: Double
+    let pairCount: Int
+    let achievedAt: String
+}
+
+struct ServerSyncEventsResponse: Decodable, Sendable {
+    let acceptedReviewIds: [UUID]
+    let duplicateReviewIds: [UUID]
+    let progressCardIds: [UUID]
+    let matchingRecordDeckIds: [UUID]
+    let serverRevision: String?
+}
+
+enum JSONValue: Encodable, Sendable {
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case null
+
+    init?(jsonObject: Any) {
+        switch jsonObject {
+        case let dictionary as [String: Any]:
+            var object: [String: JSONValue] = [:]
+            for (key, value) in dictionary {
+                guard let converted = JSONValue(jsonObject: value) else { return nil }
+                object[key] = converted
+            }
+            self = .object(object)
+        case let array as [Any]:
+            var values: [JSONValue] = []
+            for value in array {
+                guard let converted = JSONValue(jsonObject: value) else { return nil }
+                values.append(converted)
+            }
+            self = .array(values)
+        case let string as String:
+            self = .string(string)
+        case let number as NSNumber:
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                self = .bool(number.boolValue)
+            } else {
+                self = .number(number.doubleValue)
+            }
+        case _ as NSNull:
+            self = .null
+        default:
+            return nil
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        switch self {
+        case .object(let object):
+            var container = encoder.container(keyedBy: DynamicCodingKey.self)
+            for (key, value) in object {
+                try container.encode(value, forKey: DynamicCodingKey(stringValue: key))
+            }
+        case .array(let values):
+            var container = encoder.unkeyedContainer()
+            for value in values {
+                try container.encode(value)
+            }
+        case .string(let string):
+            var container = encoder.singleValueContainer()
+            try container.encode(string)
+        case .number(let number):
+            var container = encoder.singleValueContainer()
+            try container.encode(number)
+        case .bool(let bool):
+            var container = encoder.singleValueContainer()
+            try container.encode(bool)
+        case .null:
+            var container = encoder.singleValueContainer()
+            try container.encodeNil()
+        }
+    }
+}
+
+private struct DynamicCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int?
+
+    init(stringValue: String) {
+        self.stringValue = stringValue
+        intValue = nil
+    }
+
+    init(intValue: Int) {
+        stringValue = String(intValue)
+        self.intValue = intValue
+    }
+}
+
 enum ServerSyncError: LocalizedError {
     case missingConfiguration
+    case invalidBaseURL(String)
     case invalidResponse
+    case networkUnavailable
+    case timedOut
+    case cannotConnect
+    case cannotFindHost
+    case secureConnectionFailed
     case httpStatus(Int)
 
     var errorDescription: String? {
         switch self {
         case .missingConfiguration:
-            "SERVER_BASE_URL и DEVICE_TOKEN не настроены."
+            "SERVER_BASE_URL и HOUSEHOLD_SYNC_TOKEN не настроены."
+        case .invalidBaseURL(let value):
+            "SERVER_BASE_URL некорректный: \(value)."
         case .invalidResponse:
             "Сервер вернул некорректный ответ."
+        case .networkUnavailable:
+            "Нет подключения к интернету. Проверьте сеть и попробуйте снова."
+        case .timedOut:
+            "Сервер не ответил вовремя. Попробуйте ещё раз."
+        case .cannotConnect:
+            "Не удалось подключиться к серверу. Проверьте адрес сервера и сеть."
+        case .cannotFindHost:
+            "Не удалось найти сервер. Проверьте SERVER_BASE_URL."
+        case .secureConnectionFailed:
+            "Не удалось установить защищённое соединение с сервером."
         case .httpStatus(let code):
+            Self.httpStatusMessage(code)
+        }
+    }
+
+    private static func httpStatusMessage(_ code: Int) -> String {
+        switch code {
+        case 401, 403:
+            "Сервер отклонил HOUSEHOLD_SYNC_TOKEN. Проверьте семейный sync token."
+        case 404:
+            "Сервер доступен, но endpoint /v1/bootstrap не найден."
+        case 500..<600:
+            "На сервере ошибка HTTP \(code). Попробуйте позже."
+        default:
             "Сервер вернул HTTP \(code)."
         }
     }
@@ -50,7 +322,7 @@ final class ServerSyncClient {
 
     private enum Keys {
         static let baseURL = "server.baseURL"
-        static let deviceToken = "server.deviceToken"
+        static let householdSyncToken = "server.householdSyncToken"
     }
 
     private let session: URLSession
@@ -62,52 +334,157 @@ final class ServerSyncClient {
     }
 
     var isConfigured: Bool {
-        baseURL != nil && deviceToken != nil
+        baseURLString != nil && householdSyncToken != nil
     }
 
     func bootstrap(selectedUserID: UUID?) async throws -> ServerBootstrap {
-        guard let baseURL, let deviceToken else {
+        let data = try await data(for: "bootstrap", method: "GET", selectedUserID: selectedUserID)
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        do {
+            return try decoder.decode(ServerBootstrap.self, from: data)
+        } catch {
+            throw ServerSyncError.invalidResponse
+        }
+    }
+
+    func uploadEvents(
+        _ payload: ServerSyncEventsPayload,
+        selectedUserID: UUID?
+    ) async throws -> ServerSyncEventsResponse {
+        guard !payload.isEmpty else {
+            return ServerSyncEventsResponse(
+                acceptedReviewIds: [],
+                duplicateReviewIds: [],
+                progressCardIds: [],
+                matchingRecordDeckIds: [],
+                serverRevision: nil
+            )
+        }
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(payload)
+        let responseData = try await self.data(
+            for: "sync/events",
+            method: "POST",
+            selectedUserID: selectedUserID,
+            body: data
+        )
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        do {
+            return try decoder.decode(ServerSyncEventsResponse.self, from: responseData)
+        } catch {
+            throw ServerSyncError.invalidResponse
+        }
+    }
+
+    private func data(
+        for path: String,
+        method: String,
+        selectedUserID: UUID?,
+        body: Data? = nil
+    ) async throws -> Data {
+        guard let baseURLString, let householdSyncToken else {
             throw ServerSyncError.missingConfiguration
         }
+        guard let baseURL = URL(string: baseURLString),
+              let scheme = baseURL.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              baseURL.host != nil else {
+            throw ServerSyncError.invalidBaseURL(baseURLString)
+        }
 
-        var request = URLRequest(url: baseURL.appendingPathComponent("/v1/bootstrap"))
-        request.setValue("Bearer \(deviceToken)", forHTTPHeaderField: "Authorization")
+        let endpoint = path
+            .split(separator: "/")
+            .reduce(baseURL.appendingPathComponent("v1")) { partial, component in
+                partial.appendingPathComponent(String(component))
+            }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = method
+        request.timeoutInterval = 15
+        request.httpBody = body
+        request.setValue("Bearer \(householdSyncToken)", forHTTPHeaderField: "Authorization")
+        if body != nil {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
         if let selectedUserID {
             request.setValue(selectedUserID.uuidString.lowercased(), forHTTPHeaderField: "X-FlashGame-User-Id")
         }
 
-        let (data, response) = try await session.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError {
+            throw Self.syncError(from: error)
+        }
         guard let http = response as? HTTPURLResponse else {
             throw ServerSyncError.invalidResponse
         }
         guard (200..<300).contains(http.statusCode) else {
             throw ServerSyncError.httpStatus(http.statusCode)
         }
-
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return try decoder.decode(ServerBootstrap.self, from: data)
+        return data
     }
 
-    private var baseURL: URL? {
-        if let value = stringValue(userDefaultsKey: Keys.baseURL, bundleKey: "SERVER_BASE_URL") {
-            return URL(string: value)
+    private static func syncError(from error: URLError) -> ServerSyncError {
+        switch error.code {
+        case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
+            .networkUnavailable
+        case .timedOut:
+            .timedOut
+        case .cannotConnectToHost:
+            .cannotConnect
+        case .cannotFindHost, .dnsLookupFailed:
+            .cannotFindHost
+        case .secureConnectionFailed, .serverCertificateUntrusted, .serverCertificateHasBadDate,
+             .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid:
+            .secureConnectionFailed
+        default:
+            .cannotConnect
         }
-        return nil
     }
 
-    private var deviceToken: String? {
-        stringValue(userDefaultsKey: Keys.deviceToken, bundleKey: "DEVICE_TOKEN")
+    private var baseURLString: String? {
+        stringValue(userDefaultsKeys: [Keys.baseURL], bundleKeys: ["SERVER_BASE_URL"])
     }
 
-    private func stringValue(userDefaultsKey: String, bundleKey: String) -> String? {
-        if let value = defaults.string(forKey: userDefaultsKey)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !value.isEmpty {
-            return value
+    private var householdSyncToken: String? {
+        stringValue(
+            userDefaultsKeys: [Keys.householdSyncToken],
+            bundleKeys: ["HOUSEHOLD_SYNC_TOKEN"]
+        )
+    }
+
+    private func stringValue(userDefaultsKeys: [String], bundleKeys: [String]) -> String? {
+        for bundleKey in bundleKeys {
+            if let value = Bundle.main.object(forInfoDictionaryKey: bundleKey) as? String {
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    return trimmed
+                }
+            }
         }
-        if let value = Bundle.main.object(forInfoDictionaryKey: bundleKey) as? String {
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
+        if let configURL = Bundle.main.url(forResource: "ServerConfig", withExtension: "plist"),
+           let data = try? Data(contentsOf: configURL),
+           let config = try? PropertyListSerialization.propertyList(
+               from: data,
+               options: [],
+               format: nil
+           ) as? [String: String] {
+            for bundleKey in bundleKeys {
+                if let value = config[bundleKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !value.isEmpty {
+                    return value
+                }
+            }
+        }
+        for userDefaultsKey in userDefaultsKeys {
+            if let value = defaults.string(forKey: userDefaultsKey)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !value.isEmpty {
+                return value
+            }
         }
         return nil
     }

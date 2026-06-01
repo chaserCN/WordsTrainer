@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AppRootView: View {
     @Environment(AppUserStore.self) private var userStore
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         TabView {
@@ -19,6 +20,12 @@ struct AppRootView: View {
         .task {
             await userStore.refreshFromServer()
         }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .background else { return }
+            AppBackgroundSync.run {
+                await userStore.syncPendingEventsToServer()
+            }
+        }
     }
 }
 
@@ -34,6 +41,9 @@ struct TodayView: View {
     @State private var showUserSwitcher = false
     @State private var showTodayModes = false
     @State private var showStudy = false
+    @State private var isSyncing = false
+    @State private var toast: TodayToast?
+    @State private var toastDismissTask: Task<Void, Never>?
     @State private var loadError: String?
 
     private var activeDecks: [DeckContent] {
@@ -54,8 +64,6 @@ struct TodayView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    TodayTitleBar()
-
                     if let selectedUser = userStore.selectedUser {
                         TodayHeader(
                             user: selectedUser,
@@ -63,7 +71,15 @@ struct TodayView: View {
                             showUserSwitcher: { showUserSwitcher = true }
                         )
                     } else {
-                        TodayServerConnectionCard(message: userStore.bootstrapState.message)
+                        TodayServerConnectionCard(
+                            title: noUserTitle,
+                            systemImage: noUserSystemImage,
+                            message: noUserMessage
+                        )
+                    }
+
+                    if let contentStatus {
+                        TodaySyncStatusCard(status: contentStatus)
                     }
 
                     StudyTodayCard(
@@ -82,6 +98,9 @@ struct TodayView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 28)
                 .padding(.bottom, 32)
+            }
+            .refreshable {
+                await syncNow()
             }
             .background { LovableBackground(variant: .today) }
             .toolbar(.hidden, for: .navigationBar)
@@ -114,6 +133,15 @@ struct TodayView: View {
                     )
                 }
             }
+            .overlay(alignment: .top) {
+                if let toast {
+                    TodayToastView(toast: toast)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 10)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.snappy(duration: 0.22), value: toast)
         }
         .task {
             await reload()
@@ -125,8 +153,78 @@ struct TodayView: View {
         .onChange(of: userStore.selectedUserID) {
             store = nil
             storeUserID = nil
+            clearToast()
             Task { await reload() }
         }
+    }
+
+    private var noUserTitle: String {
+        switch userStore.bootstrapState {
+        case .loading:
+            "Синхронизация"
+        case .emptyServer:
+            "Сервер пуст"
+        case .failed:
+            "Синхронизация не удалась"
+        case .missingConfiguration:
+            "Сервер не настроен"
+        default:
+            "Нет пользователя"
+        }
+    }
+
+    private var noUserSystemImage: String {
+        switch userStore.bootstrapState {
+        case .loading:
+            "arrow.clockwise"
+        case .emptyServer:
+            "person.2.slash"
+        case .failed:
+            "wifi.exclamationmark"
+        case .missingConfiguration:
+            "link.badge.plus"
+        default:
+            "person.crop.circle.badge.exclamationmark"
+        }
+    }
+
+    private var noUserMessage: String {
+        switch userStore.bootstrapState {
+        case .loading:
+            "Подключаемся к серверу и загружаем пользователей."
+        default:
+            userStore.bootstrapState.message ?? "Нажмите синхронизацию, чтобы загрузить пользователя с сервера."
+        }
+    }
+
+    private var contentStatus: TodaySyncStatus? {
+        guard userStore.selectedUser != nil,
+              store != nil else { return nil }
+        if decks.isEmpty {
+            return TodaySyncStatus(
+                title: "Нет колод",
+                message: "Для выбранного пользователя пока нет назначенных колод.",
+                systemImage: "books.vertical",
+                tint: oklch(0.64, 0.19, 35)
+            )
+        }
+        if activeDecks.isEmpty {
+            return TodaySyncStatus(
+                title: "Колоды неактивны",
+                message: "У пользователя есть колоды, но сейчас нет активных назначений для занятий.",
+                systemImage: "pause.circle.fill",
+                tint: oklch(0.64, 0.19, 35)
+            )
+        }
+        if totalStats.studyTotal == 0 {
+            return TodaySyncStatus(
+                title: "На сегодня всё",
+                message: "Нет новых или запланированных карточек. Можно открыть конкретную колоду и повторить все карточки.",
+                systemImage: "checkmark.circle.fill",
+                tint: oklch(0.58, 0.14, 155)
+            )
+        }
+        return nil
     }
 
     private func reload() async {
@@ -168,6 +266,59 @@ struct TodayView: View {
             showStudy = true
         } catch {
             loadError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func syncNow() async {
+        guard !isSyncing else { return }
+        isSyncing = true
+        presentToast(
+            status: TodaySyncStatus(
+                title: "Синхронизация",
+                message: "Проверяем сервер и загружаем данные.",
+                systemImage: "arrow.clockwise",
+                tint: LovableSurface.primary
+            ),
+            autoDismiss: false
+        )
+        let result = await userStore.refreshFromServer()
+        await reload()
+        isSyncing = false
+        presentToast(for: result)
+    }
+
+    private func presentToast(for result: AppUserRefreshResult) {
+        guard let message = result.message else {
+            clearToast()
+            return
+        }
+        presentToast(status: TodaySyncStatus(result: result, message: message), autoDismiss: true)
+    }
+
+    private func presentToast(status: TodaySyncStatus, autoDismiss: Bool) {
+        toastDismissTask?.cancel()
+        let nextToast = TodayToast(status: status)
+        withAnimation(.snappy(duration: 0.22)) {
+            toast = nextToast
+        }
+        guard autoDismiss else { return }
+        toastDismissTask = Task { [id = nextToast.id] in
+            try? await Task.sleep(for: .seconds(5.0))
+            await MainActor.run {
+                guard toast?.id == id else { return }
+                withAnimation(.snappy(duration: 0.22)) {
+                    toast = nil
+                }
+            }
+        }
+    }
+
+    private func clearToast() {
+        toastDismissTask?.cancel()
+        toastDismissTask = nil
+        withAnimation(.snappy(duration: 0.22)) {
+            toast = nil
         }
     }
 }
@@ -286,18 +437,6 @@ struct StatisticsView: View {
     }
 }
 
-private struct TodayTitleBar: View {
-    var body: some View {
-        ZStack {
-            Text("Сегодня")
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(LovableSurface.foreground)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 34)
-    }
-}
-
 private struct TodayHeader: View {
     let user: AppUser
     let streakDays: Int
@@ -331,18 +470,20 @@ private struct StatisticsHeader: View {
 }
 
 private struct TodayServerConnectionCard: View {
+    let title: String
+    let systemImage: String
     let message: String?
 
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: "person.crop.circle.badge.exclamationmark")
+            Image(systemName: systemImage)
                 .font(.system(size: 28, weight: .semibold))
                 .foregroundStyle(LovableSurface.primary)
                 .frame(width: 52, height: 52)
                 .background(.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Нет пользователя")
+                Text(title)
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(LovableSurface.foreground)
                 Text(message ?? "Загружаем профиль с сервера.")
@@ -358,6 +499,136 @@ private struct TodayServerConnectionCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .stroke(.white.opacity(0.5), lineWidth: 0.5)
+        }
+    }
+}
+
+private struct TodaySyncStatus: Equatable {
+    let title: String
+    let message: String
+    let systemImage: String
+    let tint: Color
+
+    init(title: String, message: String, systemImage: String, tint: Color) {
+        self.title = title
+        self.message = message
+        self.systemImage = systemImage
+        self.tint = tint
+    }
+
+    init(result: AppUserRefreshResult, message: String) {
+        switch result {
+        case .loaded:
+            self.init(
+                title: "Готово",
+                message: message,
+                systemImage: "checkmark.circle.fill",
+                tint: oklch(0.58, 0.14, 155)
+            )
+        case .missingConfiguration:
+            self.init(
+                title: "Сервер не настроен",
+                message: message,
+                systemImage: "link.badge.plus",
+                tint: oklch(0.64, 0.19, 35)
+            )
+        case .emptyServer:
+            self.init(
+                title: "Сервер пуст",
+                message: message,
+                systemImage: "person.2.slash",
+                tint: oklch(0.64, 0.19, 35)
+            )
+        case .failed:
+            self.init(
+                title: "Синхронизация не удалась",
+                message: message,
+                systemImage: "wifi.exclamationmark",
+                tint: oklch(0.64, 0.19, 35)
+            )
+        }
+    }
+
+    static func == (lhs: TodaySyncStatus, rhs: TodaySyncStatus) -> Bool {
+        lhs.title == rhs.title
+            && lhs.message == rhs.message
+            && lhs.systemImage == rhs.systemImage
+    }
+}
+
+private struct TodayToast: Identifiable, Equatable {
+    let id = UUID()
+    let status: TodaySyncStatus
+
+    static func == (lhs: TodayToast, rhs: TodayToast) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
+private struct TodayToastView: View {
+    let toast: TodayToast
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: toast.status.systemImage)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(toast.status.tint, in: Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(toast.status.title)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(LovableSurface.foreground)
+                Text(toast.status.message)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(LovableSurface.muted)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(.white, lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.08), radius: 18, x: 0, y: 8)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct TodaySyncStatusCard: View {
+    let status: TodaySyncStatus
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: status.systemImage)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 34, height: 34)
+                .background(status.tint, in: Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(status.title)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(LovableSurface.foreground)
+                Text(status.message)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(LovableSurface.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(.white.opacity(0.52), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(.white.opacity(0.55), lineWidth: 0.5)
         }
     }
 }
@@ -475,7 +746,7 @@ private struct UserSwitcherSheet: View {
                     ContentUnavailableView(
                         "Пользователи не загружены",
                         systemImage: "person.2.slash",
-                        description: Text(userStore.bootstrapState.message ?? "Нужно выполнить bootstrap с сервера.")
+                        description: Text(userStore.bootstrapState.message ?? "Выполните синхронизацию с сервером.")
                     )
                 } else {
                     Section {
