@@ -6,6 +6,9 @@ import FSRS
 final class StudySession {
     let deckID: UUID
     let mode: StudyMode
+    /// Когда false — чистая практика: ни прогресс, ни рекорд не сохраняются
+    /// (например, игра «Забытые слова» со вкладки «Статистика»).
+    let savesProgress: Bool
     let matchingTotalPairCount: Int
     let matchingStartedAt: Date?
     private(set) var queue: [StudyQueueItem]
@@ -45,10 +48,12 @@ final class StudySession {
         queue: [StudyQueueItem],
         deckCards: [WordCardContent] = [],
         dailyUsage: DeckDailyUsage?,
-        engine: StudySessionEngine
+        engine: StudySessionEngine,
+        savesProgress: Bool = true
     ) {
         self.deckID = deckID
         self.mode = mode
+        self.savesProgress = savesProgress
         self.dailyUsage = dailyUsage
         self.engine = engine
         sessionChoicePool = queue.map(\.card)

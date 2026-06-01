@@ -70,6 +70,8 @@ struct TodayView: View {
                 if store != nil {
                     TodayStudyModesView(
                         queueCount: totalStats.studyTotal,
+                        newCount: totalStats.newAvailable,
+                        dueCount: totalStats.learningDue + totalStats.reviewDue,
                         start: startToday(mode:)
                     )
                 }
@@ -140,6 +142,8 @@ struct StatisticsView: View {
     @State private var activity: [StudyActivityDay] = []
     @State private var scheduledDays: [ScheduledReviewDay] = []
     @State private var weakCards: [WeakCardStat] = []
+    @State private var weakGameSession: StudySession?
+    @State private var showWeakGame = false
     @State private var loadError: String?
 
     private var studyDaysCount: Int {
@@ -161,7 +165,7 @@ struct StatisticsView: View {
 
                     ActivityHeatmap(days: activity)
                     ForecastSection(days: scheduledDays)
-                    WeakCardsSection(cards: weakCards)
+                    WeakCardsSection(cards: weakCards, onPractice: startWeakGame)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
@@ -170,6 +174,11 @@ struct StatisticsView: View {
             }
             .background { LovableBackground(variant: .stats) }
             .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(isPresented: $showWeakGame) {
+                if let weakGameSession, let store {
+                    StudySessionView(session: weakGameSession, store: store, deckTitle: "Забытые слова")
+                }
+            }
             .overlay {
                 if let loadError {
                     DataPlaceholderView(
@@ -208,6 +217,13 @@ struct StatisticsView: View {
         } catch {
             loadError = error.localizedDescription
         }
+    }
+
+    private func startWeakGame() {
+        guard let store else { return }
+        guard let session = try? store.weakCardsMatchingSession(limit: 12) else { return }
+        weakGameSession = session
+        showWeakGame = true
     }
 }
 
@@ -281,23 +297,25 @@ private struct StudyTodayCard: View {
 
 private struct TodayStudyModesView: View {
     let queueCount: Int
+    var newCount: Int = 0
+    var dueCount: Int = 0
     var deck: DeckContent? = nil
     let start: (StudyMode) -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                QueueSummaryCard(queueCount: queueCount, deck: deck)
+                QueueSummaryCard(queueCount: queueCount, newCount: newCount, dueCount: dueCount, deck: deck)
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Режим")
+                    Text("Упражнения")
                         .font(.system(size: 26, weight: .bold))
                         .foregroundStyle(LovableSurface.foreground)
                         .padding(.top, 28)
 
                     TodayModeButton(
                         title: "Карточки",
-                        subtitle: "\(queueCount) \(cardsLabel(queueCount)) в очереди",
+                        subtitle: "Слово, перевод и заметки — переворот по тапу",
                         systemImage: "rectangle.on.rectangle.angled",
                         accent: .orange,
                         isEnabled: queueCount > 0
@@ -307,7 +325,7 @@ private struct TodayStudyModesView: View {
 
                     TodayModeButton(
                         title: "Предложения",
-                        subtitle: "\(queueCount) \(cardsLabel(queueCount)) в очереди",
+                        subtitle: "Выбери слово для примера с пропуском",
                         systemImage: "text.quote",
                         accent: .blue,
                         isEnabled: queueCount > 0
@@ -317,7 +335,7 @@ private struct TodayStudyModesView: View {
 
                     TodayModeButton(
                         title: "Колонки",
-                        subtitle: "\(queueCount) \(cardsLabel(queueCount)) сегодня",
+                        subtitle: "Соедини слово и перевод",
                         systemImage: "rectangle.split.2x1.fill",
                         accent: .green,
                         isEnabled: queueCount > 0
@@ -335,6 +353,7 @@ private struct TodayStudyModesView: View {
         .navigationTitle(deck?.title ?? "Сегодня")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.light, for: .navigationBar)
+        .tint(LovableSurface.foreground)
     }
 }
 
@@ -344,26 +363,32 @@ private struct TodayDeckModesView: View {
     let deck: DeckContent
     let store: DeckStore
 
-    @State private var queueCount = 0
+    @State private var stats: DeckStats = .zero
     @State private var session: StudySession?
     @State private var showStudy = false
 
     var body: some View {
-        TodayStudyModesView(queueCount: queueCount, deck: deck, start: start)
-            .navigationDestination(isPresented: $showStudy) {
-                if let session {
-                    StudySessionView(session: session, store: store, deckTitle: deck.title)
-                }
+        TodayStudyModesView(
+            queueCount: stats.studyTotal,
+            newCount: stats.newAvailable,
+            dueCount: stats.learningDue + stats.reviewDue,
+            deck: deck,
+            start: start
+        )
+        .navigationDestination(isPresented: $showStudy) {
+            if let session {
+                StudySessionView(session: session, store: store, deckTitle: deck.title)
             }
-            .task { await reload() }
-            .onChange(of: showStudy) { _, isShowing in
-                guard !isShowing else { return }
-                Task { await reload() }
-            }
+        }
+        .task { await reload() }
+        .onChange(of: showStudy) { _, isShowing in
+            guard !isShowing else { return }
+            Task { await reload() }
+        }
     }
 
     private func reload() async {
-        queueCount = (try? store.stats(for: deck))?.studyTotal ?? 0
+        stats = (try? store.stats(for: deck)) ?? .zero
     }
 
     private func start(_ mode: StudyMode) {
@@ -374,10 +399,9 @@ private struct TodayDeckModesView: View {
 
 private struct QueueSummaryCard: View {
     let queueCount: Int
+    let newCount: Int
+    let dueCount: Int
     var deck: DeckContent? = nil
-
-    private var repeatCount: Int { min(3, queueCount) }
-    private var freshCount: Int { max(0, queueCount - repeatCount) }
 
     private var todayDayNumber: String {
         "\(Calendar.current.component(.day, from: .now))"
@@ -385,7 +409,7 @@ private struct QueueSummaryCard: View {
 
     private var todayMonthShort: String {
         let formatter = DateFormatter()
-        formatter.locale = Locale.current
+        formatter.locale = Locale(identifier: "ru_RU")
         formatter.setLocalizedDateFormatFromTemplate("LLL")
         return formatter.string(from: .now)
     }
@@ -453,11 +477,11 @@ private struct QueueSummaryCard: View {
             }
 
             HStack(spacing: 10) {
-                LovableStat(count: freshCount, label: "Новые", color: LovableSurface.blueText)
+                LovableStat(count: newCount, label: "Новые", color: LovableSurface.blueText)
                 Rectangle()
                     .fill(.white.opacity(0.1))
                     .frame(width: 1, height: 12)
-                LovableStat(count: repeatCount, label: "Повторить", color: LovableSurface.amberText)
+                LovableStat(count: dueCount, label: "Повторить", color: LovableSurface.amberText)
             }
         }
         .padding(16)
@@ -709,15 +733,19 @@ private enum ActivityCalendarBuilder {
         )
     }
 
+    private static let ruLocale = Locale(identifier: "ru_RU")
+
     private static func weekdaySymbols(calendar: Calendar) -> [String] {
-        let symbols = DateFormatter().veryShortStandaloneWeekdaySymbols ?? ["S", "M", "T", "W", "T", "F", "S"]
+        let formatter = DateFormatter()
+        formatter.locale = ruLocale
+        let symbols = formatter.veryShortStandaloneWeekdaySymbols ?? ["В", "П", "В", "С", "Ч", "П", "С"]
         let start = calendar.firstWeekday - 1
         return Array(symbols[start...] + symbols[..<start])
     }
 
     private static func title(for date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale.current
+        formatter.locale = ruLocale
         formatter.setLocalizedDateFormatFromTemplate("LLLL yyyy")
         return formatter.string(from: date)
     }
@@ -750,34 +778,74 @@ private struct TodayDeckSummary: View {
             } else {
                 VStack(spacing: 8) {
                     ForEach(decks) { deck in
-                        let stats = statsByDeckID[deck.id] ?? .zero
                         NavigationLink {
                             TodayDeckModesView(deck: deck, store: store)
                         } label: {
-                            HStack(spacing: 12) {
-                                Text(deck.title)
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .lineLimit(1)
-                                Spacer()
-                                HStack(spacing: 4) {
-                                    Text("\(stats.studyTotal)")
-                                        .font(.system(size: 17, weight: .semibold))
-                                        .foregroundStyle(LovableSurface.blueText)
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 12, weight: .bold))
-                                        .foregroundStyle(.white.opacity(0.28))
-                                }
-                            }
-                            .foregroundStyle(.white)
-                            .padding(.vertical, 16)
-                            .padding(.horizontal, 18)
-                            .lovablePanel(cornerRadius: 20)
+                            TodayDeckCard(deck: deck, stats: statsByDeckID[deck.id] ?? .zero)
                         }
                         .buttonStyle(.plain)
                     }
                 }
             }
         }
+    }
+}
+
+/// Карточка колоды на вкладке «Сегодня»: сегодняшняя очередь + разбивка Новые/Повторить.
+private struct TodayDeckCard: View {
+    let deck: DeckContent
+    let stats: DeckStats
+
+    private var dueTotal: Int { stats.learningDue + stats.reviewDue }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [oklch(0.8, 0.12, 280), oklch(0.75, 0.15, 310), oklch(0.7, 0.2, 340)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 56, height: 56)
+                    .overlay {
+                        if let symbol = deck.avatarSystemName {
+                            Image(systemName: symbol)
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .shadow(color: oklch(0.5, 0.2, 320, 0.45), radius: 9, x: 0, y: 8)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(deck.title)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text("\(stats.studyTotal) на сегодня")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+
+            HStack(spacing: 10) {
+                LovableStat(count: stats.newAvailable, label: "Новые", color: LovableSurface.blueText)
+                Rectangle()
+                    .fill(.white.opacity(0.1))
+                    .frame(width: 1, height: 12)
+                LovableStat(count: dueTotal, label: "Повторить", color: LovableSurface.amberText)
+            }
+        }
+        .padding(16)
+        .lovablePanel(cornerRadius: 24)
     }
 }
 
@@ -854,12 +922,35 @@ private struct ForecastSection: View {
 
 private struct WeakCardsSection: View {
     let cards: [WeakCardStat]
+    var onPractice: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Часто забываемые")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(LovableSurface.foreground)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Часто забываемые")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(LovableSurface.foreground)
+                Spacer(minLength: 8)
+                if cards.count >= 2, let onPractice {
+                    Button(action: onPractice) {
+                        Text("Играть")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                        .background(
+                            LinearGradient(
+                                colors: [LovableSurface.primary, LovableSurface.primaryDeep],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            in: Capsule()
+                        )
+                        .shadow(color: oklch(0.4, 0.22, 260, 0.3), radius: 8, x: 0, y: 5)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
 
             if cards.isEmpty {
                 Text("Пока нет слов для дополнительного повтора.")
@@ -883,14 +974,6 @@ private struct WeakCardsSection: View {
                                     .lineLimit(1)
                             }
                             Spacer(minLength: 8)
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundStyle(oklch(0.78, 0.14, 235))
-                                .frame(width: 36, height: 36)
-                                .background(oklch(0.62, 0.2, 245, 0.18), in: Circle())
-                                .overlay {
-                                    Circle().stroke(.white.opacity(0.12), lineWidth: 0.5)
-                                }
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)

@@ -88,6 +88,7 @@ struct StudySessionView: View {
         .navigationTitle(session.mode.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(usesLightStudyTheme ? .light : .dark, for: .navigationBar)
+        .tint(usesLightStudyTheme ? LovableSurface.foreground : .white)
         .toolbar {
             if session.mode == .matching {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -100,7 +101,7 @@ struct StudySessionView: View {
             }
         }
         .onChange(of: session.isFinished) { _, isFinished in
-            guard isFinished, session.mode == .matching else { return }
+            guard isFinished, session.mode == .matching, session.savesProgress else { return }
             let duration = session.matchingElapsed
             finishedDuration = duration
             beatRecord = (try? store.saveMatchingRecordIfBest(

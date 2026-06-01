@@ -42,6 +42,36 @@ final class DeckStore {
         try database.weakCards(limit: limit)
     }
 
+    /// Синтетический id для игры «Забытые слова» — у неё нет реальной колоды.
+    static let weakCardsPracticeDeckID = UUID(uuidString: "00000000-0000-0000-0000-0000DEADBEEF")!
+
+    /// Игра «Колонки» из самых забываемых слов всех активных колод.
+    /// Чистая практика: ничего не сохраняем (`savesProgress: false`).
+    func weakCardsMatchingSession(limit: Int = 12) throws -> StudySession? {
+        let weak = try weakCards(limit: limit)
+        guard !weak.isEmpty else { return nil }
+        var cardByID: [UUID: WordCardContent] = [:]
+        for deck in try allDecks() where deck.isActive {
+            for card in deck.activeCards {
+                cardByID[card.id] = card
+            }
+        }
+        let cards = weak.compactMap { cardByID[$0.cardID] }
+        guard cards.count >= 2 else { return nil }
+        let queue = cards.map { card in
+            StudyQueueItem(card: card, progress: CardProgress.newCard(cardID: card.id))
+        }
+        return StudySession(
+            deckID: Self.weakCardsPracticeDeckID,
+            mode: .matching,
+            queue: queue,
+            deckCards: cards,
+            dailyUsage: nil,
+            engine: engine,
+            savesProgress: false
+        )
+    }
+
     func scheduledReviewDays(days: Int) throws -> [ScheduledReviewDay] {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: .now)
