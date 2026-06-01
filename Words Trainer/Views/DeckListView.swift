@@ -162,9 +162,12 @@ struct LovableDeckCard: View {
                     )
                     .frame(width: 56, height: 56)
                     .overlay {
-                        Image(systemName: deckSymbol(deck.avatarSystemName))
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(.white)
+                        DeckAvatarContent(
+                            symbolName: deck.avatarSystemName,
+                            imageURL: deck.avatarImageURL,
+                            size: 56,
+                            cornerRadius: 16
+                        )
                     }
                     .shadow(color: oklch(0.5, 0.2, 320, 0.45), radius: 9, x: 0, y: 8)
 
@@ -223,7 +226,7 @@ struct DeckCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top, spacing: 14) {
-                DeckIcon(symbolName: deck.avatarSystemName)
+                DeckIcon(symbolName: deck.avatarSystemName, imageURL: deck.avatarImageURL)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(deck.title)
@@ -519,6 +522,7 @@ private struct StudyActionButton: View {
 
 private struct DeckIcon: View {
     let symbolName: String?
+    let imageURL: URL?
     var size: CGFloat = 56
 
     var body: some View {
@@ -531,14 +535,50 @@ private struct DeckIcon: View {
                         endPoint: .bottomTrailing
                     )
                 )
-            Image(systemName: symbolName ?? "books.vertical.fill")
-                .font(.system(size: size * 0.42, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+            DeckAvatarContent(
+                symbolName: symbolName,
+                imageURL: imageURL,
+                size: size,
+                cornerRadius: size * 0.32
+            )
         }
         .frame(width: size, height: size)
         .shadow(color: .blue.opacity(0.25), radius: 12, x: 0, y: 6)
     }
 
+}
+
+private struct DeckAvatarContent: View {
+    let symbolName: String?
+    let imageURL: URL?
+    let size: CGFloat
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        Group {
+            if let imageURL {
+                AsyncImage(url: imageURL) { phase in
+                    if let image = phase.image {
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        symbol
+                    }
+                }
+            } else {
+                symbol
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    }
+
+    private var symbol: some View {
+        Image(systemName: deckSymbol(symbolName))
+            .font(.system(size: size * 0.42, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+    }
 }
 
 private struct DeckMetricPill: View {

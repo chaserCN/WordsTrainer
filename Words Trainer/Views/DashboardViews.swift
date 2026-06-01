@@ -141,7 +141,7 @@ struct StatisticsView: View {
     @State private var monthCount: StudyReviewCount = .zero
     @State private var activity: [StudyActivityDay] = []
     @State private var scheduledDays: [ScheduledReviewDay] = []
-    @State private var weakCards: [WeakCardStat] = []
+    @State private var weakCardsPool: [WeakCardStat] = []
     @State private var weakGameSession: StudySession?
     @State private var showWeakGame = false
     @State private var loadError: String?
@@ -165,7 +165,10 @@ struct StatisticsView: View {
 
                     ActivityHeatmap(days: activity)
                     ForecastSection(days: scheduledDays)
-                    WeakCardsSection(cards: weakCards, onPractice: startWeakGame)
+                    WeakCardsSection(
+                        cards: Array(weakCardsPool.prefix(DeckStore.weakCardsDisplayLimit)),
+                        onPractice: startWeakGame
+                    )
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
@@ -212,7 +215,7 @@ struct StatisticsView: View {
             monthCount = try deckStore.studyReviewCount(since: monthStart)
             activity = try deckStore.studyActivity(days: 120)
             scheduledDays = try deckStore.scheduledReviewDays(days: 7)
-            weakCards = try deckStore.weakCards(limit: 10)
+            weakCardsPool = try deckStore.weakCards(limit: DeckStore.weakCardsFetchLimit)
             loadError = nil
         } catch {
             loadError = error.localizedDescription
@@ -221,7 +224,7 @@ struct StatisticsView: View {
 
     private func startWeakGame() {
         guard let store else { return }
-        guard let session = try? store.weakCardsMatchingSession(limit: 12) else { return }
+        guard let session = try? store.weakCardsMatchingSession(from: weakCardsPool) else { return }
         weakGameSession = session
         showWeakGame = true
     }

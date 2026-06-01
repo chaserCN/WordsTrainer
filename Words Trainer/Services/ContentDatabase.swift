@@ -38,6 +38,7 @@ final class ContentDatabase {
                 status: row.status,
                 title: row.title,
                 avatarSystemName: row.avatarSystemName,
+                avatarImageURL: resolveMediaURL(deckID: row.id, mediaID: row.avatarMediaID),
                 languageCode: row.languageCode,
                 newCardsPerDay: row.newCardsPerDay,
                 reviewCardsPerDay: row.reviewCardsPerDay,
@@ -233,7 +234,7 @@ final class ContentDatabase {
         )
     }
 
-    func weakCards(limit: Int = 10) throws -> [WeakCardStat] {
+    func weakCards(limit: Int = 30) throws -> [WeakCardStat] {
         let sql = """
         SELECT
             cards.id,
@@ -348,9 +349,21 @@ final class ContentDatabase {
             status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
             title TEXT NOT NULL,
             avatar_system_name TEXT,
+            avatar_media_id TEXT,
             language_code TEXT NOT NULL,
             new_cards_per_day INTEGER NOT NULL,
-            review_cards_per_day INTEGER NOT NULL
+            review_cards_per_day INTEGER NOT NULL,
+            FOREIGN KEY (avatar_media_id) REFERENCES media_objects(id)
+        );
+        CREATE TABLE IF NOT EXISTS media_objects (
+            id TEXT PRIMARY KEY NOT NULL,
+            storage_key TEXT,
+            local_path TEXT,
+            sha256 TEXT,
+            mime_type TEXT,
+            byte_size INTEGER,
+            width INTEGER,
+            height INTEGER
         );
         CREATE TABLE IF NOT EXISTS cards (
             id TEXT PRIMARY KEY NOT NULL,
@@ -367,8 +380,8 @@ final class ContentDatabase {
             synonym_note TEXT,
             grammar_note TEXT,
             notes TEXT,
-            image_url TEXT,
-            audio_word_path TEXT,
+            image_media_id TEXT,
+            audio_word_media_id TEXT,
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
         CREATE INDEX IF NOT EXISTS idx_cards_deck_id ON cards(deck_id);
@@ -380,7 +393,8 @@ final class ContentDatabase {
             answer_form_key TEXT,
             translation TEXT,
             note TEXT,
-            audio_example_path TEXT,
+            image_media_id TEXT,
+            audio_example_media_id TEXT,
             sort_order INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (card_id) REFERENCES cards(id)
         );
@@ -447,15 +461,50 @@ final class ContentDatabase {
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw ContentDatabaseError.migrationFailed
         }
+        try addColumnIfMissing(table: "decks", column: "avatar_media_id", definition: "TEXT")
+        try addColumnIfMissing(table: "cards", column: "image_media_id", definition: "TEXT")
+        try addColumnIfMissing(table: "cards", column: "audio_word_media_id", definition: "TEXT")
+        try addColumnIfMissing(table: "card_examples", column: "image_media_id", definition: "TEXT")
+        try addColumnIfMissing(table: "card_examples", column: "audio_example_media_id", definition: "TEXT")
+    }
+
+    private func addColumnIfMissing(table: String, column: String, definition: String) throws {
+        guard try !hasColumn(column, inTable: table) else { return }
+        let sql = "ALTER TABLE \(table) ADD COLUMN \(column) \(definition)"
+        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.migrationFailed
+        }
+    }
+
+    private func hasColumn(_ column: String, inTable table: String) throws -> Bool {
+        let sql = "PRAGMA table_info(\(table))"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if textColumn(statement, index: 1) == column {
+                return true
+            }
+        }
+        return false
     }
 
     private func normalizeUUIDColumns() throws {
         let statements = [
             "UPDATE decks SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
+            "UPDATE decks SET avatar_media_id = lower(avatar_media_id) WHERE avatar_media_id GLOB '*[A-Z]*'",
+            "UPDATE media_objects SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
             "UPDATE cards SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
             "UPDATE cards SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
+            "UPDATE cards SET image_media_id = lower(image_media_id) WHERE image_media_id GLOB '*[A-Z]*'",
+            "UPDATE cards SET audio_word_media_id = lower(audio_word_media_id) WHERE audio_word_media_id GLOB '*[A-Z]*'",
             "UPDATE card_examples SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
             "UPDATE card_examples SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
+            "UPDATE card_examples SET image_media_id = lower(image_media_id) WHERE image_media_id GLOB '*[A-Z]*'",
+            "UPDATE card_examples SET audio_example_media_id = lower(audio_example_media_id) WHERE audio_example_media_id GLOB '*[A-Z]*'",
             "UPDATE word_forms SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
             "UPDATE example_distractors SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
             "UPDATE example_distractors SET example_id = lower(example_id) WHERE example_id GLOB '*[A-Z]*'",
@@ -482,6 +531,7 @@ final class ContentDatabase {
         let status: ContentStatus
         let title: String
         let avatarSystemName: String?
+        let avatarMediaID: UUID?
         let languageCode: String
         let newCardsPerDay: Int
         let reviewCardsPerDay: Int
@@ -489,7 +539,7 @@ final class ContentDatabase {
 
     private func fetchDeckRows() throws -> [DeckRow] {
         let sql = """
-        SELECT id, status, title, avatar_system_name, language_code,
+        SELECT id, status, title, avatar_system_name, avatar_media_id, language_code,
                new_cards_per_day, review_cards_per_day
         FROM decks
         ORDER BY title
@@ -504,16 +554,17 @@ final class ContentDatabase {
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let id = uuidColumn(statement, index: 0),
                   let title = textColumn(statement, index: 2),
-                  let languageCode = textColumn(statement, index: 4) else { continue }
+                  let languageCode = textColumn(statement, index: 5) else { continue }
             rows.append(
                 DeckRow(
                     id: id,
                     status: statusColumn(statement, index: 1),
                     title: title,
                     avatarSystemName: textColumn(statement, index: 3),
+                    avatarMediaID: uuidColumn(statement, index: 4),
                     languageCode: languageCode,
-                    newCardsPerDay: Int(sqlite3_column_int(statement, 5)),
-                    reviewCardsPerDay: Int(sqlite3_column_int(statement, 6))
+                    newCardsPerDay: Int(sqlite3_column_int(statement, 6)),
+                    reviewCardsPerDay: Int(sqlite3_column_int(statement, 7))
                 )
             )
         }
@@ -524,7 +575,7 @@ final class ContentDatabase {
         let sql = """
         SELECT id, status, lemma, display_word, part_of_speech, translation,
                short_definition, memory_hint, etymology, usage_note, synonym_note,
-               grammar_note, notes, image_url, audio_word_path
+               grammar_note, notes, image_media_id, audio_word_media_id
         FROM cards
         WHERE deck_id = ?
         ORDER BY display_word
@@ -556,6 +607,10 @@ final class ContentDatabase {
                     clozeTemplate: example.template,
                     clozeAnswer: example.answer,
                     clozeExampleTranslation: example.translation,
+                    clozeExampleImageURL: resolveMediaURL(
+                        deckID: deckID,
+                        mediaID: example.imageMediaID ?? uuidColumn(statement, index: 13)
+                    ),
                     answerFormKey: example.answerFormKey,
                     shortDefinition: textColumn(statement, index: 6),
                     memoryHint: textColumn(statement, index: 7),
@@ -564,14 +619,17 @@ final class ContentDatabase {
                     synonymNote: textColumn(statement, index: 10),
                     grammarNote: textColumn(statement, index: 11),
                     explanation: textColumn(statement, index: 12),
-                    imageURL: textColumn(statement, index: 13).flatMap(URL.init(string:)),
+                    imageURL: resolveMediaURL(
+                        deckID: deckID,
+                        mediaID: uuidColumn(statement, index: 13)
+                    ),
                     audioWordURL: resolveMediaURL(
                         deckID: deckID,
-                        relativePath: textColumn(statement, index: 14)
+                        mediaID: uuidColumn(statement, index: 14)
                     ),
                     audioExampleURL: resolveMediaURL(
                         deckID: deckID,
-                        relativePath: example.audioExamplePath
+                        mediaID: example.audioExampleMediaID
                     ),
                     distractors: try fetchDistractors(exampleID: example.id),
                     forms: try fetchForms(cardID: id)
@@ -587,12 +645,13 @@ final class ContentDatabase {
         let answer: String
         let answerFormKey: String?
         let translation: String?
-        let audioExamplePath: String?
+        let imageMediaID: UUID?
+        let audioExampleMediaID: UUID?
     }
 
     private func fetchPrimaryExample(cardID: UUID) throws -> ExampleRow? {
         let sql = """
-        SELECT id, template, answer, answer_form_key, translation, audio_example_path
+        SELECT id, template, answer, answer_form_key, translation, image_media_id, audio_example_media_id
         FROM card_examples
         WHERE card_id = ?
         ORDER BY sort_order, id
@@ -618,7 +677,8 @@ final class ContentDatabase {
             answer: answer,
             answerFormKey: textColumn(statement, index: 3),
             translation: textColumn(statement, index: 4),
-            audioExamplePath: textColumn(statement, index: 5)
+            imageMediaID: uuidColumn(statement, index: 5),
+            audioExampleMediaID: uuidColumn(statement, index: 6)
         )
     }
 
@@ -667,9 +727,36 @@ final class ContentDatabase {
         return distractors
     }
 
-    private func resolveMediaURL(deckID: UUID, relativePath: String?) -> URL? {
-        guard let relativePath else { return nil }
-        return try? AppDataPaths.mediaFileURL(deckID: deckID, relativePath: relativePath)
+    private func resolveMediaURL(deckID: UUID, mediaID: UUID?) -> URL? {
+        guard let mediaID else { return nil }
+        let sql = """
+        SELECT local_path, storage_key
+        FROM media_objects
+        WHERE id = ?
+        LIMIT 1
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            return nil
+        }
+        defer { sqlite3_finalize(statement) }
+        try? bind(statement, index: 1, uuid: mediaID)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+
+        if let localPath = textColumn(statement, index: 0) {
+            return resolveMediaReference(localPath, deckID: deckID)
+        }
+        if let storageKey = textColumn(statement, index: 1) {
+            return resolveMediaReference(storageKey, deckID: deckID)
+        }
+        return nil
+    }
+
+    private func resolveMediaReference(_ reference: String, deckID: UUID) -> URL? {
+        if let remoteURL = URL(string: reference), remoteURL.scheme == "http" || remoteURL.scheme == "https" {
+            return remoteURL
+        }
+        return try? AppDataPaths.mediaFileURL(deckID: deckID, relativePath: reference)
     }
 
     // MARK: - SQLite helpers

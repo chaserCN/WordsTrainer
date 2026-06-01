@@ -38,17 +38,24 @@ final class DeckStore {
         try database.studyReviewCount(since: startDate)
     }
 
-    func weakCards(limit: Int = 10) throws -> [WeakCardStat] {
-        try database.weakCards(limit: limit)
-    }
-
     /// Синтетический id для игры «Забытые слова» — у неё нет реальной колоды.
     static let weakCardsPracticeDeckID = UUID(uuidString: "00000000-0000-0000-0000-0000DEADBEEF")!
 
+    static let weakCardsFetchLimit = 30
+    static let weakCardsDisplayLimit = 10
+    static let weakCardsGamePairLimit = 12
+
+    func weakCards(limit: Int = weakCardsFetchLimit) throws -> [WeakCardStat] {
+        try database.weakCards(limit: limit)
+    }
+
     /// Игра «Колонки» из самых забываемых слов всех активных колод.
     /// Чистая практика: ничего не сохраняем (`savesProgress: false`).
-    func weakCardsMatchingSession(limit: Int = 12) throws -> StudySession? {
-        let weak = try weakCards(limit: limit)
+    func weakCardsMatchingSession(
+        from weakStats: [WeakCardStat],
+        limit: Int = weakCardsGamePairLimit
+    ) throws -> StudySession? {
+        let weak = Array(weakStats.shuffled().prefix(limit))
         guard !weak.isEmpty else { return nil }
         var cardByID: [UUID: WordCardContent] = [:]
         for deck in try allDecks() where deck.isActive {

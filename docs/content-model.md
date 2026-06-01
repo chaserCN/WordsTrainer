@@ -17,6 +17,7 @@ Documents/Data/
   <deck-id>/
     media/
       *.mp3
+      *.jpg / *.png / *.webp
 ```
 
 All UUID values are stored as lowercase UUID strings. The media folder name is
@@ -33,9 +34,29 @@ id TEXT PRIMARY KEY NOT NULL,
 status TEXT NOT NULL DEFAULT 'active',
 title TEXT NOT NULL,
 avatar_system_name TEXT,
+avatar_media_id TEXT,
 language_code TEXT NOT NULL,
 new_cards_per_day INTEGER NOT NULL,
 review_cards_per_day INTEGER NOT NULL
+```
+
+`avatar_media_id` points at `media_objects.id`. `avatar_system_name` is only a
+fallback SF Symbol.
+
+### `media_objects`
+
+All deck avatars, card images, example images, word audio, and example audio are
+stored through this table.
+
+```sql
+id TEXT PRIMARY KEY NOT NULL,
+storage_key TEXT,
+local_path TEXT,
+sha256 TEXT,
+mime_type TEXT,
+byte_size INTEGER,
+width INTEGER,
+height INTEGER
 ```
 
 - `status`: deck-level enable/disable switch exposed in the deck detail UI.
@@ -61,8 +82,8 @@ usage_note TEXT,
 synonym_note TEXT,
 grammar_note TEXT,
 notes TEXT,
-image_url TEXT,
-audio_word_path TEXT
+image_media_id TEXT,
+audio_word_media_id TEXT
 ```
 
 Field meaning:
@@ -96,7 +117,8 @@ answer TEXT NOT NULL,
 answer_form_key TEXT,
 translation TEXT,
 note TEXT,
-audio_example_path TEXT,
+image_media_id TEXT,
+audio_example_media_id TEXT,
 sort_order INTEGER NOT NULL DEFAULT 0
 ```
 
@@ -108,6 +130,8 @@ Rules:
 - `answer_form_key` describes the form of `answer`, not the lemma.
 - Multi-word answers are allowed, but still occupy one blank.
 - Current UI uses the first example by `sort_order`.
+- `image_media_id` is an optional image for this concrete example. If it is
+  absent, UI falls back to `cards.image_media_id`.
 
 Example:
 
@@ -227,6 +251,7 @@ struct WordCardContent: Codable, Identifiable, Hashable {
     let clozePrompt: String       // currently same as clozeTemplate
     let clozeTemplate: String?    // card_examples.template
     let clozeAnswer: String?      // card_examples.answer
+    let clozeExampleImageURL: URL? // card_examples.image_media_id, fallback to cards.image_media_id in loading
     let answerFormKey: String?    // card_examples.answer_form_key
 
     let shortDefinition: String?
@@ -272,7 +297,8 @@ struct DeckContent: Identifiable, Hashable {
     let id: UUID
     var status: ContentStatus     // decks.status
     var title: String
-    var avatarSystemName: String?
+    var avatarSystemName: String? // fallback SF Symbol
+    var avatarImageURL: URL?      // resolved from decks.avatar_media_id
     var languageCode: String
     var newCardsPerDay: Int
     var reviewCardsPerDay: Int

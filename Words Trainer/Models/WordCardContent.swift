@@ -33,6 +33,8 @@ struct WordCardContent: Codable, Identifiable, Hashable {
     let clozeAnswer: String?
     /// Russian translation of the example sentence (`card_examples.translation`).
     let clozeExampleTranslation: String?
+    /// Optional image for the concrete example. Falls back to `imageURL` in UI.
+    let clozeExampleImageURL: URL?
     let answerFormKey: String?
     let shortDefinition: String?
     let memoryHint: String?
@@ -58,6 +60,7 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         clozeTemplate: String? = nil,
         clozeAnswer: String? = nil,
         clozeExampleTranslation: String? = nil,
+        clozeExampleImageURL: URL? = nil,
         answerFormKey: String? = nil,
         shortDefinition: String? = nil,
         memoryHint: String? = nil,
@@ -82,6 +85,7 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         self.clozeTemplate = clozeTemplate
         self.clozeAnswer = clozeAnswer
         self.clozeExampleTranslation = clozeExampleTranslation
+        self.clozeExampleImageURL = clozeExampleImageURL
         self.answerFormKey = answerFormKey
         self.shortDefinition = shortDefinition
         self.memoryHint = memoryHint
@@ -310,6 +314,7 @@ struct DeckContent: Identifiable, Hashable {
     var status: ContentStatus
     var title: String
     var avatarSystemName: String?
+    var avatarImageURL: URL?
     var languageCode: String
     var newCardsPerDay: Int
     var reviewCardsPerDay: Int
@@ -323,6 +328,7 @@ struct DeckContent: Identifiable, Hashable {
         status: ContentStatus = .active,
         title: String,
         avatarSystemName: String?,
+        avatarImageURL: URL? = nil,
         languageCode: String,
         newCardsPerDay: Int,
         reviewCardsPerDay: Int,
@@ -332,6 +338,7 @@ struct DeckContent: Identifiable, Hashable {
         self.status = status
         self.title = title
         self.avatarSystemName = avatarSystemName
+        self.avatarImageURL = avatarImageURL
         self.languageCode = languageCode
         self.newCardsPerDay = newCardsPerDay
         self.reviewCardsPerDay = reviewCardsPerDay
