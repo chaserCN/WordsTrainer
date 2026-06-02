@@ -145,6 +145,88 @@ struct DeckStatsTests {
         #expect(stats.reviewDue == 1)
     }
 
+    @Test("deck stats count cards due later today separately")
+    func dueLaterTodayCount() {
+        let dueNowID = UUID()
+        let reviewLaterID = UUID()
+        let learningLaterID = UUID()
+        let tomorrowID = UUID()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 9))!
+        let laterToday = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 21))!
+        let tomorrow = calendar.date(from: DateComponents(year: 2026, month: 6, day: 4, hour: 9))!
+        let deck = DeckContent(
+            id: UUID(),
+            title: "Test",
+            avatarSystemName: nil,
+            languageCode: "en",
+            newCardsPerDay: 20,
+            reviewCardsPerDay: 200,
+            cards: [
+                TestFixtures.card(id: dueNowID, word: "cat", translation: "кот"),
+                TestFixtures.card(id: reviewLaterID, word: "dog", translation: "собака"),
+                TestFixtures.card(id: learningLaterID, word: "bird", translation: "птица"),
+                TestFixtures.card(id: tomorrowID, word: "fish", translation: "рыба"),
+            ]
+        )
+        let progressByCardID = [
+            dueNowID: CardProgress(cardID: dueNowID, fsrsCard: reviewCard(due: now.addingTimeInterval(-60), now: now)),
+            reviewLaterID: CardProgress(cardID: reviewLaterID, fsrsCard: reviewCard(due: laterToday, now: now)),
+            learningLaterID: CardProgress(cardID: learningLaterID, fsrsCard: learningCard(due: laterToday, now: now)),
+            tomorrowID: CardProgress(cardID: tomorrowID, fsrsCard: reviewCard(due: tomorrow, now: now)),
+        ]
+
+        let stats = DeckStatsCalculator.compute(
+            deck: deck,
+            progressByCardID: progressByCardID,
+            dailyUsage: nil,
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(stats.reviewDue == 1)
+        #expect(stats.dueLaterToday == 2)
+        #expect(stats.studyTotal == 1)
+    }
+
+    @Test("deck stats cap review cards due later today by daily review limit")
+    func dueLaterTodayReviewCountRespectsDailyLimit() {
+        let dueNowID = UUID()
+        let laterID = UUID()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 9))!
+        let laterToday = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 21))!
+        let deck = DeckContent(
+            id: UUID(),
+            title: "Test",
+            avatarSystemName: nil,
+            languageCode: "en",
+            newCardsPerDay: 20,
+            reviewCardsPerDay: 1,
+            cards: [
+                TestFixtures.card(id: dueNowID, word: "cat", translation: "кот"),
+                TestFixtures.card(id: laterID, word: "dog", translation: "собака"),
+            ]
+        )
+        let progressByCardID = [
+            dueNowID: CardProgress(cardID: dueNowID, fsrsCard: reviewCard(due: now.addingTimeInterval(-60), now: now)),
+            laterID: CardProgress(cardID: laterID, fsrsCard: reviewCard(due: laterToday, now: now)),
+        ]
+
+        let stats = DeckStatsCalculator.compute(
+            deck: deck,
+            progressByCardID: progressByCardID,
+            dailyUsage: nil,
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(stats.reviewDue == 1)
+        #expect(stats.dueLaterToday == 0)
+    }
+
     @Test("cloze queue falls back to full deck when SRS queue is empty")
     @MainActor
     func clozeQueueFallback() throws {
@@ -167,6 +249,28 @@ struct DeckStatsTests {
         )
         #expect(queue.isEmpty)
         #expect(deck.cards.count == 1)
+    }
+
+    private func reviewCard(due: Date, now: Date) -> Card {
+        Card(
+            due: due,
+            stability: 1,
+            difficulty: 1,
+            reps: 1,
+            state: .review,
+            lastReview: now.addingTimeInterval(-86_400)
+        )
+    }
+
+    private func learningCard(due: Date, now: Date) -> Card {
+        Card(
+            due: due,
+            stability: 1,
+            difficulty: 1,
+            reps: 1,
+            state: .learning,
+            lastReview: now.addingTimeInterval(-3_600)
+        )
     }
 
     @Test("study queue skips inactive cards")

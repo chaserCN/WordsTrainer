@@ -61,88 +61,28 @@ struct TodayView: View {
             DeckStats(
                 newAvailable: partial.newAvailable + stats.newAvailable,
                 learningDue: partial.learningDue + stats.learningDue,
-                reviewDue: partial.reviewDue + stats.reviewDue
+                reviewDue: partial.reviewDue + stats.reviewDue,
+                dueLaterToday: partial.dueLaterToday + stats.dueLaterToday
             )
         }
     }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    if let selectedUser = userStore.selectedUser {
-                        TodayHeader(
-                            user: selectedUser,
-                            streakDays: streakDays,
-                            showUserSwitcher: { showUserSwitcher = true }
-                        )
-                    } else if showsNoUserConnectionCard {
-                        TodayServerConnectionCard(
-                            title: noUserTitle,
-                            systemImage: noUserSystemImage,
-                            message: noUserMessage
-                        )
-                    }
-
-                    if let contentStatus {
-                        TodaySyncStatusCard(status: contentStatus)
-                    }
-
-                    StudyTodayCard(
-                        stats: totalStats,
-                        practiceCount: todayPracticeCount,
-                        isEnabled: totalStats.studyTotal > 0 || todayPracticeCount > 0,
-                        action: {
-                            showTodayModes = true
-                        }
-                    )
-
-                    if let store, !activeDecksWithStudyToday.isEmpty {
-                        TodayDeckSummary(decks: activeDecksWithStudyToday, statsByDeckID: statsByDeckID, store: store)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.top, 28)
-                .padding(.bottom, 32)
-            }
+            todayScrollContent
             .refreshable {
                 await syncNow()
             }
             .background { LovableBackground(variant: .today) }
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(isPresented: $showTodayModes) {
-                if let store {
-                    TodayAllDecksModesView(
-                        store: store,
-                        queueCount: totalStats.studyTotal,
-                        newCount: totalStats.newAvailable,
-                        dueCount: totalStats.learningDue + totalStats.reviewDue
-                    )
-                }
-            }
+            .navigationDestination(isPresented: $showTodayModes) { todayModesDestination }
             .sheet(isPresented: $showUserSwitcher) {
                 UserSwitcherSheet()
                     .presentationDetents([.medium])
                     .presentationDragIndicator(.visible)
             }
-            .overlay {
-                if let loadError {
-                    DataPlaceholderView(
-                        title: "Ошибка",
-                        systemImage: "exclamationmark.triangle",
-                        message: loadError
-                    )
-                }
-            }
-            .overlay(alignment: .top) {
-                if let toast {
-                    TodayToastView(toast: toast)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 10)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
+            .overlay { loadErrorOverlay }
+            .overlay(alignment: .top) { toastOverlay }
             .animation(.snappy(duration: 0.22), value: toast)
         }
         .task {
@@ -162,6 +102,97 @@ struct TodayView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: DeckStore.localDataDidChangeNotification)) { _ in
             Task { await reload() }
+        }
+    }
+
+    private var todayScrollContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                todayHeaderSection
+                contentStatusSection
+                studyTodaySection
+                todayDecksSection
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 28)
+            .padding(.bottom, 32)
+        }
+    }
+
+    @ViewBuilder
+    private var todayHeaderSection: some View {
+        if let selectedUser = userStore.selectedUser {
+            TodayHeader(
+                user: selectedUser,
+                streakDays: streakDays,
+                showUserSwitcher: { showUserSwitcher = true }
+            )
+        } else if showsNoUserConnectionCard {
+            TodayServerConnectionCard(
+                title: noUserTitle,
+                systemImage: noUserSystemImage,
+                message: noUserMessage
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var contentStatusSection: some View {
+        if let contentStatus {
+            TodaySyncStatusCard(status: contentStatus)
+        }
+    }
+
+    private var studyTodaySection: some View {
+        let stats = totalStats
+        return StudyTodayCard(
+            stats: stats,
+            practiceCount: todayPracticeCount,
+            isEnabled: stats.studyTotal > 0 || todayPracticeCount > 0,
+            action: { showTodayModes = true }
+        )
+    }
+
+    @ViewBuilder
+    private var todayDecksSection: some View {
+        if let store, !activeDecksWithStudyToday.isEmpty {
+            TodayDeckSummary(decks: activeDecksWithStudyToday, statsByDeckID: statsByDeckID, store: store)
+        }
+    }
+
+    @ViewBuilder
+    private var todayModesDestination: some View {
+        if let store {
+            let stats = totalStats
+            TodayAllDecksModesView(
+                store: store,
+                queueCount: stats.studyTotal,
+                newCount: stats.newAvailable,
+                dueCount: stats.learningDue + stats.reviewDue,
+                laterCount: stats.dueLaterToday
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var loadErrorOverlay: some View {
+        if let loadError {
+            DataPlaceholderView(
+                title: "Ошибка",
+                systemImage: "exclamationmark.triangle",
+                message: loadError
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var toastOverlay: some View {
+        if let toast {
+            TodayToastView(toast: toast)
+                .padding(.horizontal, 20)
+                .padding(.top, 10)
+                .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 
@@ -893,6 +924,7 @@ private struct TodayStudyModesView: View {
     let queueCount: Int
     var newCount: Int = 0
     var dueCount: Int = 0
+    var laterCount: Int = 0
     var practiceCount: Int = 0
     var deck: DeckContent? = nil
     let start: (StudyMode) -> Void
@@ -908,6 +940,7 @@ private struct TodayStudyModesView: View {
                     queueCount: queueCount,
                     newCount: newCount,
                     dueCount: dueCount,
+                    laterCount: laterCount,
                     practiceCount: practiceCount,
                     deck: deck
                 )
@@ -969,6 +1002,7 @@ private struct TodayAllDecksModesView: View {
     let queueCount: Int
     let newCount: Int
     let dueCount: Int
+    let laterCount: Int
 
     @State private var session: StudySession?
     @State private var sessionDeckTitle = ""
@@ -981,6 +1015,7 @@ private struct TodayAllDecksModesView: View {
             queueCount: queueCount,
             newCount: newCount,
             dueCount: dueCount,
+            laterCount: laterCount,
             practiceCount: practiceCount,
             start: start
         )
@@ -1053,6 +1088,7 @@ private struct TodayDeckModesView: View {
             queueCount: stats.studyTotal,
             newCount: stats.newAvailable,
             dueCount: stats.learningDue + stats.reviewDue,
+            laterCount: stats.dueLaterToday,
             practiceCount: practiceCount,
             deck: deck,
             start: start
@@ -1088,6 +1124,7 @@ private struct QueueSummaryCard: View {
     let queueCount: Int
     let newCount: Int
     let dueCount: Int
+    let laterCount: Int
     var practiceCount: Int = 0
     var deck: DeckContent? = nil
 
@@ -1154,6 +1191,12 @@ private struct QueueSummaryCard: View {
                     .fill(.white.opacity(0.1))
                     .frame(width: 1, height: 12)
                 LovableStat(count: dueCount, label: "Повторить", color: LovableSurface.amberText)
+                if laterCount > 0 {
+                    Rectangle()
+                        .fill(.white.opacity(0.1))
+                        .frame(width: 1, height: 12)
+                    LovableStat(count: laterCount, label: "Позже", color: oklch(0.74, 0.1, 285))
+                }
             }
         }
         .padding(16)
