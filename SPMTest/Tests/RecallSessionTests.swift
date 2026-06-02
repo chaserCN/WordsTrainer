@@ -123,4 +123,62 @@ struct RecallSessionTests {
         #expect(saved?.fsrsCard.reps == 1)
         #expect(saved?.fsrsCard.state != .new)
     }
+
+    @Test("practice review advances without saving progress or review event")
+    @MainActor
+    func practiceReviewDoesNotSaveProgressOrReviewEvent() throws {
+        let engine = StudySessionEngine()
+        let cardID = UUID()
+        let card = TestFixtures.card(id: cardID, word: "cat", translation: "кот")
+        let session = StudySession(
+            deckID: UUID(),
+            mode: .flashcards,
+            queue: [TestFixtures.queueItem(card: card)],
+            dailyUsage: nil,
+            engine: engine,
+            savesProgress: false
+        )
+
+        var didSaveProgress = false
+        var didSaveReview = false
+        try session.advanceAfterReview(outcome: .remembered) { _, _ in
+            didSaveProgress = true
+        } onReview: { _ in
+            didSaveReview = true
+        }
+
+        #expect(session.isFinished)
+        #expect(!didSaveProgress)
+        #expect(!didSaveReview)
+    }
+
+    @Test("review event uses queue item deck id when session mixes decks")
+    @MainActor
+    func reviewEventUsesQueueItemDeckID() throws {
+        let engine = StudySessionEngine()
+        let sessionDeckID = UUID()
+        let sourceDeckID = UUID()
+        let cardID = UUID()
+        let card = TestFixtures.card(id: cardID, word: "cat", translation: "кот")
+        let item = StudyQueueItem(
+            card: card,
+            progress: CardProgress.newCard(cardID: cardID),
+            deckID: sourceDeckID
+        )
+        let session = StudySession(
+            deckID: sessionDeckID,
+            mode: .flashcards,
+            queue: [item],
+            dailyUsage: nil,
+            engine: engine,
+            matchingRecordScope: .today(dayKey: "2026-06-02")
+        )
+
+        var reviewDeckID: UUID?
+        try session.advanceAfterReview(outcome: .remembered) { _, _ in } onReview: { event in
+            reviewDeckID = event.deckID
+        }
+
+        #expect(reviewDeckID == sourceDeckID)
+    }
 }

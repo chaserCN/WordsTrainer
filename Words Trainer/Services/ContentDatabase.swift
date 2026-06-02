@@ -54,6 +54,7 @@ struct PendingServerSyncBatch {
 final class ContentDatabase {
     private var db: OpaquePointer?
     private let userID: UUID
+    var currentUserID: UUID { userID }
 
     init(userID: UUID = ContentDatabaseDefaults.userID) throws {
         self.userID = userID
@@ -412,6 +413,50 @@ final class ContentDatabase {
         if try hasStatsSummarySnapshot() {
             try applyReviewToStatsSummary(event)
         }
+    }
+
+    func reviewedCardIDs(
+        day: Date = .now,
+        deckID: UUID? = nil,
+        calendar: Calendar = .current
+    ) throws -> [UUID] {
+        let start = calendar.startOfDay(for: day)
+        let end = calendar.date(byAdding: .day, value: 1, to: start)
+            ?? start.addingTimeInterval(24 * 60 * 60)
+        var sql = """
+        SELECT card_id, MAX(reviewed_at) AS last_reviewed_at
+        FROM study_reviews
+        WHERE user_id = ? AND reviewed_at >= ? AND reviewed_at < ?
+        """
+        if deckID != nil {
+            sql += " AND deck_id = ?"
+        }
+        sql += """
+
+        GROUP BY card_id
+        ORDER BY last_reviewed_at DESC
+        """
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        guard sqlite3_bind_double(statement, 2, start.timeIntervalSince1970) == SQLITE_OK,
+              sqlite3_bind_double(statement, 3, end.timeIntervalSince1970) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        if let deckID {
+            try bind(statement, index: 4, uuid: deckID)
+        }
+
+        var cardIDs: [UUID] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let cardID = uuidColumn(statement, index: 0) else { continue }
+            cardIDs.append(cardID)
+        }
+        return cardIDs
     }
 
     func studyActivity(since startDate: Date) throws -> [StudyActivityDay] {

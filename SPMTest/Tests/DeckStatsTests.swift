@@ -208,6 +208,49 @@ struct DeckStatsTests {
         #expect(queue.isEmpty)
     }
 
+    @Test("study queue samples review cards from shuffled due pool")
+    func studyQueueSamplesReviewsFromShuffledPool() {
+        let now = Date()
+        let cards = (0..<6).map { index in
+            TestFixtures.card(word: "word \(index)", translation: "перевод \(index)")
+        }
+        let deck = DeckContent(
+            id: UUID(),
+            title: "Test",
+            avatarSystemName: nil,
+            languageCode: "en",
+            newCardsPerDay: 0,
+            reviewCardsPerDay: 2,
+            cards: cards
+        )
+        let dueCard = Card(
+            due: now.addingTimeInterval(-60),
+            stability: 1,
+            difficulty: 1,
+            reps: 1,
+            state: .review,
+            lastReview: now.addingTimeInterval(-86_400)
+        )
+        let progressByCardID = Dictionary(
+            uniqueKeysWithValues: cards.map {
+                ($0.id, CardProgress(cardID: $0.id, fsrsCard: dueCard))
+            }
+        )
+        var firstRNG = SeededRNG(seed: 1)
+
+        let firstQueue = StudyQueueBuilder.build(
+            deck: deck,
+            progressByCardID: progressByCardID,
+            dailyUsage: nil,
+            now: now,
+            using: &firstRNG
+        )
+
+        #expect(firstQueue.count == 2)
+        #expect(Set(firstQueue.map(\.card.id)).isSubset(of: Set(cards.map(\.id))))
+        #expect(firstQueue.map(\.card.word) != ["word 0", "word 1"])
+    }
+
     @Test("binary review updates FSRS card")
     @MainActor
     func binaryReview() throws {

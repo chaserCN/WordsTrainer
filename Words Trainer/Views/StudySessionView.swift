@@ -103,11 +103,11 @@ struct StudySessionView: View {
             }
         }
         .onChange(of: session.isFinished) { _, isFinished in
-            guard isFinished, session.mode == .matching, session.savesProgress else { return }
+            guard isFinished, session.mode == .matching else { return }
             let duration = session.matchingElapsed
             finishedDuration = duration
             beatRecord = (try? store.saveMatchingRecordIfBest(
-                deckID: session.deckID,
+                scope: session.matchingRecordScope,
                 duration: duration,
                 pairCount: session.matchingTotalPairCount
             )) ?? false

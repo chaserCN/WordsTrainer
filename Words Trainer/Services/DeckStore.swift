@@ -23,11 +23,24 @@ enum WeakCardsPractice {
 @MainActor
 @Observable
 final class DeckStore {
+    static let localDataDidChangeNotification = Notification.Name("DeckStore.localDataDidChange")
+    static let changedDeckIDUserInfoKey = "deckID"
+
+    private let userID: UUID
     private let database: ContentDatabase
+    private let todayMatchingRecordStore: TodayMatchingRecordStore
     private let engine = StudySessionEngine()
 
     init(database: ContentDatabase) {
+        self.userID = database.currentUserID
         self.database = database
+        self.todayMatchingRecordStore = TodayMatchingRecordStore()
+    }
+
+    init(database: ContentDatabase, todayMatchingRecordStore: TodayMatchingRecordStore) {
+        self.userID = database.currentUserID
+        self.database = database
+        self.todayMatchingRecordStore = todayMatchingRecordStore
     }
 
     convenience init() throws {
@@ -49,6 +62,7 @@ final class DeckStore {
 
     func setDeckStatus(_ status: ContentStatus, for deckID: UUID) throws {
         try database.updateDeckStatus(deckID: deckID, status: status)
+        notifyLocalDataDidChange(deckID: deckID)
     }
 
     func studyActivity(days: Int) throws -> [StudyActivityDay] {
@@ -132,13 +146,21 @@ final class DeckStore {
         }
     }
 
-    func firstDeckWithStudyToday(mode: StudyMode = .flashcards) throws -> (DeckContent, StudySession)? {
-        for deck in try allDecks() where deck.isActive {
-            let stats = try stats(for: deck)
-            guard stats.studyTotal > 0 else { continue }
-            return (deck, try startTodaySession(deck: deck, mode: mode))
-        }
-        return nil
+    func startTodaySession(mode: StudyMode) throws -> StudySession? {
+        try TodayStudySessionBuilder.todaySession(
+            snapshots: todaySnapshots(),
+            mode: mode,
+            dayKey: DeckDailyUsage.todayKey(),
+            engine: engine
+        )
+    }
+
+    func todayPracticeCardCount() throws -> Int {
+        try TodayStudySessionBuilder.todayPracticeCardCount(snapshots: todaySnapshots())
+    }
+
+    func todayPracticeCardCount(deck: DeckContent) throws -> Int {
+        try TodayStudySessionBuilder.todayPracticeCardCount(snapshot: todaySnapshot(deck: deck))
     }
 
     func stats(for deck: DeckContent) throws -> DeckStats {
@@ -211,6 +233,23 @@ final class DeckStore {
         )
     }
 
+    func startTodayPracticeSession(mode: StudyMode) throws -> StudySession? {
+        try TodayStudySessionBuilder.todayPracticeSession(
+            snapshots: todaySnapshots(),
+            mode: mode,
+            dayKey: DeckDailyUsage.todayKey(),
+            engine: engine
+        )
+    }
+
+    func startTodayPracticeSession(deck: DeckContent, mode: StudyMode) throws -> StudySession? {
+        try TodayStudySessionBuilder.todayPracticeSession(
+            snapshot: todaySnapshot(deck: deck),
+            mode: mode,
+            engine: engine
+        )
+    }
+
     /// Сессия из всех активных карт колоды независимо от расписания (вкладка «Колоды»).
     func startAllCardsSession(deck: DeckContent, mode: StudyMode) throws -> StudySession {
         let studyCards = deck.isActive ? deck.activeCards : []
@@ -258,6 +297,17 @@ final class DeckStore {
         try database.matchingRecord(deckID: deckID)
     }
 
+    func matchingRecord(scope: MatchingRecordScope) throws -> MatchingRecordSummary? {
+        switch scope {
+        case .none:
+            return nil
+        case .deck(let deckID):
+            return try database.matchingRecord(deckID: deckID)?.summary
+        case .today(let dayKey):
+            return todayMatchingRecordStore.record(userID: userID, dayKey: dayKey)
+        }
+    }
+
     /// Saves when there is no record, the pair count changed, or the time improved.
     @discardableResult
     func saveMatchingRecordIfBest(
@@ -276,6 +326,7 @@ final class DeckStore {
                         achievedAt: .now
                     )
                 )
+                notifyLocalDataDidChange(deckID: deckID)
                 return true
             }
             guard duration < existing.bestDuration else { return false }
@@ -288,7 +339,56 @@ final class DeckStore {
                 achievedAt: .now
             )
         )
+        notifyLocalDataDidChange(deckID: deckID)
         return true
+    }
+
+    @discardableResult
+    func saveMatchingRecordIfBest(
+        scope: MatchingRecordScope,
+        duration: TimeInterval,
+        pairCount: Int
+    ) throws -> Bool {
+        switch scope {
+        case .none:
+            return false
+        case .deck(let deckID):
+            return try saveMatchingRecordIfBest(
+                deckID: deckID,
+                duration: duration,
+                pairCount: pairCount
+            )
+        case .today(let dayKey):
+            return todayMatchingRecordStore.saveIfBest(
+                userID: userID,
+                dayKey: dayKey,
+                duration: duration,
+                pairCount: pairCount
+            )
+        }
+    }
+
+    func notifyLocalDataDidChange(deckID: UUID) {
+        NotificationCenter.default.post(
+            name: Self.localDataDidChangeNotification,
+            object: self,
+            userInfo: [Self.changedDeckIDUserInfoKey: deckID]
+        )
+    }
+
+    private func todaySnapshots() throws -> [TodayStudyDeckSnapshot] {
+        try allDecks().filter(\.isActive).map { deck in
+            try todaySnapshot(deck: deck)
+        }
+    }
+
+    private func todaySnapshot(deck: DeckContent) throws -> TodayStudyDeckSnapshot {
+        try TodayStudyDeckSnapshot(
+            deck: deck,
+            progressByCardID: database.progressMap(deckID: deck.id),
+            dailyUsage: database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey()),
+            reviewedCardIDs: database.reviewedCardIDs(deckID: deck.id)
+        )
     }
 }
 
@@ -297,10 +397,14 @@ extension StudySession {
         outcome: ReviewOutcome,
         store: DeckStore
     ) throws {
+        let shouldNotify = savesProgress
+        let progressDeckID = current?.deckID ?? deckID
         try advanceAfterReview(outcome: outcome) { progress, wasNew in
-            try store.saveProgress(deckID: deckID, progress: progress, wasNew: wasNew)
+            try store.saveProgress(deckID: progressDeckID, progress: progress, wasNew: wasNew)
         } onReview: { event in
             try store.saveStudyReview(event)
         }
+        guard shouldNotify else { return }
+        store.notifyLocalDataDidChange(deckID: progressDeckID)
     }
 }

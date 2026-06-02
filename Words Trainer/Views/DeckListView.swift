@@ -69,6 +69,9 @@ struct DeckListView: View {
             guard state == .loaded else { return }
             Task { await bootstrap() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: DeckStore.localDataDidChangeNotification)) { _ in
+            Task { await bootstrap() }
+        }
     }
 
     private var activeDecks: [DeckContent] {

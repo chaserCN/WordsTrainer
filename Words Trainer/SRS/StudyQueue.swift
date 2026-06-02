@@ -3,13 +3,19 @@ import FSRS
 
 struct StudyQueueItem: Identifiable, Sendable {
     let id: UUID
+    let deckID: UUID?
     let card: WordCardContent
     let progress: CardProgress
 
-    init(card: WordCardContent, progress: CardProgress) {
+    init(card: WordCardContent, progress: CardProgress, deckID: UUID? = nil) {
         self.id = card.id
+        self.deckID = deckID
         self.card = card
         self.progress = progress
+    }
+
+    func withDeckID(_ deckID: UUID) -> StudyQueueItem {
+        StudyQueueItem(card: card, progress: progress, deckID: deckID)
     }
 }
 
@@ -52,6 +58,23 @@ enum StudyQueueBuilder {
         dailyUsage: DeckDailyUsage?,
         now: Date = .now
     ) -> [StudyQueueItem] {
+        var rng = SystemRandomNumberGenerator()
+        return build(
+            deck: deck,
+            progressByCardID: progressByCardID,
+            dailyUsage: dailyUsage,
+            now: now,
+            using: &rng
+        )
+    }
+
+    static func build<RNG: RandomNumberGenerator>(
+        deck: DeckContent,
+        progressByCardID: [UUID: CardProgress],
+        dailyUsage: DeckDailyUsage?,
+        now: Date = .now,
+        using rng: inout RNG
+    ) -> [StudyQueueItem] {
         guard deck.isActive else { return [] }
 
         var learning: [StudyQueueItem] = []
@@ -77,17 +100,19 @@ enum StudyQueueBuilder {
                     learning.append(item)
                 }
             case .review:
-                if fsrs.due <= now, review.count < deck.reviewCardsPerDay {
+                if fsrs.due <= now {
                     review.append(item)
                 }
             }
         }
 
-        learning.sort { $0.progress.fsrsCard.due < $1.progress.fsrsCard.due }
-        review.sort { $0.progress.fsrsCard.due < $1.progress.fsrsCard.due }
+        learning.shuffle(using: &rng)
+        review.shuffle(using: &rng)
+        newCards.shuffle(using: &rng)
 
+        let takenReview = Array(review.prefix(min(review.count, deck.reviewCardsPerDay)))
         let takenNew = Array(newCards.prefix(min(newCards.count, newSlotsLeft)))
-        return learning + review + takenNew
+        return learning + takenReview + takenNew
     }
 }
 

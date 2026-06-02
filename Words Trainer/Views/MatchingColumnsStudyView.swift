@@ -51,7 +51,7 @@ struct MatchingColumnsStudyView: View {
 
     /// Лейблы всех виденных пар — чтобы текст не пропадал, пока матченная пара гаснет.
     @State private var pairCache: [String: MatchingPair] = [:]
-    @State private var matchingRecord: DeckMatchingRecord?
+    @State private var matchingRecord: MatchingRecordSummary?
     @State private var previewPair: MatchingPair?
     @State private var suppressedWordTapSlot: UUID?
 
@@ -94,8 +94,8 @@ struct MatchingColumnsStudyView: View {
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 12)
-        .task(id: session.deckID) {
-            matchingRecord = try? store.matchingRecord(deckID: session.deckID)
+        .task(id: session.matchingRecordScope) {
+            matchingRecord = try? store.matchingRecord(scope: session.matchingRecordScope)
         }
         .onChange(of: session.matchingVisibleItems.map(\.id), initial: true) { _, _ in
             seedColumnsIfNeeded()
@@ -482,7 +482,7 @@ private struct MatchingStatusBar: View {
     @Environment(AppSettings.self) private var settings
     let remainingCount: Int
     let startedAt: Date
-    let record: DeckMatchingRecord?
+    let record: MatchingRecordSummary?
     let pairCount: Int
 
     private var recordDuration: TimeInterval? {

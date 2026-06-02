@@ -6,8 +6,9 @@ import FSRS
 final class StudySession {
     let deckID: UUID
     let mode: StudyMode
-    /// Когда false — чистая практика: ни прогресс, ни рекорд не сохраняются
-    /// (например, игра «Забытые слова» со вкладки «Статистика»).
+    let matchingRecordScope: MatchingRecordScope
+    /// Когда false — чистая практика: учебный прогресс и review events не сохраняются.
+    /// Matching-рекорд управляется отдельно через `matchingRecordScope`.
     let savesProgress: Bool
     let matchingTotalPairCount: Int
     let matchingStartedAt: Date?
@@ -49,11 +50,13 @@ final class StudySession {
         deckCards: [WordCardContent] = [],
         dailyUsage: DeckDailyUsage?,
         engine: StudySessionEngine,
+        matchingRecordScope: MatchingRecordScope? = nil,
         savesProgress: Bool = true
     ) {
         self.deckID = deckID
         self.mode = mode
         self.savesProgress = savesProgress
+        self.matchingRecordScope = matchingRecordScope ?? (savesProgress ? .deck(deckID) : .none)
         self.dailyUsage = dailyUsage
         self.engine = engine
         sessionChoicePool = queue.map(\.card)
@@ -96,19 +99,22 @@ final class StudySession {
         } else {
             updated = try engine.applyReview(progress: item.progress, outcome: outcome, now: reviewedAt)
         }
-        try onSave(updated, wasNew && outcome.passed)
-        try onReview?(
-            StudyReviewEvent(
-                cardID: item.card.id,
-                deckID: deckID,
-                mode: mode,
-                outcome: outcome,
-                reviewedAt: reviewedAt,
-                wasNew: wasNew,
-                previousState: String(describing: item.progress.fsrsCard.state),
-                newState: String(describing: updated.fsrsCard.state)
+        if savesProgress {
+            let eventDeckID = item.deckID ?? deckID
+            try onSave(updated, wasNew && outcome.passed)
+            try onReview?(
+                StudyReviewEvent(
+                    cardID: item.card.id,
+                    deckID: eventDeckID,
+                    mode: mode,
+                    outcome: outcome,
+                    reviewedAt: reviewedAt,
+                    wasNew: wasNew,
+                    previousState: String(describing: item.progress.fsrsCard.state),
+                    newState: String(describing: updated.fsrsCard.state)
+                )
             )
-        )
+        }
         queue.removeFirst()
     }
 }

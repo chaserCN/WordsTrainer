@@ -113,6 +113,56 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("reviewed card IDs return cards reviewed during requested day")
+    func reviewedCardIDsReturnCardsReviewedDuringRequestedDay() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+            let reviewedAt = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
+            let previousDay = try #require(Self.isoDate("2026-06-01T12:00:00.000Z"))
+
+            try database.saveStudyReview(
+                StudyReviewEvent(
+                    id: UUID(uuidString: "55555555-5555-4555-8555-555555555555")!,
+                    cardID: cardID,
+                    deckID: deckID,
+                    mode: .flashcards,
+                    outcome: .remembered,
+                    reviewedAt: previousDay,
+                    durationMS: 1000,
+                    wasNew: true,
+                    previousState: "new",
+                    newState: "review"
+                )
+            )
+            try database.saveStudyReview(
+                StudyReviewEvent(
+                    id: UUID(uuidString: "66666666-6666-4666-8666-666666666666")!,
+                    cardID: cardID,
+                    deckID: deckID,
+                    mode: .clozeMultipleChoice,
+                    outcome: .correct,
+                    reviewedAt: reviewedAt,
+                    durationMS: 1000,
+                    wasNew: false,
+                    previousState: "review",
+                    newState: "review"
+                )
+            )
+
+            #expect(try database.reviewedCardIDs(day: reviewedAt, calendar: calendar) == [cardID])
+            #expect(try database.reviewedCardIDs(day: reviewedAt, deckID: deckID, calendar: calendar) == [cardID])
+            #expect(try database.reviewedCardIDs(day: reviewedAt, deckID: UUID(), calendar: calendar).isEmpty)
+            #expect(
+                try database.reviewedCardIDs(
+                    day: reviewedAt.addingTimeInterval(24 * 60 * 60),
+                    calendar: calendar
+                ).isEmpty
+            )
+        }
+    }
+
     @Test("empty server daily usage snapshot clears synced local usage")
     func emptyServerDailyUsageSnapshotClearsSyncedLocalUsage() throws {
         try withIsolatedDatabase { database in

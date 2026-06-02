@@ -46,6 +46,7 @@ let package = Package(
                 "SRS/MatchingPairScheduler.swift",
                 "SRS/StudyQueue.swift",
                 "SRS/StudySession.swift",
+                "SRS/TodayStudySessionBuilder.swift",
             ]
         ),
         .testTarget(

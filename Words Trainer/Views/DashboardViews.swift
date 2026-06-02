@@ -38,12 +38,10 @@ struct TodayView: View {
     @State private var storeUserID: UUID?
     @State private var decks: [DeckContent] = []
     @State private var statsByDeckID: [UUID: DeckStats] = [:]
+    @State private var todayPracticeCount = 0
     @State private var streakDays = 0
-    @State private var session: StudySession?
-    @State private var sessionDeckTitle = ""
     @State private var showUserSwitcher = false
     @State private var showTodayModes = false
-    @State private var showStudy = false
     @State private var toast: TodayToast?
     @State private var toastDismissTask: Task<Void, Never>?
     @State private var loadError: String?
@@ -94,7 +92,8 @@ struct TodayView: View {
 
                     StudyTodayCard(
                         stats: totalStats,
-                        isEnabled: totalStats.studyTotal > 0,
+                        practiceCount: todayPracticeCount,
+                        isEnabled: totalStats.studyTotal > 0 || todayPracticeCount > 0,
                         action: {
                             showTodayModes = true
                         }
@@ -115,18 +114,13 @@ struct TodayView: View {
             .background { LovableBackground(variant: .today) }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showTodayModes) {
-                if store != nil {
-                    TodayStudyModesView(
+                if let store {
+                    TodayAllDecksModesView(
+                        store: store,
                         queueCount: totalStats.studyTotal,
                         newCount: totalStats.newAvailable,
-                        dueCount: totalStats.learningDue + totalStats.reviewDue,
-                        start: startToday(mode:)
+                        dueCount: totalStats.learningDue + totalStats.reviewDue
                     )
-                }
-            }
-            .navigationDestination(isPresented: $showStudy) {
-                if let session, let store {
-                    StudySessionView(session: session, store: store, deckTitle: sessionDeckTitle)
                 }
             }
             .sheet(isPresented: $showUserSwitcher) {
@@ -156,10 +150,6 @@ struct TodayView: View {
         .task {
             await reload()
         }
-        .onChange(of: showStudy) { _, isShowing in
-            guard !isShowing else { return }
-            Task { await reload() }
-        }
         .onChange(of: userStore.selectedUserID) {
             store = nil
             storeUserID = nil
@@ -171,6 +161,9 @@ struct TodayView: View {
             if state == .loaded {
                 Task { await reload() }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: DeckStore.localDataDidChangeNotification)) { _ in
+            Task { await reload() }
         }
     }
 
@@ -249,6 +242,7 @@ struct TodayView: View {
             guard let selectedUserID = userStore.selectedUserID else {
                 decks = []
                 statsByDeckID = [:]
+                todayPracticeCount = 0
                 streakDays = 0
                 loadError = nil
                 return
@@ -267,20 +261,9 @@ struct TodayView: View {
                 nextStats[deck.id] = try deckStore.stats(for: deck)
             }
             statsByDeckID = nextStats
+            todayPracticeCount = try deckStore.todayPracticeCardCount()
             streakDays = currentStreakDays(from: try deckStore.studyActivity(days: 90))
             loadError = nil
-        } catch {
-            loadError = error.localizedDescription
-        }
-    }
-
-    private func startToday(mode: StudyMode) {
-        guard let store else { return }
-        do {
-            guard let next = try store.firstDeckWithStudyToday(mode: mode) else { return }
-            sessionDeckTitle = next.0.title
-            session = next.1
-            showStudy = true
         } catch {
             loadError = error.localizedDescription
         }
@@ -428,6 +411,9 @@ struct StatisticsView: View {
         }
         .onChange(of: userStore.bootstrapState) { _, state in
             guard state == .loaded else { return }
+            Task { await reload() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: DeckStore.localDataDidChangeNotification)) { _ in
             Task { await reload() }
         }
     }
@@ -855,6 +841,7 @@ private struct UserSwitcherSheet: View {
 
 private struct StudyTodayCard: View {
     let stats: DeckStats
+    var practiceCount: Int = 0
     let isEnabled: Bool
     let action: () -> Void
 
@@ -864,7 +851,7 @@ private struct StudyTodayCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Учить сегодня")
                         .font(.system(size: 24, weight: .bold))
-                    Text(isEnabled ? "\(stats.studyTotal) карточек в очереди" : "На сегодня всё готово")
+                    Text(subtitle)
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.white.opacity(0.72))
                 }
@@ -897,19 +884,40 @@ private struct StudyTodayCard: View {
         .disabled(!isEnabled)
         .shadow(color: oklch(0.4, 0.22, 260, isEnabled ? 0.35 : 0), radius: 18, x: 0, y: 14)
     }
+
+    private var subtitle: String {
+        if stats.studyTotal > 0 {
+            return "\(stats.studyTotal) карточек в очереди"
+        }
+        if practiceCount > 0 {
+            return "\(practiceCount) карточек для практики"
+        }
+        return "На сегодня всё готово"
+    }
 }
 
 private struct TodayStudyModesView: View {
     let queueCount: Int
     var newCount: Int = 0
     var dueCount: Int = 0
+    var practiceCount: Int = 0
     var deck: DeckContent? = nil
     let start: (StudyMode) -> Void
+
+    private var canStart: Bool {
+        queueCount > 0 || practiceCount > 0
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                QueueSummaryCard(queueCount: queueCount, newCount: newCount, dueCount: dueCount, deck: deck)
+                QueueSummaryCard(
+                    queueCount: queueCount,
+                    newCount: newCount,
+                    dueCount: dueCount,
+                    practiceCount: practiceCount,
+                    deck: deck
+                )
 
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Упражнения")
@@ -922,7 +930,7 @@ private struct TodayStudyModesView: View {
                         subtitle: "Слово, перевод и заметки — переворот по тапу",
                         systemImage: "rectangle.on.rectangle.angled",
                         accent: .orange,
-                        isEnabled: queueCount > 0
+                        isEnabled: canStart
                     ) {
                         start(.flashcards)
                     }
@@ -932,7 +940,7 @@ private struct TodayStudyModesView: View {
                         subtitle: "Выбери слово для примера с пропуском",
                         systemImage: "text.quote",
                         accent: .blue,
-                        isEnabled: queueCount > 0
+                        isEnabled: canStart
                     ) {
                         start(.clozeMultipleChoice)
                     }
@@ -942,7 +950,7 @@ private struct TodayStudyModesView: View {
                         subtitle: "Соедини слово и перевод",
                         systemImage: "rectangle.split.2x1.fill",
                         accent: .green,
-                        isEnabled: queueCount > 0
+                        isEnabled: canStart
                     ) {
                         start(.matching)
                     }
@@ -961,6 +969,81 @@ private struct TodayStudyModesView: View {
     }
 }
 
+/// Экран режимов для общей очереди на сегодня.
+/// Учебная сессия пушится отсюда, поэтому Back возвращает на выбор упражнения.
+private struct TodayAllDecksModesView: View {
+    let store: DeckStore
+    let queueCount: Int
+    let newCount: Int
+    let dueCount: Int
+
+    @State private var session: StudySession?
+    @State private var sessionDeckTitle = ""
+    @State private var showStudy = false
+    @State private var practiceCount = 0
+    @State private var loadError: String?
+
+    var body: some View {
+        TodayStudyModesView(
+            queueCount: queueCount,
+            newCount: newCount,
+            dueCount: dueCount,
+            practiceCount: practiceCount,
+            start: start
+        )
+        .navigationDestination(isPresented: $showStudy) {
+            if let session {
+                StudySessionView(session: session, store: store, deckTitle: sessionDeckTitle)
+            }
+        }
+        .alert("Не удалось начать упражнение", isPresented: loadErrorBinding) {
+            Button("ОК", role: .cancel) {
+                loadError = nil
+            }
+        } message: {
+            Text(loadError ?? "")
+        }
+        .task { await reloadPracticeCount() }
+        .onReceive(NotificationCenter.default.publisher(for: DeckStore.localDataDidChangeNotification)) { _ in
+            Task { await reloadPracticeCount() }
+        }
+        .onChange(of: showStudy) { _, isShowing in
+            guard !isShowing else { return }
+            Task { await reloadPracticeCount() }
+        }
+    }
+
+    private var loadErrorBinding: Binding<Bool> {
+        Binding(
+            get: { loadError != nil },
+            set: { isPresented in
+                if !isPresented { loadError = nil }
+            }
+        )
+    }
+
+    private func start(_ mode: StudyMode) {
+        do {
+            if let todaySession = try store.startTodaySession(mode: mode) {
+                sessionDeckTitle = TodayStudySessionBuilder.title
+                session = todaySession
+            } else if let practiceSession = try store.startTodayPracticeSession(mode: mode) {
+                sessionDeckTitle = TodayStudySessionBuilder.practiceTitle
+                session = practiceSession
+            } else {
+                return
+            }
+            showStudy = true
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
+    private func reloadPracticeCount() async {
+        practiceCount = (try? store.todayPracticeCardCount()) ?? 0
+    }
+}
+
 /// Экран режимов для конкретной колоды на вкладке «Сегодня».
 /// Учим только сегодняшнюю очередь этой колоды.
 private struct TodayDeckModesView: View {
@@ -968,6 +1051,7 @@ private struct TodayDeckModesView: View {
     let store: DeckStore
 
     @State private var stats: DeckStats = .zero
+    @State private var practiceCount = 0
     @State private var session: StudySession?
     @State private var showStudy = false
 
@@ -976,6 +1060,7 @@ private struct TodayDeckModesView: View {
             queueCount: stats.studyTotal,
             newCount: stats.newAvailable,
             dueCount: stats.learningDue + stats.reviewDue,
+            practiceCount: practiceCount,
             deck: deck,
             start: start
         )
@@ -993,10 +1078,15 @@ private struct TodayDeckModesView: View {
 
     private func reload() async {
         stats = (try? store.stats(for: deck)) ?? .zero
+        practiceCount = (try? store.todayPracticeCardCount(deck: deck)) ?? 0
     }
 
     private func start(_ mode: StudyMode) {
-        session = try? store.startTodaySession(deck: deck, mode: mode)
+        if stats.studyTotal > 0 {
+            session = try? store.startTodaySession(deck: deck, mode: mode)
+        } else {
+            session = try? store.startTodayPracticeSession(deck: deck, mode: mode)
+        }
         showStudy = session != nil
     }
 }
@@ -1005,6 +1095,7 @@ private struct QueueSummaryCard: View {
     let queueCount: Int
     let newCount: Int
     let dueCount: Int
+    var practiceCount: Int = 0
     var deck: DeckContent? = nil
 
     private var todayDayNumber: String {
@@ -1056,7 +1147,7 @@ private struct QueueSummaryCard: View {
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
-                    Text("\(queueCount) \(cardsLabel(queueCount)) · сегодня")
+                    Text(summaryText)
                         .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(.white.opacity(0.55))
                 }
@@ -1074,6 +1165,13 @@ private struct QueueSummaryCard: View {
         }
         .padding(16)
         .lovablePanel(cornerRadius: 24)
+    }
+
+    private var summaryText: String {
+        if queueCount == 0, practiceCount > 0 {
+            return "\(practiceCount) \(cardsLabel(practiceCount)) · практика"
+        }
+        return "\(queueCount) \(cardsLabel(queueCount)) · сегодня"
     }
 }
 
