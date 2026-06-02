@@ -82,7 +82,7 @@ struct TodayView: View {
                     .presentationDragIndicator(.visible)
             }
             .overlay { loadErrorOverlay }
-            .overlay(alignment: .top) { toastOverlay }
+            .overlay(alignment: .bottom) { toastOverlay }
             .animation(.snappy(duration: 0.22), value: toast)
         }
         .task {
@@ -191,8 +191,8 @@ struct TodayView: View {
         if let toast {
             TodayToastView(toast: toast)
                 .padding(.horizontal, 20)
-                .padding(.top, 10)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                .padding(.bottom, 16)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 
