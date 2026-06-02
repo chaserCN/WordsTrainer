@@ -7,6 +7,9 @@ struct ServerBootstrap: Decodable, Sendable {
     let assignments: [ServerDeckAssignment]
     let content: ServerContentPayload
     let media: [ServerMediaObject]
+    let progress: [ServerProgressPayload]
+    let reviews: [ServerReviewEventPayload]
+    let matchingRecords: [ServerMatchingRecordPayload]
 
     private enum CodingKeys: String, CodingKey {
         case user
@@ -14,6 +17,9 @@ struct ServerBootstrap: Decodable, Sendable {
         case assignments
         case content
         case media
+        case progress
+        case reviews
+        case matchingRecords
     }
 
     init(from decoder: Decoder) throws {
@@ -23,6 +29,9 @@ struct ServerBootstrap: Decodable, Sendable {
         assignments = try container.decodeIfPresent([ServerDeckAssignment].self, forKey: .assignments) ?? []
         content = try container.decodeIfPresent(ServerContentPayload.self, forKey: .content) ?? .empty
         media = try container.decodeIfPresent([ServerMediaObject].self, forKey: .media) ?? []
+        progress = try container.decodeIfPresent([ServerProgressPayload].self, forKey: .progress) ?? []
+        reviews = try container.decodeIfPresent([ServerReviewEventPayload].self, forKey: .reviews) ?? []
+        matchingRecords = try container.decodeIfPresent([ServerMatchingRecordPayload].self, forKey: .matchingRecords) ?? []
     }
 }
 
@@ -137,6 +146,64 @@ struct ServerMediaObject: Decodable, Sendable {
     let byteSize: Int?
     let width: Int?
     let height: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case storageKey
+        case sha256
+        case mimeType
+        case byteSize
+        case width
+        case height
+    }
+
+    init(
+        id: UUID,
+        storageKey: String?,
+        sha256: String?,
+        mimeType: String?,
+        byteSize: Int?,
+        width: Int?,
+        height: Int?
+    ) {
+        self.id = id
+        self.storageKey = storageKey
+        self.sha256 = sha256
+        self.mimeType = mimeType
+        self.byteSize = byteSize
+        self.width = width
+        self.height = height
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        storageKey = try container.decodeIfPresent(String.self, forKey: .storageKey)
+        sha256 = try container.decodeIfPresent(String.self, forKey: .sha256)
+        mimeType = try container.decodeIfPresent(String.self, forKey: .mimeType)
+        byteSize = try container.decodeFlexibleIntIfPresent(forKey: .byteSize)
+        width = try container.decodeFlexibleIntIfPresent(forKey: .width)
+        height = try container.decodeFlexibleIntIfPresent(forKey: .height)
+    }
+}
+
+private extension KeyedDecodingContainer {
+    func decodeFlexibleIntIfPresent(forKey key: Key) throws -> Int? {
+        if let value = try decodeIfPresent(Int.self, forKey: key) {
+            return value
+        }
+        guard let stringValue = try decodeIfPresent(String.self, forKey: key) else {
+            return nil
+        }
+        guard let value = Int(stringValue) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: key,
+                in: self,
+                debugDescription: "Expected an integer or numeric string."
+            )
+        }
+        return value
+    }
 }
 
 struct ServerSyncEventsPayload: Encodable, Sendable {
@@ -149,7 +216,7 @@ struct ServerSyncEventsPayload: Encodable, Sendable {
     }
 }
 
-struct ServerReviewEventPayload: Encodable, Sendable {
+struct ServerReviewEventPayload: Codable, Sendable {
     let clientEventId: UUID
     let deckId: UUID
     let deckVersionId: UUID?
@@ -163,7 +230,7 @@ struct ServerReviewEventPayload: Encodable, Sendable {
     let newState: String?
 }
 
-struct ServerProgressPayload: Encodable, Sendable {
+struct ServerProgressPayload: Codable, Sendable {
     let cardId: UUID
     let deckId: UUID
     let fsrsData: JSONValue
@@ -172,7 +239,7 @@ struct ServerProgressPayload: Encodable, Sendable {
     let updatedAt: String?
 }
 
-struct ServerMatchingRecordPayload: Encodable, Sendable {
+struct ServerMatchingRecordPayload: Codable, Sendable {
     let deckId: UUID
     let deckVersionId: UUID?
     let bestDurationSeconds: Double
@@ -188,7 +255,7 @@ struct ServerSyncEventsResponse: Decodable, Sendable {
     let serverRevision: String?
 }
 
-enum JSONValue: Encodable, Sendable {
+enum JSONValue: Codable, Sendable {
     case object([String: JSONValue])
     case array([JSONValue])
     case string(String)
@@ -224,6 +291,42 @@ enum JSONValue: Encodable, Sendable {
             self = .null
         default:
             return nil
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        if let container = try? decoder.container(keyedBy: DynamicCodingKey.self) {
+            var object: [String: JSONValue] = [:]
+            for key in container.allKeys {
+                object[key.stringValue] = try container.decode(JSONValue.self, forKey: key)
+            }
+            self = .object(object)
+            return
+        }
+
+        if var container = try? decoder.unkeyedContainer() {
+            var values: [JSONValue] = []
+            while !container.isAtEnd {
+                values.append(try container.decode(JSONValue.self))
+            }
+            self = .array(values)
+            return
+        }
+
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let bool = try? container.decode(Bool.self) {
+            self = .bool(bool)
+        } else if let number = try? container.decode(Double.self) {
+            self = .number(number)
+        } else if let string = try? container.decode(String.self) {
+            self = .string(string)
+        } else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unsupported JSON value."
+            )
         }
     }
 
@@ -382,6 +485,10 @@ final class ServerSyncClient {
         } catch {
             throw ServerSyncError.invalidResponse
         }
+    }
+
+    func downloadMedia(id: UUID) async throws -> Data {
+        try await data(for: "media/\(id.uuidString.lowercased())", method: "GET", selectedUserID: nil)
     }
 
     private func data(

@@ -25,6 +25,7 @@ struct FlashcardStudyView: View {
     private static let actionGap: CGFloat = 20
     private static let flipHalfDuration = 0.18
     private static let flipPerspective: CGFloat = 0.25
+    private static let mediaImageSize: CGFloat = 96
 
     private var hasWordAudio: Bool {
         card.audioWordURL != nil
@@ -32,6 +33,10 @@ struct FlashcardStudyView: View {
 
     private var notesText: String? {
         card.explanation?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+    }
+
+    private var cardImageURL: URL? {
+        card.imageURL ?? card.clozeExampleImageURL
     }
 
     var body: some View {
@@ -45,22 +50,33 @@ struct FlashcardStudyView: View {
                 min(maxCardHeight, (proxy.size.height - 132) * Self.cardHeightFraction)
             )
 
-            VStack(spacing: 0) {
-                StudyProgressHeader(totalCount: totalCount, remainingCount: remainingCount)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-
-                Spacer(minLength: Self.verticalGap)
-
-                VStack(spacing: Self.actionGap) {
-                    flashcard(baseHeight: baseCardHeight, maxHeight: maxCardHeight)
-
-                    actionButtons
+            ZStack(alignment: .top) {
+                if let cardImageURL {
+                    FlashcardMediaImage(url: cardImageURL)
+                        .frame(width: Self.mediaImageSize, height: Self.mediaImageSize)
+                        .position(x: proxy.size.width / 2, y: mediaImageCenterY(in: proxy.size.height))
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
-                .padding(.horizontal, 16)
-                .studyCardChangeTransition(cardID: card.id, direction: cardChangeDirection)
 
-                Spacer(minLength: Self.verticalGap)
+                VStack(spacing: 0) {
+                    StudyProgressHeader(totalCount: totalCount, remainingCount: remainingCount)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+
+                    Spacer(minLength: Self.verticalGap)
+
+                    VStack(spacing: Self.actionGap) {
+                        flashcard(baseHeight: baseCardHeight, maxHeight: maxCardHeight)
+
+                        actionButtons
+                    }
+                    .padding(.horizontal, 16)
+                    .studyCardChangeTransition(cardID: card.id, direction: cardChangeDirection)
+
+                    Spacer(minLength: Self.verticalGap)
+                }
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
         }
@@ -78,6 +94,10 @@ struct FlashcardStudyView: View {
             isEnabled: isAnswerEnabled,
             onAnswer: answer
         )
+    }
+
+    private func mediaImageCenterY(in height: CGFloat) -> CGFloat {
+        min(300, max(230, height * 0.31))
     }
 
     private func flashcard(baseHeight: CGFloat, maxHeight: CGFloat) -> some View {
@@ -494,6 +514,39 @@ private enum FlashcardPalette {
 }
 
 private let flashcardShape = RoundedRectangle(cornerRadius: 28, style: .continuous)
+
+private struct FlashcardMediaImage: View {
+    let url: URL
+
+    var body: some View {
+        Group {
+            if url.isFileURL, let image = UIImage(contentsOfFile: url.path) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .empty, .failure:
+                        Color.white.opacity(0.10)
+                    @unknown default:
+                        Color.white.opacity(0.10)
+                    }
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+        )
+        .shadow(color: MatchPalette.shadow.opacity(0.18), radius: 14, x: 0, y: 8)
+    }
+}
 
 private extension String {
     var nonEmpty: String? {

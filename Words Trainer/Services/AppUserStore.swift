@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import OSLog
 
 struct AppUser: Identifiable, Codable, Hashable, Sendable {
@@ -152,6 +153,7 @@ final class AppUserStore {
             if let selectedUserID {
                 let database = try ContentDatabase(userID: selectedUserID)
                 try database.importServerBootstrap(bootstrap, selectedUserID: selectedUserID)
+                try await cacheMedia(from: bootstrap, database: database)
                 try await uploadPendingEvents(database: database, selectedUserID: selectedUserID)
             }
             bootstrapState = serverUsers.isEmpty ? .emptyServer : .loaded
@@ -201,6 +203,99 @@ final class AppUserStore {
             _ = try await syncClient.uploadEvents(batch.payload, selectedUserID: selectedUserID)
             try database.markServerSyncBatchUploaded(batch)
         }
+    }
+
+    private func cacheMedia(from bootstrap: ServerBootstrap, database: ContentDatabase) async throws {
+        let versionDeckIDs = Dictionary(
+            uniqueKeysWithValues: bootstrap.assignments.compactMap { assignment -> (UUID, UUID)? in
+                let versionID = assignment.deckVersionId ?? assignment.currentVersionId
+                guard let versionID else { return nil }
+                return (versionID, assignment.deckId)
+            }
+        )
+        var mediaDeckIDs: [UUID: Set<UUID>] = [:]
+        for assignment in bootstrap.assignments {
+            if let mediaID = assignment.avatarMediaId {
+                mediaDeckIDs[mediaID, default: []].insert(assignment.deckId)
+            }
+        }
+        for card in bootstrap.content.cards {
+            guard let deckID = versionDeckIDs[card.deckVersionId] else { continue }
+            if let mediaID = card.imageMediaId {
+                mediaDeckIDs[mediaID, default: []].insert(deckID)
+            }
+            if let mediaID = card.audioWordMediaId {
+                mediaDeckIDs[mediaID, default: []].insert(deckID)
+            }
+        }
+        for example in bootstrap.content.examples {
+            guard let deckID = versionDeckIDs[example.deckVersionId] else { continue }
+            if let mediaID = example.imageMediaId {
+                mediaDeckIDs[mediaID, default: []].insert(deckID)
+            }
+            if let mediaID = example.audioExampleMediaId {
+                mediaDeckIDs[mediaID, default: []].insert(deckID)
+            }
+        }
+
+        let mediaObjects = Dictionary(
+            uniqueKeysWithValues: bootstrap.media.map { ($0.id, $0) }
+        )
+        for (mediaID, deckIDs) in mediaDeckIDs {
+            guard let media = mediaObjects[mediaID] else { continue }
+            for deckID in deckIDs {
+                try await cacheMediaObject(media, deckID: deckID, database: database)
+            }
+        }
+    }
+
+    private func cacheMediaObject(_ media: ServerMediaObject, deckID: UUID, database: ContentDatabase) async throws {
+        let relativePath = "media/\(media.id.uuidString.lowercased()).\(fileExtension(for: media))"
+        if let existingURL = try AppDataPaths.mediaFileURL(deckID: deckID, relativePath: relativePath) {
+            if media.sha256 == nil {
+                try database.updateMediaLocalPath(mediaID: media.id, localPath: relativePath)
+                return
+            }
+            let existingData = try Data(contentsOf: existingURL)
+            if sha256Hex(for: existingData) == media.sha256 {
+                try database.updateMediaLocalPath(mediaID: media.id, localPath: relativePath)
+                return
+            }
+        }
+
+        let data = try await syncClient.downloadMedia(id: media.id)
+        if let expectedHash = media.sha256, sha256Hex(for: data) != expectedHash {
+            throw ServerSyncError.invalidResponse
+        }
+        let deckURL = try AppDataPaths.deckFolderURL(deckID: deckID)
+        let mediaDirectory = deckURL.appendingPathComponent(AppDataPaths.deckMediaFolderName, isDirectory: true)
+        try FileManager.default.createDirectory(at: mediaDirectory, withIntermediateDirectories: true)
+        let fileURL = deckURL.appendingPathComponent(relativePath)
+        try data.write(to: fileURL, options: .atomic)
+        try database.updateMediaLocalPath(mediaID: media.id, localPath: relativePath)
+    }
+
+    private func fileExtension(for media: ServerMediaObject) -> String {
+        switch media.mimeType?.lowercased() {
+        case "audio/mpeg", "audio/mp3":
+            "mp3"
+        case "audio/wav", "audio/wave", "audio/x-wav":
+            "wav"
+        case "audio/mp4", "audio/aac":
+            "m4a"
+        case "image/jpeg", "image/jpg":
+            "jpg"
+        case "image/png":
+            "png"
+        case "image/webp":
+            "webp"
+        default:
+            "bin"
+        }
+    }
+
+    private func sha256Hex(for data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     private func saveUsers() {

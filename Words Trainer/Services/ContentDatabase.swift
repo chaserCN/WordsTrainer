@@ -82,11 +82,58 @@ final class ContentDatabase {
             try upsertExamples(bootstrap.content.examples)
             try upsertForms(bootstrap.content.forms)
             try upsertDistractors(bootstrap.content.distractors)
+            try upsertServerProgress(bootstrap.progress)
+            try upsertServerReviews(bootstrap.reviews, selectedUserID: selectedUserID)
+            try upsertServerMatchingRecords(bootstrap.matchingRecords, selectedUserID: selectedUserID)
             try rebuildDerivedStats(selectedUserID: selectedUserID)
             try commitTransaction()
         } catch {
             try? rollbackTransaction()
             throw error
+        }
+    }
+
+    func mediaObjects(ids mediaIDs: Set<UUID>) throws -> [ServerMediaObject] {
+        guard !mediaIDs.isEmpty else { return [] }
+        var results: [ServerMediaObject] = []
+        let sql = """
+        SELECT id, storage_key, sha256, mime_type, byte_size, width, height
+        FROM media_objects
+        WHERE id = ?
+        """
+        for mediaID in mediaIDs {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            defer { sqlite3_finalize(statement) }
+            try bind(statement, index: 1, uuid: mediaID)
+            guard sqlite3_step(statement) == SQLITE_ROW,
+                  let id = uuidColumn(statement, index: 0) else { continue }
+            results.append(ServerMediaObject(
+                id: id,
+                storageKey: textColumn(statement, index: 1),
+                sha256: textColumn(statement, index: 2),
+                mimeType: textColumn(statement, index: 3),
+                byteSize: intColumn(statement, index: 4),
+                width: intColumn(statement, index: 5),
+                height: intColumn(statement, index: 6)
+            ))
+        }
+        return results
+    }
+
+    func updateMediaLocalPath(mediaID: UUID, localPath: String) throws {
+        let sql = "UPDATE media_objects SET local_path = ? WHERE id = ?"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, text: localPath)
+        try bind(statement, index: 2, uuid: mediaID)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
         }
     }
 
@@ -888,8 +935,143 @@ final class ContentDatabase {
         }
     }
 
+    private func upsertServerProgress(_ progressItems: [ServerProgressPayload]) throws {
+        let syncedAt = Date().timeIntervalSince1970
+        for progress in progressItems {
+            let data = try JSONEncoder().encode(progress.fsrsData)
+            let updatedAt = parseServerDate(progress.updatedAt)?.timeIntervalSince1970 ?? syncedAt
+            let sql = """
+            INSERT INTO card_progress (user_id, card_id, deck_id, fsrs_data, updated_at, synced_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, card_id) DO UPDATE SET
+                deck_id = excluded.deck_id,
+                fsrs_data = excluded.fsrs_data,
+                updated_at = excluded.updated_at,
+                synced_at = excluded.synced_at
+            WHERE card_progress.synced_at IS NOT NULL
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            defer { sqlite3_finalize(statement) }
+            try bind(statement, index: 1, uuid: userID)
+            try bind(statement, index: 2, uuid: progress.cardId)
+            try bind(statement, index: 3, uuid: progress.deckId)
+            try data.withUnsafeBytes { raw in
+                guard sqlite3_bind_blob(statement, 4, raw.baseAddress, Int32(data.count), sqliteTransient) == SQLITE_OK else {
+                    throw ContentDatabaseError.queryFailed
+                }
+            }
+            guard sqlite3_bind_double(statement, 5, updatedAt) == SQLITE_OK,
+                  sqlite3_bind_double(statement, 6, syncedAt) == SQLITE_OK,
+                  sqlite3_step(statement) == SQLITE_DONE else {
+                throw ContentDatabaseError.queryFailed
+            }
+        }
+    }
+
+    private func upsertServerReviews(_ reviews: [ServerReviewEventPayload], selectedUserID: UUID) throws {
+        let syncedAt = Date().timeIntervalSince1970
+        for review in reviews {
+            guard let reviewedAt = parseServerDate(review.reviewedAt) else {
+                throw ContentDatabaseError.queryFailed
+            }
+            let sql = """
+            INSERT INTO study_reviews (
+                id, user_id, card_id, deck_id, mode, outcome, reviewed_at,
+                duration_ms, was_new, previous_state, new_state, synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                user_id = excluded.user_id,
+                card_id = excluded.card_id,
+                deck_id = excluded.deck_id,
+                mode = excluded.mode,
+                outcome = excluded.outcome,
+                reviewed_at = excluded.reviewed_at,
+                duration_ms = excluded.duration_ms,
+                was_new = excluded.was_new,
+                previous_state = excluded.previous_state,
+                new_state = excluded.new_state,
+                synced_at = excluded.synced_at
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            defer { sqlite3_finalize(statement) }
+            try bind(statement, index: 1, uuid: review.clientEventId)
+            try bind(statement, index: 2, uuid: selectedUserID)
+            try bind(statement, index: 3, uuid: review.cardId)
+            try bind(statement, index: 4, uuid: review.deckId)
+            try bind(statement, index: 5, text: review.mode)
+            try bind(statement, index: 6, text: review.outcome)
+            guard sqlite3_bind_double(statement, 7, reviewedAt.timeIntervalSince1970) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            try bind(statement, index: 8, int: review.durationMs)
+            guard sqlite3_bind_int(statement, 9, review.wasNew ? 1 : 0) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            try bind(statement, index: 10, text: review.previousState)
+            try bind(statement, index: 11, text: review.newState)
+            guard sqlite3_bind_double(statement, 12, syncedAt) == SQLITE_OK,
+                  sqlite3_step(statement) == SQLITE_DONE else {
+                throw ContentDatabaseError.queryFailed
+            }
+        }
+    }
+
+    private func upsertServerMatchingRecords(
+        _ records: [ServerMatchingRecordPayload],
+        selectedUserID: UUID
+    ) throws {
+        let syncedAt = Date().timeIntervalSince1970
+        for record in records {
+            guard let achievedAt = parseServerDate(record.achievedAt) else {
+                throw ContentDatabaseError.queryFailed
+            }
+            let sql = """
+            INSERT INTO deck_matching_records (user_id, deck_id, best_duration_seconds, pair_count, achieved_at, synced_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, deck_id) DO UPDATE SET
+                best_duration_seconds = excluded.best_duration_seconds,
+                pair_count = excluded.pair_count,
+                achieved_at = excluded.achieved_at,
+                synced_at = excluded.synced_at
+            WHERE deck_matching_records.synced_at IS NOT NULL
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            defer { sqlite3_finalize(statement) }
+            try bind(statement, index: 1, uuid: selectedUserID)
+            try bind(statement, index: 2, uuid: record.deckId)
+            guard sqlite3_bind_double(statement, 3, record.bestDurationSeconds) == SQLITE_OK,
+                  sqlite3_bind_int(statement, 4, Int32(record.pairCount)) == SQLITE_OK,
+                  sqlite3_bind_double(statement, 5, achievedAt.timeIntervalSince1970) == SQLITE_OK,
+                  sqlite3_bind_double(statement, 6, syncedAt) == SQLITE_OK,
+                  sqlite3_step(statement) == SQLITE_DONE else {
+                throw ContentDatabaseError.queryFailed
+            }
+        }
+    }
+
     private func localStatus(_ value: String) -> ContentStatus {
         value == "active" ? .active : .inactive
+    }
+
+    private func parseServerDate(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractionalFormatter.date(from: value) {
+            return date
+        }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.date(from: value)
     }
 
     private func isoString(_ date: Date) -> String {
@@ -1603,6 +1785,11 @@ final class ContentDatabase {
     private func uuidColumn(_ statement: OpaquePointer?, index: Int32) -> UUID? {
         guard let text = textColumn(statement, index: index) else { return nil }
         return UUID(databaseString: text)
+    }
+
+    private func intColumn(_ statement: OpaquePointer?, index: Int32) -> Int? {
+        guard sqlite3_column_type(statement, index) != SQLITE_NULL else { return nil }
+        return Int(sqlite3_column_int(statement, index))
     }
 
     private func statusColumn(_ statement: OpaquePointer?, index: Int32) -> ContentStatus {

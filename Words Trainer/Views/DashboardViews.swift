@@ -54,6 +54,12 @@ struct TodayView: View {
         decks.filter(\.isActive)
     }
 
+    private var activeDecksWithStudyToday: [DeckContent] {
+        activeDecks.filter { deck in
+            (statsByDeckID[deck.id] ?? .zero).studyTotal > 0
+        }
+    }
+
     private var totalStats: DeckStats {
         statsByDeckID.values.reduce(.zero) { partial, stats in
             DeckStats(
@@ -74,7 +80,7 @@ struct TodayView: View {
                             streakDays: streakDays,
                             showUserSwitcher: { showUserSwitcher = true }
                         )
-                    } else {
+                    } else if showsNoUserConnectionCard {
                         TodayServerConnectionCard(
                             title: noUserTitle,
                             systemImage: noUserSystemImage,
@@ -94,8 +100,8 @@ struct TodayView: View {
                         }
                     )
 
-                    if let store {
-                        TodayDeckSummary(decks: activeDecks, statsByDeckID: statsByDeckID, store: store)
+                    if let store, !activeDecksWithStudyToday.isEmpty {
+                        TodayDeckSummary(decks: activeDecksWithStudyToday, statsByDeckID: statsByDeckID, store: store)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -160,6 +166,13 @@ struct TodayView: View {
             clearToast()
             Task { await reload() }
         }
+        .onChange(of: userStore.bootstrapState) { _, state in
+            presentToast(forBootstrapState: state)
+        }
+    }
+
+    private var showsNoUserConnectionCard: Bool {
+        userStore.bootstrapState == .emptyServer
     }
 
     private var noUserTitle: String {
@@ -218,14 +231,6 @@ struct TodayView: View {
                 message: "У пользователя есть колоды, но сейчас нет активных назначений для занятий.",
                 systemImage: "pause.circle.fill",
                 tint: oklch(0.64, 0.19, 35)
-            )
-        }
-        if totalStats.studyTotal == 0 {
-            return TodaySyncStatus(
-                title: "На сегодня всё",
-                message: "Нет новых или запланированных карточек. Можно открыть конкретную колоду и повторить все карточки.",
-                systemImage: "checkmark.circle.fill",
-                tint: oklch(0.58, 0.14, 155)
             )
         }
         return nil
@@ -316,6 +321,34 @@ struct TodayView: View {
             return
         }
         presentToast(status: TodaySyncStatus(result: result, message: message), autoDismiss: true)
+    }
+
+    private func presentToast(forBootstrapState state: AppUserBootstrapState) {
+        guard !isSyncing else { return }
+        switch state {
+        case .missingConfiguration:
+            presentToast(
+                status: TodaySyncStatus(
+                    title: "Сервер не настроен",
+                    message: state.message ?? "Нужно подключить устройство к серверу.",
+                    systemImage: "link.badge.plus",
+                    tint: oklch(0.64, 0.19, 35)
+                ),
+                autoDismiss: true
+            )
+        case .failed(let message):
+            presentToast(
+                status: TodaySyncStatus(
+                    title: "Синхронизация не удалась",
+                    message: message,
+                    systemImage: "wifi.exclamationmark",
+                    tint: oklch(0.64, 0.19, 35)
+                ),
+                autoDismiss: true
+            )
+        default:
+            break
+        }
     }
 
     private func presentToast(status: TodaySyncStatus, autoDismiss: Bool) {
