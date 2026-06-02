@@ -12,8 +12,13 @@ enum AppDataPaths {
     static let dataDirectoryName = "Data"
     static let databaseFileName = "flashgame.db"
     static let deckMediaFolderName = "media"
+    nonisolated(unsafe) static var dataDirectoryOverride: URL?
 
     static func dataDirectoryURL() throws -> URL {
+        if let dataDirectoryOverride {
+            try FileManager.default.createDirectory(at: dataDirectoryOverride, withIntermediateDirectories: true)
+            return dataDirectoryOverride
+        }
         let documents = try FileManager.default.url(
             for: .documentDirectory,
             in: .userDomainMask,

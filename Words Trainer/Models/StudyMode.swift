@@ -11,7 +11,7 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .recall: "Помню / Забыл"
+        case .recall: "Оставить / Сбросить"
         case .flashcards: "Карточки"
         case .clozeMultipleChoice: "Предложения"
         case .clozeTyping: "Пропуск — ввод"

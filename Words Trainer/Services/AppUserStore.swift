@@ -1,25 +1,6 @@
-import Foundation
 import CryptoKit
+import Foundation
 import OSLog
-
-struct AppUser: Identifiable, Codable, Hashable, Sendable {
-    static let defaultID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
-
-    let id: UUID
-    var displayName: String
-    var avatarMediaID: UUID?
-    var avatarImageURL: URL?
-    var accentHue: Double
-
-    var initials: String {
-        let parts = displayName
-            .split(separator: " ")
-            .prefix(2)
-            .compactMap(\.first)
-        let value = String(parts).uppercased()
-        return value.isEmpty ? "U" : value
-    }
-}
 
 enum AppUserBootstrapState: Equatable {
     case idle
@@ -37,37 +18,6 @@ enum AppUserBootstrapState: Equatable {
             "Нужно подключить устройство к серверу."
         case .emptyServer:
             "На сервере пока нет пользователей."
-        case .failed(let message):
-            message
-        }
-    }
-}
-
-enum AppUserRefreshResult: Equatable {
-    case loaded(userCount: Int, assignmentCount: Int, activeAssignmentCount: Int)
-    case missingConfiguration
-    case emptyServer
-    case cancelled
-    case failed(String)
-
-    var message: String? {
-        switch self {
-        case .loaded(let userCount, let assignmentCount, let activeAssignmentCount):
-            if userCount == 0 {
-                nil
-            } else if assignmentCount == 0 {
-                "Пользователи загружены, но выбранному пользователю пока не назначены колоды."
-            } else if activeAssignmentCount == 0 {
-                "Колоды загружены, но все назначения сейчас неактивны."
-            } else {
-                "Синхронизация выполнена."
-            }
-        case .missingConfiguration:
-            "Нужно настроить SERVER_BASE_URL и HOUSEHOLD_SYNC_TOKEN."
-        case .emptyServer:
-            "Сервер доступен, но пользователей пока нет."
-        case .cancelled:
-            "Синхронизация была прервана. Попробуйте ещё раз."
         case .failed(let message):
             message
         }
@@ -103,11 +53,15 @@ final class AppUserStore {
     }
 
     var bootstrapState: AppUserBootstrapState = .idle
+    var syncStatus: AppUserSyncStatus = .idle
 
     var selectedUser: AppUser? {
         guard let selectedUserID else { return nil }
         return users.first { $0.id == selectedUserID }
     }
+
+    private var refreshTask: Task<AppUserRefreshResult, Never>?
+    private var refreshTaskID: UUID?
 
     private init(defaults: UserDefaults, syncClient: ServerSyncClient) {
         self.defaults = defaults
@@ -130,59 +84,133 @@ final class AppUserStore {
 
     @discardableResult
     func refreshFromServer() async -> AppUserRefreshResult {
-        Self.logger.info("refreshFromServer started selectedUserID=\(self.selectedUserID?.uuidString ?? "nil", privacy: .public)")
+        let targetUserID = selectedUserID
+        if let refreshTask {
+            if syncStatus.isSyncing, syncStatus.userID == targetUserID {
+                Self.logger.info("refreshFromServer joined existing task selectedUserID=\(targetUserID?.uuidString ?? "nil", privacy: .public)")
+                return await refreshTask.value
+            }
+            Self.logger.info("refreshFromServer cancelling stale task selectedUserID=\(self.syncStatus.userID?.uuidString ?? "nil", privacy: .public)")
+            refreshTask.cancel()
+        }
+
+        let taskID = UUID()
+        refreshTaskID = taskID
+        let task = Task { @MainActor in
+            await performRefreshFromServer(targetUserID: targetUserID, taskID: taskID)
+        }
+        refreshTask = task
+        let result = await task.value
+        if refreshTaskID == taskID {
+            refreshTask = nil
+            refreshTaskID = nil
+        }
+        return result
+    }
+
+    private func performRefreshFromServer(targetUserID: UUID?, taskID: UUID) async -> AppUserRefreshResult {
+        Self.logger.info("refreshFromServer started selectedUserID=\(targetUserID?.uuidString ?? "nil", privacy: .public)")
         guard syncClient.isConfigured else {
             Self.logger.warning("refreshFromServer skipped: missing sync configuration")
             bootstrapState = .missingConfiguration
-            return .missingConfiguration
+            return finishSync(.missingConfiguration, userID: targetUserID, startedAt: nil, taskID: taskID)
         }
 
         let previousState = bootstrapState
+        let startedAt = Date()
         bootstrapState = .loading
+        syncStatus = .syncing(userID: targetUserID, startedAt: startedAt)
         do {
-            let bootstrap = try await syncClient.bootstrap(selectedUserID: selectedUserID)
+            var cachedDeckVersionIDs: [UUID] = []
+            if let targetUserID {
+                do {
+                    let database = try ContentDatabase(userID: targetUserID)
+                    cachedDeckVersionIDs = try database.cachedDeckVersionIDs()
+                    try await uploadPendingEvents(database: database, selectedUserID: targetUserID)
+                } catch ServerSyncError.cancelled {
+                    throw ServerSyncError.cancelled
+                } catch let error as CancellationError {
+                    throw error
+                } catch {
+                    Self.logger.warning(
+                        "pre-bootstrap pending upload failed; bootstrap will continue: \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+            }
+
+            let bootstrap = try await syncClient.bootstrap(
+                selectedUserID: targetUserID,
+                cachedDeckVersionIDs: cachedDeckVersionIDs
+            )
+            guard isCurrentRefreshTask(taskID) else { return .cancelled }
             let serverUsers = bootstrap.users.map(\.appUser)
             Self.logger.info("bootstrap loaded users=\(serverUsers.count, privacy: .public) assignments=\(bootstrap.assignments.count, privacy: .public)")
             users = serverUsers
-            let preferredID = bootstrap.user?.id ?? selectedUserID
+            let preferredID = bootstrap.user?.id ?? targetUserID
+            let resolvedUserID: UUID?
             if let preferredID, serverUsers.contains(where: { $0.id == preferredID }) {
-                selectedUserID = preferredID
+                resolvedUserID = preferredID
             } else {
-                selectedUserID = serverUsers.first?.id
+                resolvedUserID = serverUsers.first?.id
             }
-            if let selectedUserID {
-                let database = try ContentDatabase(userID: selectedUserID)
-                try database.importServerBootstrap(bootstrap, selectedUserID: selectedUserID)
-                try await cacheMedia(from: bootstrap, database: database)
-                try await uploadPendingEvents(database: database, selectedUserID: selectedUserID)
+            if selectedUserID == targetUserID || selectedUserID == nil {
+                selectedUserID = resolvedUserID
+            }
+            if let resolvedUserID {
+                let database = try ContentDatabase(userID: resolvedUserID)
+                try database.importServerBootstrap(bootstrap, selectedUserID: resolvedUserID)
+                let mediaFailureCount = try await cacheMedia(from: bootstrap, database: database)
+                guard isCurrentRefreshTask(taskID) else { return .cancelled }
+                try await uploadPendingEvents(database: database, selectedUserID: resolvedUserID)
+                guard isCurrentRefreshTask(taskID) else { return .cancelled }
+                bootstrapState = serverUsers.isEmpty ? .emptyServer : .loaded
+                let activeAssignmentCount = bootstrap.assignments.filter { $0.assignmentStatus == "active" }.count
+                if mediaFailureCount > 0 {
+                    return finishSync(.loadedWithMediaWarnings(
+                        userCount: serverUsers.count,
+                        assignmentCount: bootstrap.assignments.count,
+                        activeAssignmentCount: activeAssignmentCount,
+                        failedMediaCount: mediaFailureCount
+                    ), userID: resolvedUserID, startedAt: startedAt, taskID: taskID)
+                }
             }
             bootstrapState = serverUsers.isEmpty ? .emptyServer : .loaded
             let activeAssignmentCount = bootstrap.assignments.filter { $0.assignmentStatus == "active" }.count
-            return serverUsers.isEmpty
+            let result: AppUserRefreshResult = serverUsers.isEmpty
                 ? .emptyServer
                 : .loaded(
                     userCount: serverUsers.count,
                     assignmentCount: bootstrap.assignments.count,
                     activeAssignmentCount: activeAssignmentCount
                 )
+            return finishSync(result, userID: resolvedUserID, startedAt: startedAt, taskID: taskID)
         } catch ServerSyncError.cancelled {
             Self.logger.info("refreshFromServer cancelled")
+            guard isCurrentRefreshTask(taskID) else { return .cancelled }
             bootstrapState = previousState
-            return .cancelled
+            return finishSync(.cancelled, userID: targetUserID, startedAt: startedAt, taskID: taskID)
         } catch is CancellationError {
             Self.logger.info("refreshFromServer cancelled by task cancellation")
+            guard isCurrentRefreshTask(taskID) else { return .cancelled }
             bootstrapState = previousState
-            return .cancelled
+            return finishSync(.cancelled, userID: targetUserID, startedAt: startedAt, taskID: taskID)
         } catch {
+            guard isCurrentRefreshTask(taskID) else { return .cancelled }
             let message = error.localizedDescription
             Self.logger.error("refreshFromServer failed: \(message, privacy: .public)")
             bootstrapState = .failed(message)
-            return .failed(message)
+            return finishSync(.failed(message), userID: targetUserID, startedAt: startedAt, taskID: taskID)
         }
     }
 
     func select(_ user: AppUser) {
         selectedUserID = user.id
+    }
+
+    @discardableResult
+    func selectAndRefresh(_ user: AppUser) async -> AppUserRefreshResult {
+        selectedUserID = user.id
+        return await refreshFromServer()
     }
 
     func syncPendingEventsToServer() async {
@@ -205,7 +233,22 @@ final class AppUserStore {
         }
     }
 
-    private func cacheMedia(from bootstrap: ServerBootstrap, database: ContentDatabase) async throws {
+    private func isCurrentRefreshTask(_ taskID: UUID) -> Bool {
+        refreshTaskID == taskID
+    }
+
+    private func finishSync(
+        _ result: AppUserRefreshResult,
+        userID: UUID?,
+        startedAt: Date?,
+        taskID: UUID
+    ) -> AppUserRefreshResult {
+        guard isCurrentRefreshTask(taskID) else { return result }
+        syncStatus = .finished(result: result, userID: userID, startedAt: startedAt)
+        return result
+    }
+
+    private func cacheMedia(from bootstrap: ServerBootstrap, database: ContentDatabase) async throws -> Int {
         let versionDeckIDs = Dictionary(
             uniqueKeysWithValues: bootstrap.assignments.compactMap { assignment -> (UUID, UUID)? in
                 let versionID = assignment.deckVersionId ?? assignment.currentVersionId
@@ -241,20 +284,36 @@ final class AppUserStore {
         let mediaObjects = Dictionary(
             uniqueKeysWithValues: bootstrap.media.map { ($0.id, $0) }
         )
+        var failureCount = 0
         for (mediaID, deckIDs) in mediaDeckIDs {
             guard let media = mediaObjects[mediaID] else { continue }
             for deckID in deckIDs {
-                try await cacheMediaObject(media, deckID: deckID, database: database)
+                do {
+                    try await cacheMediaObject(media, deckID: deckID, database: database)
+                } catch ServerSyncError.cancelled {
+                    throw ServerSyncError.cancelled
+                } catch let error as CancellationError {
+                    throw error
+                } catch {
+                    failureCount += 1
+                    Self.logger.error(
+                        "cacheMediaObject failed mediaID=\(media.id.uuidString, privacy: .public) deckID=\(deckID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    )
+                }
             }
         }
+        return failureCount
     }
 
     private func cacheMediaObject(_ media: ServerMediaObject, deckID: UUID, database: ContentDatabase) async throws {
         let relativePath = "media/\(media.id.uuidString.lowercased()).\(fileExtension(for: media))"
         if let existingURL = try AppDataPaths.mediaFileURL(deckID: deckID, relativePath: relativePath) {
             if media.sha256 == nil {
-                try database.updateMediaLocalPath(mediaID: media.id, localPath: relativePath)
-                return
+                let fileSize = try? existingURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
+                if media.byteSize == nil || fileSize == media.byteSize {
+                    try database.updateMediaLocalPath(mediaID: media.id, localPath: relativePath)
+                    return
+                }
             }
             let existingData = try Data(contentsOf: existingURL)
             if sha256Hex(for: existingData) == media.sha256 {

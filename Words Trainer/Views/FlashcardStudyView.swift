@@ -44,7 +44,7 @@ struct FlashcardStudyView: View {
     }
 
     private var cardImageURL: URL? {
-        card.imageURL ?? card.clozeExampleImageURL
+        card.imageURL
     }
 
     var body: some View {

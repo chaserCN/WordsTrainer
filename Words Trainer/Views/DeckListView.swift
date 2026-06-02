@@ -65,6 +65,10 @@ struct DeckListView: View {
             storeUserID = nil
             Task { await bootstrap() }
         }
+        .onChange(of: userStore.bootstrapState) { _, state in
+            guard state == .loaded else { return }
+            Task { await bootstrap() }
+        }
     }
 
     private var activeDecks: [DeckContent] {
@@ -391,8 +395,8 @@ struct DeckDetailView: View {
 
                     StudySection(title: "Сбросить") {
                         StudyActionButton(
-                            title: "Помню / Забыл",
-                            subtitle: "Покажи слово и отметь: помню или забыл",
+                            title: "Оставить / Сбросить",
+                            subtitle: "Покажи слово и реши: оставить прогресс или начать заново",
                             systemImage: "eye.fill",
                             accent: .purple,
                             isEnabled: !studyCards.isEmpty

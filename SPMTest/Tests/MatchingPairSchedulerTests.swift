@@ -8,7 +8,7 @@ struct MatchingPairSchedulerTests {
 
     @Test("empty pool starts finished with zero remaining")
     func emptyPool() {
-        var scheduler = TestFixtures.scheduler(pairs: [], seed: 1)
+        let scheduler = TestFixtures.scheduler(pairs: [], seed: 1)
         #expect(scheduler.isFinished)
         #expect(scheduler.remainingCount == 0)
         #expect(scheduler.visible.isEmpty)

@@ -45,8 +45,8 @@ struct RecallOutcomeButton: View {
 }
 
 struct ReviewOutcomeControls: View {
-    var forgotTitle = "Забыл"
-    var rememberedTitle = "Помню"
+    var forgotTitle = "Сбросить"
+    var rememberedTitle = "Оставить"
     var verticalPadding: CGFloat = 16
     var isEnabled = true
     let onAnswer: (ReviewOutcome) -> Void

@@ -10,6 +10,38 @@ struct ServerBootstrap: Decodable, Sendable {
     let progress: [ServerProgressPayload]
     let reviews: [ServerReviewEventPayload]
     let matchingRecords: [ServerMatchingRecordPayload]
+    let dailyUsage: [ServerDailyUsagePayload]
+    let hasDailyUsageSnapshot: Bool
+    let statsSummary: ServerStatsSummaryPayload
+    let hasStatsSummarySnapshot: Bool
+
+    init(
+        user: ServerUser?,
+        users: [ServerUser],
+        assignments: [ServerDeckAssignment],
+        content: ServerContentPayload,
+        media: [ServerMediaObject],
+        progress: [ServerProgressPayload],
+        reviews: [ServerReviewEventPayload],
+        matchingRecords: [ServerMatchingRecordPayload],
+        dailyUsage: [ServerDailyUsagePayload] = [],
+        hasDailyUsageSnapshot: Bool = true,
+        statsSummary: ServerStatsSummaryPayload = .empty,
+        hasStatsSummarySnapshot: Bool = true
+    ) {
+        self.user = user
+        self.users = users
+        self.assignments = assignments
+        self.content = content
+        self.media = media
+        self.progress = progress
+        self.reviews = reviews
+        self.matchingRecords = matchingRecords
+        self.dailyUsage = dailyUsage
+        self.hasDailyUsageSnapshot = hasDailyUsageSnapshot
+        self.statsSummary = statsSummary
+        self.hasStatsSummarySnapshot = hasStatsSummarySnapshot
+    }
 
     private enum CodingKeys: String, CodingKey {
         case user
@@ -20,6 +52,8 @@ struct ServerBootstrap: Decodable, Sendable {
         case progress
         case reviews
         case matchingRecords
+        case dailyUsage
+        case statsSummary
     }
 
     init(from decoder: Decoder) throws {
@@ -32,6 +66,10 @@ struct ServerBootstrap: Decodable, Sendable {
         progress = try container.decodeIfPresent([ServerProgressPayload].self, forKey: .progress) ?? []
         reviews = try container.decodeIfPresent([ServerReviewEventPayload].self, forKey: .reviews) ?? []
         matchingRecords = try container.decodeIfPresent([ServerMatchingRecordPayload].self, forKey: .matchingRecords) ?? []
+        dailyUsage = try container.decodeIfPresent([ServerDailyUsagePayload].self, forKey: .dailyUsage) ?? []
+        hasDailyUsageSnapshot = container.contains(.dailyUsage)
+        statsSummary = try container.decodeIfPresent(ServerStatsSummaryPayload.self, forKey: .statsSummary) ?? .empty
+        hasStatsSummarySnapshot = container.contains(.statsSummary)
     }
 }
 
@@ -76,6 +114,8 @@ struct ServerDeckAssignment: Decodable, Sendable {
     let versionNumber: Int?
     let versionStatus: String?
     let manifest: ServerDeckManifest?
+    let userEnabled: Bool?
+    let preferenceUpdatedAt: String?
 }
 
 struct ServerContentPayload: Decodable, Sendable {
@@ -210,9 +250,10 @@ struct ServerSyncEventsPayload: Encodable, Sendable {
     var reviews: [ServerReviewEventPayload] = []
     var progress: [ServerProgressPayload] = []
     var matchingRecords: [ServerMatchingRecordPayload] = []
+    var deckPreferences: [ServerDeckPreferencePayload] = []
 
     var isEmpty: Bool {
-        reviews.isEmpty && progress.isEmpty && matchingRecords.isEmpty
+        reviews.isEmpty && progress.isEmpty && matchingRecords.isEmpty && deckPreferences.isEmpty
     }
 }
 
@@ -247,11 +288,45 @@ struct ServerMatchingRecordPayload: Codable, Sendable {
     let achievedAt: String
 }
 
+struct ServerDeckPreferencePayload: Codable, Sendable {
+    let deckId: UUID
+    let isEnabled: Bool
+    let updatedAt: String?
+}
+
+struct ServerDailyUsagePayload: Codable, Sendable {
+    let deckId: UUID
+    let dayKey: String
+    let newCardsStudied: Int
+}
+
+struct ServerStatsSummaryPayload: Codable, Sendable {
+    static let empty = ServerStatsSummaryPayload(activityDays: [], weakCards: [])
+
+    let activityDays: [ServerStudyActivityDayPayload]
+    let weakCards: [ServerWeakCardStatPayload]
+}
+
+struct ServerStudyActivityDayPayload: Codable, Sendable {
+    let dayKey: String
+    let reviewedCount: Int
+    let passedCount: Int
+}
+
+struct ServerWeakCardStatPayload: Codable, Sendable {
+    let cardId: UUID
+    let deckId: UUID
+    let failedCount: Int
+    let reviewedCount: Int
+    let lastFailedAt: String?
+}
+
 struct ServerSyncEventsResponse: Decodable, Sendable {
     let acceptedReviewIds: [UUID]
     let duplicateReviewIds: [UUID]
     let progressCardIds: [UUID]
     let matchingRecordDeckIds: [UUID]
+    let deckPreferenceDeckIds: [UUID]
     let serverRevision: String?
 }
 
@@ -424,7 +499,7 @@ enum ServerSyncError: LocalizedError {
     }
 }
 
-final class ServerSyncClient {
+struct ServerSyncClient: Sendable {
     static let shared = ServerSyncClient()
     private static let logger = Logger(subsystem: "com.uniweb.wordtrainer.Words-Trainer", category: "ServerSync")
 
@@ -434,19 +509,32 @@ final class ServerSyncClient {
     }
 
     private let session: URLSession
-    private let defaults: UserDefaults
+    private let userDefaultsSuiteName: String?
 
-    init(session: URLSession = .shared, defaults: UserDefaults = .standard) {
+    init(session: URLSession = .shared, userDefaultsSuiteName: String? = nil) {
         self.session = session
-        self.defaults = defaults
+        self.userDefaultsSuiteName = userDefaultsSuiteName
     }
 
     var isConfigured: Bool {
         baseURLString != nil && householdSyncToken != nil
     }
 
-    func bootstrap(selectedUserID: UUID?) async throws -> ServerBootstrap {
-        let data = try await data(for: "bootstrap", method: "GET", selectedUserID: selectedUserID)
+    func bootstrap(selectedUserID: UUID?, cachedDeckVersionIDs: [UUID] = []) async throws -> ServerBootstrap {
+        var headers: [String: String] = [
+            "X-FlashGame-Time-Zone": TimeZone.current.identifier
+        ]
+        if !cachedDeckVersionIDs.isEmpty {
+            headers["X-FlashGame-Cached-Deck-Version-Ids"] = cachedDeckVersionIDs
+                .map { $0.uuidString.lowercased() }
+                .joined(separator: ",")
+        }
+        let data = try await data(
+            for: "bootstrap",
+            method: "GET",
+            selectedUserID: selectedUserID,
+            headers: headers
+        )
 
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -467,6 +555,7 @@ final class ServerSyncClient {
                 duplicateReviewIds: [],
                 progressCardIds: [],
                 matchingRecordDeckIds: [],
+                deckPreferenceDeckIds: [],
                 serverRevision: nil
             )
         }
@@ -495,7 +584,8 @@ final class ServerSyncClient {
         for path: String,
         method: String,
         selectedUserID: UUID?,
-        body: Data? = nil
+        body: Data? = nil,
+        headers: [String: String] = [:]
     ) async throws -> Data {
         guard let baseURLString, let householdSyncToken else {
             throw ServerSyncError.missingConfiguration
@@ -522,6 +612,9 @@ final class ServerSyncClient {
         }
         if let selectedUserID {
             request.setValue(selectedUserID.uuidString.lowercased(), forHTTPHeaderField: "X-FlashGame-User-Id")
+        }
+        for (field, value) in headers {
+            request.setValue(value, forHTTPHeaderField: field)
         }
         Self.logger.info("HTTP \(method, privacy: .public) \(endpoint.absoluteString, privacy: .public) selectedUserID=\(selectedUserID?.uuidString ?? "nil", privacy: .public)")
 
@@ -600,11 +693,16 @@ final class ServerSyncClient {
             }
         }
         for userDefaultsKey in userDefaultsKeys {
-            if let value = defaults.string(forKey: userDefaultsKey)?.trimmingCharacters(in: .whitespacesAndNewlines),
+            if let value = userDefaults.string(forKey: userDefaultsKey)?.trimmingCharacters(in: .whitespacesAndNewlines),
                !value.isEmpty {
                 return value
             }
         }
         return nil
+    }
+
+    private var userDefaults: UserDefaults {
+        guard let userDefaultsSuiteName else { return .standard }
+        return UserDefaults(suiteName: userDefaultsSuiteName) ?? .standard
     }
 }

@@ -4,14 +4,31 @@ import SQLite3
 
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
+private enum ContentDatabaseDefaults {
+    static let userID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+}
+
+private enum SyncMetadataKey {
+    static let statsSummarySnapshot = "stats_summary_snapshot"
+}
+
+struct ContentCacheCleanupResult {
+    let removedDeckIDs: [UUID]
+}
+
 struct PendingServerSyncBatch {
     let payload: ServerSyncEventsPayload
     let reviewIDs: [UUID]
     let progressCardIDs: [UUID]
     let matchingDeckIDs: [UUID]
+    let deckPreferenceDeckIDs: [UUID]
 
     var isEmpty: Bool {
-        payload.isEmpty && reviewIDs.isEmpty && progressCardIDs.isEmpty && matchingDeckIDs.isEmpty
+        payload.isEmpty
+            && reviewIDs.isEmpty
+            && progressCardIDs.isEmpty
+            && matchingDeckIDs.isEmpty
+            && deckPreferenceDeckIDs.isEmpty
     }
 }
 
@@ -20,7 +37,7 @@ final class ContentDatabase {
     private var db: OpaquePointer?
     private let userID: UUID
 
-    init(userID: UUID = AppUser.defaultID) throws {
+    init(userID: UUID = ContentDatabaseDefaults.userID) throws {
         self.userID = userID
         _ = try AppDataPaths.dataDirectoryURL()
         let path = try AppDataPaths.databaseURL().path
@@ -68,29 +85,103 @@ final class ContentDatabase {
                 return (versionID, assignment.deckId)
             }
         )
-        let assignedDeckIDs = bootstrap.assignments.map(\.deckId)
+        let importedContentVersionIDs = Set(
+            bootstrap.content.cards.map(\.deckVersionId)
+                + bootstrap.content.examples.map(\.deckVersionId)
+                + bootstrap.content.forms.map(\.deckVersionId)
+                + bootstrap.content.distractors.map(\.deckVersionId)
+        )
+        let decksWithImportedContent = Set(importedContentVersionIDs.compactMap { versionDeckIDs[$0] })
 
-        try beginTransaction()
+            try beginTransaction()
         do {
             try replaceAssignments(bootstrap.assignments, selectedUserID: selectedUserID)
             try upsertMediaObjects(bootstrap.media)
-            for deckID in assignedDeckIDs {
+            for deckID in decksWithImportedContent {
                 try deleteDeckContent(deckID: deckID)
             }
             try upsertDecks(bootstrap.assignments)
+            try upsertServerDeckPreferences(bootstrap.assignments, selectedUserID: selectedUserID)
             try upsertCards(bootstrap.content.cards, versionDeckIDs: versionDeckIDs)
             try upsertExamples(bootstrap.content.examples)
             try upsertForms(bootstrap.content.forms)
             try upsertDistractors(bootstrap.content.distractors)
+            try markContentVersionsImported(importedContentVersionIDs, versionDeckIDs: versionDeckIDs)
             try upsertServerProgress(bootstrap.progress)
+            try deleteSyncedProgressMissingFromServerSnapshot(bootstrap.progress)
             try upsertServerReviews(bootstrap.reviews, selectedUserID: selectedUserID)
             try upsertServerMatchingRecords(bootstrap.matchingRecords, selectedUserID: selectedUserID)
-            try rebuildDerivedStats(selectedUserID: selectedUserID)
+            if bootstrap.hasDailyUsageSnapshot {
+                try replaceServerDailyUsage(bootstrap.dailyUsage, selectedUserID: selectedUserID)
+                try mergeUnsyncedDailyUsageFromLocalReviews(selectedUserID: selectedUserID)
+            } else {
+                try rebuildDerivedStats(selectedUserID: selectedUserID)
+            }
+            if bootstrap.hasStatsSummarySnapshot {
+                try replaceServerStatsSummary(bootstrap.statsSummary, selectedUserID: selectedUserID)
+                try mergeUnsyncedStatsSummaryFromLocalReviews(selectedUserID: selectedUserID)
+                try setSyncMetadata(SyncMetadataKey.statsSummarySnapshot, value: "1", selectedUserID: selectedUserID)
+            } else {
+                try setSyncMetadata(SyncMetadataKey.statsSummarySnapshot, value: "0", selectedUserID: selectedUserID)
+            }
+            try commitTransaction()
+            try cleanupUnusedContentCache()
+        } catch {
+            try? rollbackTransaction()
+            throw error
+        }
+    }
+
+    @discardableResult
+    func cleanupUnusedContentCache() throws -> ContentCacheCleanupResult {
+        let orphanDeckIDs = try fetchDeckIDsWithoutAssignments()
+        guard !orphanDeckIDs.isEmpty else {
+            try deleteUnreferencedMediaObjects()
+            return ContentCacheCleanupResult(removedDeckIDs: [])
+        }
+
+        try beginTransaction()
+        do {
+            try deleteRowsForDecksWithoutAssignments()
+            try deleteUnreferencedMediaObjects()
             try commitTransaction()
         } catch {
             try? rollbackTransaction()
             throw error
         }
+
+        for deckID in orphanDeckIDs {
+            let folderURL = try AppDataPaths.deckFolderURL(deckID: deckID)
+            if FileManager.default.fileExists(atPath: folderURL.path) {
+                try FileManager.default.removeItem(at: folderURL)
+            }
+        }
+        return ContentCacheCleanupResult(removedDeckIDs: orphanDeckIDs)
+    }
+
+    func cachedDeckVersionIDs() throws -> [UUID] {
+        let sql = """
+        SELECT DISTINCT decks.content_version_id
+        FROM decks
+        JOIN user_deck_assignments ON user_deck_assignments.deck_id = decks.id
+        WHERE user_deck_assignments.user_id = ?
+          AND decks.content_version_id IS NOT NULL
+        ORDER BY decks.content_version_id
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+
+        var ids: [UUID] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let id = uuidColumn(statement, index: 0) {
+                ids.append(id)
+            }
+        }
+        return ids
     }
 
     func mediaObjects(ids mediaIDs: Set<UUID>) throws -> [ServerMediaObject] {
@@ -138,19 +229,28 @@ final class ContentDatabase {
     }
 
     func updateDeckStatus(deckID: UUID, status: ContentStatus) throws {
+        try setDeckUserEnabled(status.isActive, deckID: deckID)
+    }
+
+    func setDeckUserEnabled(_ isEnabled: Bool, deckID: UUID, updatedAt: Date = .now) throws {
         let sql = """
-        UPDATE decks
-        SET status = ?
-        WHERE id = ?
+        INSERT INTO user_deck_preferences (user_id, deck_id, is_enabled, updated_at, synced_at)
+        VALUES (?, ?, ?, ?, NULL)
+        ON CONFLICT(user_id, deck_id) DO UPDATE SET
+            is_enabled = excluded.is_enabled,
+            updated_at = excluded.updated_at,
+            synced_at = NULL
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
         defer { sqlite3_finalize(statement) }
-        try bind(statement, index: 1, text: status.rawValue)
+        try bind(statement, index: 1, uuid: userID)
         try bind(statement, index: 2, uuid: deckID)
-        guard sqlite3_step(statement) == SQLITE_DONE else {
+        guard sqlite3_bind_int(statement, 3, isEnabled ? 1 : 0) == SQLITE_OK,
+              sqlite3_bind_double(statement, 4, updatedAt.timeIntervalSince1970) == SQLITE_OK,
+              sqlite3_step(statement) == SQLITE_DONE else {
             throw ContentDatabaseError.queryFailed
         }
     }
@@ -290,9 +390,17 @@ final class ContentDatabase {
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw ContentDatabaseError.queryFailed
         }
+
+        if try hasStatsSummarySnapshot() {
+            try applyReviewToStatsSummary(event)
+        }
     }
 
     func studyActivity(since startDate: Date) throws -> [StudyActivityDay] {
+        if try hasStatsSummarySnapshot() {
+            return try studyActivityFromSummary(since: startDate)
+        }
+
         let sql = """
         SELECT
             strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime') AS day_key,
@@ -328,6 +436,10 @@ final class ContentDatabase {
     }
 
     func studyReviewCount(since startDate: Date) throws -> StudyReviewCount {
+        if try hasStatsSummarySnapshot() {
+            return try studyReviewCountFromSummary(since: startDate)
+        }
+
         let sql = """
         SELECT
             COUNT(*),
@@ -352,6 +464,10 @@ final class ContentDatabase {
     }
 
     func weakCards(limit: Int = 30) throws -> [WeakCardStat] {
+        if try hasStatsSummarySnapshot() {
+            return try weakCardsFromSummary(limit: limit)
+        }
+
         let sql = """
         SELECT
             cards.id,
@@ -364,10 +480,133 @@ final class ContentDatabase {
         FROM study_reviews
         JOIN cards ON cards.id = study_reviews.card_id
         JOIN decks ON decks.id = study_reviews.deck_id
+        JOIN user_deck_assignments ON user_deck_assignments.user_id = study_reviews.user_id
+            AND user_deck_assignments.deck_id = study_reviews.deck_id
+            AND user_deck_assignments.status = 'active'
+        LEFT JOIN user_deck_preferences ON user_deck_preferences.user_id = study_reviews.user_id
+            AND user_deck_preferences.deck_id = study_reviews.deck_id
         WHERE study_reviews.user_id = ? AND cards.status = 'active' AND decks.status = 'active'
+          AND COALESCE(user_deck_preferences.is_enabled, 1) = 1
         GROUP BY cards.id, cards.deck_id, cards.display_word, cards.translation
         HAVING failed_count > 0
         ORDER BY failed_count DESC, CAST(failed_count AS REAL) / reviewed_count DESC, last_failed_at DESC
+        LIMIT ?
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        guard sqlite3_bind_int(statement, 2, Int32(limit)) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+
+        var cards: [WeakCardStat] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let cardID = uuidColumn(statement, index: 0),
+                  let deckID = uuidColumn(statement, index: 1),
+                  let word = textColumn(statement, index: 2),
+                  let translation = textColumn(statement, index: 3) else { continue }
+            let lastFailedAt: Date?
+            if sqlite3_column_type(statement, 6) == SQLITE_NULL {
+                lastFailedAt = nil
+            } else {
+                lastFailedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 6))
+            }
+            cards.append(
+                WeakCardStat(
+                    cardID: cardID,
+                    deckID: deckID,
+                    word: word,
+                    translation: translation,
+                    failedCount: Int(sqlite3_column_int(statement, 4)),
+                    reviewedCount: Int(sqlite3_column_int(statement, 5)),
+                    lastFailedAt: lastFailedAt
+                )
+            )
+        }
+        return cards
+    }
+
+    private func studyActivityFromSummary(since startDate: Date) throws -> [StudyActivityDay] {
+        let sql = """
+        SELECT day_key, reviewed_count, passed_count
+        FROM study_activity_summary
+        WHERE user_id = ? AND day_key >= ?
+        ORDER BY day_key
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, text: DeckDailyUsage.dayKey(for: startDate))
+
+        var days: [StudyActivityDay] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let dayKey = textColumn(statement, index: 0) else { continue }
+            days.append(
+                StudyActivityDay(
+                    dayKey: dayKey,
+                    reviewedCount: Int(sqlite3_column_int(statement, 1)),
+                    passedCount: Int(sqlite3_column_int(statement, 2))
+                )
+            )
+        }
+        return days
+    }
+
+    private func studyReviewCountFromSummary(since startDate: Date) throws -> StudyReviewCount {
+        let sql = """
+        SELECT
+            COALESCE(SUM(reviewed_count), 0),
+            COALESCE(SUM(passed_count), 0)
+        FROM study_activity_summary
+        WHERE user_id = ? AND day_key >= ?
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, text: DeckDailyUsage.dayKey(for: startDate))
+
+        guard sqlite3_step(statement) == SQLITE_ROW else { return .zero }
+        return StudyReviewCount(
+            total: Int(sqlite3_column_int(statement, 0)),
+            passed: Int(sqlite3_column_int(statement, 1))
+        )
+    }
+
+    private func weakCardsFromSummary(limit: Int) throws -> [WeakCardStat] {
+        let sql = """
+        SELECT
+            cards.id,
+            cards.deck_id,
+            cards.display_word,
+            cards.translation,
+            study_weak_card_stats.failed_count,
+            study_weak_card_stats.reviewed_count,
+            study_weak_card_stats.last_failed_at
+        FROM study_weak_card_stats
+        JOIN cards ON cards.id = study_weak_card_stats.card_id
+        JOIN decks ON decks.id = study_weak_card_stats.deck_id
+        JOIN user_deck_assignments ON user_deck_assignments.user_id = study_weak_card_stats.user_id
+            AND user_deck_assignments.deck_id = study_weak_card_stats.deck_id
+            AND user_deck_assignments.status = 'active'
+        LEFT JOIN user_deck_preferences ON user_deck_preferences.user_id = study_weak_card_stats.user_id
+            AND user_deck_preferences.deck_id = study_weak_card_stats.deck_id
+        WHERE study_weak_card_stats.user_id = ?
+          AND study_weak_card_stats.failed_count > 0
+          AND cards.status = 'active'
+          AND decks.status = 'active'
+          AND COALESCE(user_deck_preferences.is_enabled, 1) = 1
+        ORDER BY study_weak_card_stats.failed_count DESC,
+                 CAST(study_weak_card_stats.failed_count AS REAL) / study_weak_card_stats.reviewed_count DESC,
+                 study_weak_card_stats.last_failed_at DESC
         LIMIT ?
         """
         var statement: OpaquePointer?
@@ -465,15 +704,18 @@ final class ContentDatabase {
         let reviews = try pendingReviewEvents(limit: limit)
         let progress = try pendingProgressItems(limit: limit)
         let matchingRecords = try pendingMatchingRecords(limit: limit)
+        let deckPreferences = try pendingDeckPreferences(limit: limit)
         return PendingServerSyncBatch(
             payload: ServerSyncEventsPayload(
                 reviews: reviews.payload,
                 progress: progress.payload,
-                matchingRecords: matchingRecords.payload
+                matchingRecords: matchingRecords.payload,
+                deckPreferences: deckPreferences.payload
             ),
             reviewIDs: reviews.ids,
             progressCardIDs: progress.cardIDs,
-            matchingDeckIDs: matchingRecords.deckIDs
+            matchingDeckIDs: matchingRecords.deckIDs,
+            deckPreferenceDeckIDs: deckPreferences.deckIDs
         )
     }
 
@@ -487,6 +729,9 @@ final class ContentDatabase {
         }
         for deckID in batch.matchingDeckIDs {
             try markMatchingRecordSynced(deckID: deckID, syncedAt: timestamp)
+        }
+        for deckID in batch.deckPreferenceDeckIDs {
+            try markDeckPreferenceSynced(deckID: deckID, syncedAt: timestamp)
         }
     }
 
@@ -638,6 +883,44 @@ final class ContentDatabase {
         return (payload, deckIDs)
     }
 
+    private func pendingDeckPreferences(limit: Int) throws -> (payload: [ServerDeckPreferencePayload], deckIDs: [UUID]) {
+        let sql = """
+        SELECT user_deck_preferences.deck_id,
+               user_deck_preferences.is_enabled,
+               user_deck_preferences.updated_at
+        FROM user_deck_preferences
+        JOIN user_deck_assignments ON user_deck_assignments.user_id = user_deck_preferences.user_id
+            AND user_deck_assignments.deck_id = user_deck_preferences.deck_id
+        WHERE user_deck_preferences.user_id = ?
+          AND user_deck_preferences.synced_at IS NULL
+        ORDER BY user_deck_preferences.updated_at
+        LIMIT ?
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, int: limit)
+
+        var payload: [ServerDeckPreferencePayload] = []
+        var deckIDs: [UUID] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let deckID = uuidColumn(statement, index: 0) else { continue }
+            let updatedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 2))
+            deckIDs.append(deckID)
+            payload.append(
+                ServerDeckPreferencePayload(
+                    deckId: deckID,
+                    isEnabled: sqlite3_column_int(statement, 1) != 0,
+                    updatedAt: isoString(updatedAt)
+                )
+            )
+        }
+        return (payload, deckIDs)
+    }
+
     private func markReviewSynced(reviewID: UUID, syncedAt: Double) throws {
         try markSynced(
             sql: "UPDATE study_reviews SET synced_at = ? WHERE user_id = ? AND id = ?",
@@ -657,6 +940,14 @@ final class ContentDatabase {
     private func markMatchingRecordSynced(deckID: UUID, syncedAt: Double) throws {
         try markSynced(
             sql: "UPDATE deck_matching_records SET synced_at = ? WHERE user_id = ? AND deck_id = ?",
+            id: deckID,
+            syncedAt: syncedAt
+        )
+    }
+
+    private func markDeckPreferenceSynced(deckID: UUID, syncedAt: Double) throws {
+        try markSynced(
+            sql: "UPDATE user_deck_preferences SET synced_at = ? WHERE user_id = ? AND deck_id = ?",
             id: deckID,
             syncedAt: syncedAt
         )
@@ -695,6 +986,36 @@ final class ContentDatabase {
                 uuid2: assignment.deckId,
                 text: localStatus(assignment.assignmentStatus).rawValue
             )
+        }
+    }
+
+    private func upsertServerDeckPreferences(_ assignments: [ServerDeckAssignment], selectedUserID: UUID) throws {
+        let syncedAt = Date().timeIntervalSince1970
+        for assignment in assignments where assignment.userId == selectedUserID {
+            let updatedAt = parseServerDate(assignment.preferenceUpdatedAt)?.timeIntervalSince1970 ?? 0
+            let sql = """
+            INSERT INTO user_deck_preferences (user_id, deck_id, is_enabled, updated_at, synced_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, deck_id) DO UPDATE SET
+                is_enabled = excluded.is_enabled,
+                updated_at = excluded.updated_at,
+                synced_at = excluded.synced_at
+            WHERE user_deck_preferences.synced_at IS NOT NULL
+               OR excluded.updated_at >= user_deck_preferences.updated_at
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            defer { sqlite3_finalize(statement) }
+            try bind(statement, index: 1, uuid: selectedUserID)
+            try bind(statement, index: 2, uuid: assignment.deckId)
+            guard sqlite3_bind_int(statement, 3, (assignment.userEnabled ?? true) ? 1 : 0) == SQLITE_OK,
+                  sqlite3_bind_double(statement, 4, updatedAt) == SQLITE_OK,
+                  sqlite3_bind_double(statement, 5, syncedAt) == SQLITE_OK,
+                  sqlite3_step(statement) == SQLITE_DONE else {
+                throw ContentDatabaseError.queryFailed
+            }
         }
     }
 
@@ -789,6 +1110,78 @@ final class ContentDatabase {
             "UPDATE cards SET status = 'inactive' WHERE deck_id = '\(deckID)'",
         ]
         try executeMigrationStatements(statements)
+    }
+
+    private func fetchDeckIDsWithoutAssignments() throws -> [UUID] {
+        let sql = """
+        SELECT decks.id
+        FROM decks
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM user_deck_assignments
+            WHERE user_deck_assignments.deck_id = decks.id
+        )
+        ORDER BY decks.id
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+
+        var deckIDs: [UUID] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let deckID = uuidColumn(statement, index: 0) {
+                deckIDs.append(deckID)
+            }
+        }
+        return deckIDs
+    }
+
+    private func deleteRowsForDecksWithoutAssignments() throws {
+        let orphanDecks = """
+        SELECT decks.id
+        FROM decks
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM user_deck_assignments
+            WHERE user_deck_assignments.deck_id = decks.id
+        )
+        """
+        let orphanCards = "SELECT cards.id FROM cards WHERE cards.deck_id IN (\(orphanDecks))"
+        let orphanExamples = "SELECT card_examples.id FROM card_examples WHERE card_examples.card_id IN (\(orphanCards))"
+        let statements = [
+            "DELETE FROM example_distractors WHERE example_id IN (\(orphanExamples))",
+            "DELETE FROM example_distractors WHERE source_card_id IN (\(orphanCards))",
+            "DELETE FROM word_forms WHERE card_id IN (\(orphanCards))",
+            "DELETE FROM card_examples WHERE card_id IN (\(orphanCards))",
+            "DELETE FROM card_progress WHERE deck_id IN (\(orphanDecks))",
+            "DELETE FROM deck_daily_usage WHERE deck_id IN (\(orphanDecks))",
+            "DELETE FROM study_weak_card_stats WHERE deck_id IN (\(orphanDecks))",
+            "DELETE FROM deck_matching_records WHERE deck_id IN (\(orphanDecks))",
+            "DELETE FROM user_deck_preferences WHERE deck_id IN (\(orphanDecks))",
+            "DELETE FROM cards WHERE deck_id IN (\(orphanDecks))",
+            "DELETE FROM decks WHERE id IN (\(orphanDecks))",
+        ]
+        try executeMigrationStatements(statements)
+    }
+
+    private func deleteUnreferencedMediaObjects() throws {
+        let sql = """
+        DELETE FROM media_objects
+        WHERE id NOT IN (
+            SELECT avatar_media_id FROM decks WHERE avatar_media_id IS NOT NULL
+            UNION
+            SELECT image_media_id FROM cards WHERE image_media_id IS NOT NULL
+            UNION
+            SELECT audio_word_media_id FROM cards WHERE audio_word_media_id IS NOT NULL
+            UNION
+            SELECT image_media_id FROM card_examples WHERE image_media_id IS NOT NULL
+            UNION
+            SELECT audio_example_media_id FROM card_examples WHERE audio_example_media_id IS NOT NULL
+        )
+        """
+        try exec(sql)
     }
 
     private func upsertCards(_ cards: [ServerCardContent], versionDeckIDs: [UUID: UUID]) throws {
@@ -935,6 +1328,23 @@ final class ContentDatabase {
         }
     }
 
+    private func markContentVersionsImported(_ versionIDs: Set<UUID>, versionDeckIDs: [UUID: UUID]) throws {
+        for versionID in versionIDs {
+            guard let deckID = versionDeckIDs[versionID] else { continue }
+            let sql = "UPDATE decks SET content_version_id = ? WHERE id = ?"
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            defer { sqlite3_finalize(statement) }
+            try bind(statement, index: 1, uuid: versionID)
+            try bind(statement, index: 2, uuid: deckID)
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw ContentDatabaseError.queryFailed
+            }
+        }
+    }
+
     private func upsertServerProgress(_ progressItems: [ServerProgressPayload]) throws {
         let syncedAt = Date().timeIntervalSince1970
         for progress in progressItems {
@@ -949,6 +1359,7 @@ final class ContentDatabase {
                 updated_at = excluded.updated_at,
                 synced_at = excluded.synced_at
             WHERE card_progress.synced_at IS NOT NULL
+               OR excluded.updated_at >= card_progress.updated_at
             """
             var statement: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -968,6 +1379,34 @@ final class ContentDatabase {
                   sqlite3_step(statement) == SQLITE_DONE else {
                 throw ContentDatabaseError.queryFailed
             }
+        }
+    }
+
+    private func deleteSyncedProgressMissingFromServerSnapshot(_ progressItems: [ServerProgressPayload]) throws {
+        let cardIDs = Array(Set(progressItems.map(\.cardId))).sorted { $0.uuidString < $1.uuidString }
+        let placeholders = cardIDs.map { _ in "?" }.joined(separator: ", ")
+        let sql: String
+        if cardIDs.isEmpty {
+            sql = "DELETE FROM card_progress WHERE user_id = ? AND synced_at IS NOT NULL"
+        } else {
+            sql = """
+            DELETE FROM card_progress
+            WHERE user_id = ?
+              AND synced_at IS NOT NULL
+              AND card_id NOT IN (\(placeholders))
+            """
+        }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        for (offset, cardID) in cardIDs.enumerated() {
+            try bind(statement, index: Int32(offset + 2), uuid: cardID)
+        }
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
         }
     }
 
@@ -1089,7 +1528,7 @@ final class ContentDatabase {
             user_id,
             deck_id,
             strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime') AS day_key,
-            SUM(CASE WHEN was_new = 1 THEN 1 ELSE 0 END) AS new_cards_studied
+            SUM(CASE WHEN was_new = 1 AND outcome IN ('remembered', 'correct') THEN 1 ELSE 0 END) AS new_cards_studied
         FROM study_reviews
         WHERE user_id = ?
         GROUP BY user_id, deck_id, day_key
@@ -1106,6 +1545,295 @@ final class ContentDatabase {
         }
     }
 
+    private func replaceServerDailyUsage(_ dailyUsage: [ServerDailyUsagePayload], selectedUserID: UUID) throws {
+        try exec("DELETE FROM deck_daily_usage WHERE user_id = ?", uuid: selectedUserID)
+
+        for usage in dailyUsage {
+            let sql = """
+            INSERT INTO deck_daily_usage (user_id, deck_id, day_key, new_cards_studied)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, deck_id, day_key) DO UPDATE SET
+                new_cards_studied = excluded.new_cards_studied
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            defer { sqlite3_finalize(statement) }
+            try bind(statement, index: 1, uuid: selectedUserID)
+            try bind(statement, index: 2, uuid: usage.deckId)
+            try bind(statement, index: 3, text: usage.dayKey)
+            guard sqlite3_bind_int(statement, 4, Int32(usage.newCardsStudied)) == SQLITE_OK,
+                  sqlite3_step(statement) == SQLITE_DONE else {
+                throw ContentDatabaseError.queryFailed
+            }
+        }
+    }
+
+    private func mergeUnsyncedDailyUsageFromLocalReviews(selectedUserID: UUID) throws {
+        let sql = """
+        INSERT INTO deck_daily_usage (user_id, deck_id, day_key, new_cards_studied)
+        SELECT
+            user_id,
+            deck_id,
+            strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime') AS day_key,
+            SUM(CASE WHEN was_new = 1 AND outcome IN ('remembered', 'correct') THEN 1 ELSE 0 END) AS new_cards_studied
+        FROM study_reviews
+        WHERE user_id = ? AND synced_at IS NULL
+        GROUP BY user_id, deck_id, day_key
+        HAVING new_cards_studied > 0
+        ON CONFLICT(user_id, deck_id, day_key) DO UPDATE SET
+            new_cards_studied = deck_daily_usage.new_cards_studied + excluded.new_cards_studied
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: selectedUserID)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
+        }
+    }
+
+    private func replaceServerStatsSummary(_ statsSummary: ServerStatsSummaryPayload, selectedUserID: UUID) throws {
+        try exec("DELETE FROM study_activity_summary WHERE user_id = ?", uuid: selectedUserID)
+        try exec("DELETE FROM study_weak_card_stats WHERE user_id = ?", uuid: selectedUserID)
+
+        for day in statsSummary.activityDays {
+            let sql = """
+            INSERT INTO study_activity_summary (user_id, day_key, reviewed_count, passed_count)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, day_key) DO UPDATE SET
+                reviewed_count = excluded.reviewed_count,
+                passed_count = excluded.passed_count
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            defer { sqlite3_finalize(statement) }
+            try bind(statement, index: 1, uuid: selectedUserID)
+            try bind(statement, index: 2, text: day.dayKey)
+            guard sqlite3_bind_int(statement, 3, Int32(day.reviewedCount)) == SQLITE_OK,
+                  sqlite3_bind_int(statement, 4, Int32(day.passedCount)) == SQLITE_OK,
+                  sqlite3_step(statement) == SQLITE_DONE else {
+                throw ContentDatabaseError.queryFailed
+            }
+        }
+
+        for card in statsSummary.weakCards {
+            let lastFailedAt = card.lastFailedAt.flatMap(parseServerDate)
+            let sql = """
+            INSERT INTO study_weak_card_stats (
+                user_id, card_id, deck_id, failed_count, reviewed_count, last_failed_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, card_id) DO UPDATE SET
+                deck_id = excluded.deck_id,
+                failed_count = excluded.failed_count,
+                reviewed_count = excluded.reviewed_count,
+                last_failed_at = excluded.last_failed_at
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            defer { sqlite3_finalize(statement) }
+            try bind(statement, index: 1, uuid: selectedUserID)
+            try bind(statement, index: 2, uuid: card.cardId)
+            try bind(statement, index: 3, uuid: card.deckId)
+            guard sqlite3_bind_int(statement, 4, Int32(card.failedCount)) == SQLITE_OK,
+                  sqlite3_bind_int(statement, 5, Int32(card.reviewedCount)) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            if let lastFailedAt {
+                guard sqlite3_bind_double(statement, 6, lastFailedAt.timeIntervalSince1970) == SQLITE_OK else {
+                    throw ContentDatabaseError.queryFailed
+                }
+            } else {
+                guard sqlite3_bind_null(statement, 6) == SQLITE_OK else {
+                    throw ContentDatabaseError.queryFailed
+                }
+            }
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw ContentDatabaseError.queryFailed
+            }
+        }
+    }
+
+    private func mergeUnsyncedStatsSummaryFromLocalReviews(selectedUserID: UUID) throws {
+        try mergeUnsyncedActivitySummaryFromLocalReviews(selectedUserID: selectedUserID)
+        try mergeUnsyncedWeakCardsFromLocalReviews(selectedUserID: selectedUserID)
+    }
+
+    private func mergeUnsyncedActivitySummaryFromLocalReviews(selectedUserID: UUID) throws {
+        let sql = """
+        INSERT INTO study_activity_summary (user_id, day_key, reviewed_count, passed_count)
+        SELECT
+            user_id,
+            strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime') AS day_key,
+            COUNT(*) AS reviewed_count,
+            SUM(CASE WHEN outcome IN ('remembered', 'correct') THEN 1 ELSE 0 END) AS passed_count
+        FROM study_reviews
+        WHERE user_id = ? AND synced_at IS NULL
+        GROUP BY user_id, day_key
+        ON CONFLICT(user_id, day_key) DO UPDATE SET
+            reviewed_count = study_activity_summary.reviewed_count + excluded.reviewed_count,
+            passed_count = study_activity_summary.passed_count + excluded.passed_count
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: selectedUserID)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
+        }
+    }
+
+    private func mergeUnsyncedWeakCardsFromLocalReviews(selectedUserID: UUID) throws {
+        let sql = """
+        INSERT INTO study_weak_card_stats (
+            user_id, card_id, deck_id, failed_count, reviewed_count, last_failed_at
+        )
+        SELECT
+            study_reviews.user_id,
+            study_reviews.card_id,
+            study_reviews.deck_id,
+            SUM(CASE WHEN study_reviews.outcome IN ('forgot', 'incorrect') THEN 1 ELSE 0 END) AS failed_count,
+            COUNT(*) AS reviewed_count,
+            MAX(CASE WHEN study_reviews.outcome IN ('forgot', 'incorrect') THEN study_reviews.reviewed_at ELSE NULL END) AS last_failed_at
+        FROM study_reviews
+        LEFT JOIN study_weak_card_stats ON study_weak_card_stats.user_id = study_reviews.user_id
+            AND study_weak_card_stats.card_id = study_reviews.card_id
+        WHERE study_reviews.user_id = ? AND study_reviews.synced_at IS NULL
+        GROUP BY study_reviews.user_id, study_reviews.card_id, study_reviews.deck_id
+        HAVING failed_count > 0 OR MAX(CASE WHEN study_weak_card_stats.card_id IS NOT NULL THEN 1 ELSE 0 END) > 0
+        ON CONFLICT(user_id, card_id) DO UPDATE SET
+            deck_id = excluded.deck_id,
+            failed_count = study_weak_card_stats.failed_count + excluded.failed_count,
+            reviewed_count = study_weak_card_stats.reviewed_count + excluded.reviewed_count,
+            last_failed_at = CASE
+                WHEN excluded.last_failed_at IS NULL THEN study_weak_card_stats.last_failed_at
+                WHEN study_weak_card_stats.last_failed_at IS NULL THEN excluded.last_failed_at
+                ELSE MAX(study_weak_card_stats.last_failed_at, excluded.last_failed_at)
+            END
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: selectedUserID)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
+        }
+    }
+
+    private func applyReviewToStatsSummary(_ event: StudyReviewEvent) throws {
+        let dayKey = DeckDailyUsage.dayKey(for: event.reviewedAt)
+        let sql = """
+        INSERT INTO study_activity_summary (user_id, day_key, reviewed_count, passed_count)
+        VALUES (?, ?, 1, ?)
+        ON CONFLICT(user_id, day_key) DO UPDATE SET
+            reviewed_count = study_activity_summary.reviewed_count + 1,
+            passed_count = study_activity_summary.passed_count + excluded.passed_count
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, text: dayKey)
+        guard sqlite3_bind_int(statement, 3, event.outcome.passed ? 1 : 0) == SQLITE_OK,
+              sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
+        }
+
+        if event.outcome.passed {
+            try incrementExistingWeakCardReviewCount(cardID: event.cardID)
+        } else {
+            try upsertFailedWeakCardReview(event)
+        }
+    }
+
+    private func incrementExistingWeakCardReviewCount(cardID: UUID) throws {
+        let sql = """
+        UPDATE study_weak_card_stats
+        SET reviewed_count = reviewed_count + 1
+        WHERE user_id = ? AND card_id = ?
+        """
+        try exec(sql, uuid: userID, uuid2: cardID)
+    }
+
+    private func upsertFailedWeakCardReview(_ event: StudyReviewEvent) throws {
+        let sql = """
+        INSERT INTO study_weak_card_stats (
+            user_id, card_id, deck_id, failed_count, reviewed_count, last_failed_at
+        ) VALUES (?, ?, ?, 1, 1, ?)
+        ON CONFLICT(user_id, card_id) DO UPDATE SET
+            deck_id = excluded.deck_id,
+            failed_count = study_weak_card_stats.failed_count + 1,
+            reviewed_count = study_weak_card_stats.reviewed_count + 1,
+            last_failed_at = MAX(study_weak_card_stats.last_failed_at, excluded.last_failed_at)
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, uuid: event.cardID)
+        try bind(statement, index: 3, uuid: event.deckID)
+        guard sqlite3_bind_double(statement, 4, event.reviewedAt.timeIntervalSince1970) == SQLITE_OK,
+              sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
+        }
+    }
+
+    private func hasStatsSummarySnapshot() throws -> Bool {
+        try syncMetadataValue(SyncMetadataKey.statsSummarySnapshot) == "1"
+    }
+
+    private func setSyncMetadata(_ key: String, value: String, selectedUserID: UUID) throws {
+        let sql = """
+        INSERT INTO sync_metadata (user_id, key, value)
+        VALUES (?, ?, ?)
+        ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: selectedUserID)
+        try bind(statement, index: 2, text: key)
+        try bind(statement, index: 3, text: value)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
+        }
+    }
+
+    private func syncMetadataValue(_ key: String) throws -> String? {
+        let sql = """
+        SELECT value
+        FROM sync_metadata
+        WHERE user_id = ? AND key = ?
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, text: key)
+
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return textColumn(statement, index: 0)
+    }
+
     // MARK: - Schema
 
     private func executeMigrations() throws {
@@ -1116,6 +1844,7 @@ final class ContentDatabase {
             title TEXT NOT NULL,
             avatar_system_name TEXT,
             avatar_media_id TEXT,
+            content_version_id TEXT,
             language_code TEXT NOT NULL,
             new_cards_per_day INTEGER NOT NULL,
             review_cards_per_day INTEGER NOT NULL,
@@ -1129,6 +1858,16 @@ final class ContentDatabase {
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
         CREATE INDEX IF NOT EXISTS idx_user_deck_assignments_user_id ON user_deck_assignments(user_id);
+        CREATE TABLE IF NOT EXISTS user_deck_preferences (
+            user_id TEXT NOT NULL,
+            deck_id TEXT NOT NULL,
+            is_enabled INTEGER NOT NULL DEFAULT 1,
+            updated_at REAL NOT NULL,
+            synced_at REAL,
+            PRIMARY KEY (user_id, deck_id),
+            FOREIGN KEY (deck_id) REFERENCES decks(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_user_deck_preferences_user_id ON user_deck_preferences(user_id);
         CREATE TABLE IF NOT EXISTS media_objects (
             id TEXT PRIMARY KEY NOT NULL,
             storage_key TEXT,
@@ -1211,6 +1950,30 @@ final class ContentDatabase {
             PRIMARY KEY (user_id, deck_id, day_key),
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
+        CREATE TABLE IF NOT EXISTS study_activity_summary (
+            user_id TEXT NOT NULL,
+            day_key TEXT NOT NULL,
+            reviewed_count INTEGER NOT NULL DEFAULT 0,
+            passed_count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, day_key)
+        );
+        CREATE TABLE IF NOT EXISTS study_weak_card_stats (
+            user_id TEXT NOT NULL,
+            card_id TEXT NOT NULL,
+            deck_id TEXT NOT NULL,
+            failed_count INTEGER NOT NULL DEFAULT 0,
+            reviewed_count INTEGER NOT NULL DEFAULT 0,
+            last_failed_at REAL,
+            PRIMARY KEY (user_id, card_id),
+            FOREIGN KEY (card_id) REFERENCES cards(id),
+            FOREIGN KEY (deck_id) REFERENCES decks(id)
+        );
+        CREATE TABLE IF NOT EXISTS sync_metadata (
+            user_id TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            PRIMARY KEY (user_id, key)
+        );
         CREATE TABLE IF NOT EXISTS deck_matching_records (
             user_id TEXT NOT NULL,
             deck_id TEXT NOT NULL,
@@ -1245,6 +2008,7 @@ final class ContentDatabase {
             throw ContentDatabaseError.migrationFailed
         }
         try addColumnIfMissing(table: "decks", column: "avatar_media_id", definition: "TEXT")
+        try addColumnIfMissing(table: "decks", column: "content_version_id", definition: "TEXT")
         try addColumnIfMissing(table: "cards", column: "image_media_id", definition: "TEXT")
         try addColumnIfMissing(table: "cards", column: "audio_word_media_id", definition: "TEXT")
         try addColumnIfMissing(table: "card_examples", column: "image_media_id", definition: "TEXT")
@@ -1257,7 +2021,7 @@ final class ContentDatabase {
     }
 
     private func migrateUserScopedTablesIfNeeded() throws {
-        let defaultUserID = AppUser.defaultID.databaseString
+        let defaultUserID = ContentDatabaseDefaults.userID.databaseString
         if try !hasColumn("user_id", inTable: "card_progress") {
             try executeMigrationStatements([
                 "ALTER TABLE card_progress RENAME TO card_progress_legacy",
@@ -1356,7 +2120,7 @@ final class ContentDatabase {
     }
 
     private func seedDefaultAssignmentsIfNeeded() throws {
-        let defaultUserID = AppUser.defaultID.databaseString
+        let defaultUserID = ContentDatabaseDefaults.userID.databaseString
         let sql = """
         INSERT OR IGNORE INTO user_deck_assignments (user_id, deck_id, status)
         SELECT '\(defaultUserID)', id, status
@@ -1408,6 +2172,13 @@ final class ContentDatabase {
             "UPDATE card_progress SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
             "UPDATE deck_daily_usage SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
             "UPDATE deck_daily_usage SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
+            "UPDATE user_deck_preferences SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
+            "UPDATE user_deck_preferences SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
+            "UPDATE study_weak_card_stats SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
+            "UPDATE study_weak_card_stats SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
+            "UPDATE study_weak_card_stats SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
+            "UPDATE study_activity_summary SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
+            "UPDATE sync_metadata SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
             "UPDATE deck_matching_records SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
             "UPDATE deck_matching_records SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
             "UPDATE study_reviews SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
@@ -1437,10 +2208,19 @@ final class ContentDatabase {
 
     private func fetchDeckRows() throws -> [DeckRow] {
         let sql = """
-        SELECT decks.id, user_deck_assignments.status, decks.title, decks.avatar_system_name,
+        SELECT decks.id,
+               CASE
+                   WHEN user_deck_assignments.status = 'active'
+                    AND COALESCE(user_deck_preferences.is_enabled, 1) = 1
+                   THEN 'active'
+                   ELSE 'inactive'
+               END AS effective_status,
+               decks.title, decks.avatar_system_name,
                decks.avatar_media_id, decks.language_code, decks.new_cards_per_day, decks.review_cards_per_day
         FROM decks
         JOIN user_deck_assignments ON user_deck_assignments.deck_id = decks.id
+        LEFT JOIN user_deck_preferences ON user_deck_preferences.user_id = user_deck_assignments.user_id
+            AND user_deck_preferences.deck_id = user_deck_assignments.deck_id
         WHERE user_deck_assignments.user_id = ?
         ORDER BY title
         """

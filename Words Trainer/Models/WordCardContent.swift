@@ -33,7 +33,7 @@ struct WordCardContent: Codable, Identifiable, Hashable {
     let clozeAnswer: String?
     /// Russian translation of the example sentence (`card_examples.translation`).
     let clozeExampleTranslation: String?
-    /// Optional image for the concrete example. Falls back to `imageURL` in UI.
+    /// Optional image for the concrete example. Stored for future UI modes.
     let clozeExampleImageURL: URL?
     let answerFormKey: String?
     let shortDefinition: String?

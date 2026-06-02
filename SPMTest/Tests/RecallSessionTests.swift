@@ -31,6 +31,32 @@ struct RecallSessionTests {
         #expect(saved?.fsrsCard.state == .new)
     }
 
+    @Test("flashcards forgot uses FSRS failure instead of reset")
+    @MainActor
+    func flashcardsForgotDoesNotResetToNew() throws {
+        let engine = StudySessionEngine()
+        let cardID = UUID()
+        var progress = CardProgress.newCard(cardID: cardID)
+        progress = try engine.applyReview(progress: progress, outcome: .remembered)
+        #expect(progress.fsrsCard.state != .new)
+
+        let card = TestFixtures.card(id: cardID, word: "cat", translation: "кот")
+        let session = StudySession(
+            deckID: UUID(),
+            mode: .flashcards,
+            queue: [TestFixtures.queueItem(card: card, progress: progress)],
+            dailyUsage: nil,
+            engine: engine
+        )
+
+        var saved: CardProgress?
+        try session.advanceAfterReview(outcome: .forgot) { progress, _ in
+            saved = progress
+        }
+
+        #expect(saved?.fsrsCard.state != .new)
+    }
+
     @Test("recall forgot makes card count as new in deck stats")
     @MainActor
     func recallForgotCountsAsNew() throws {

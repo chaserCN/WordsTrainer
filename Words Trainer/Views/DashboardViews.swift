@@ -44,8 +44,6 @@ struct TodayView: View {
     @State private var showUserSwitcher = false
     @State private var showTodayModes = false
     @State private var showStudy = false
-    @State private var isSyncing = false
-    @State private var syncTask: Task<Void, Never>?
     @State private var toast: TodayToast?
     @State private var toastDismissTask: Task<Void, Never>?
     @State private var loadError: String?
@@ -88,7 +86,9 @@ struct TodayView: View {
                         )
                     }
 
-                    if let contentStatus {
+                    if let visibleSyncStatus {
+                        TodaySyncStatusCard(status: visibleSyncStatus)
+                    } else if let contentStatus {
                         TodaySyncStatusCard(status: contentStatus)
                     }
 
@@ -168,6 +168,9 @@ struct TodayView: View {
         }
         .onChange(of: userStore.bootstrapState) { _, state in
             presentToast(forBootstrapState: state)
+            if state == .loaded {
+                Task { await reload() }
+            }
         }
     }
 
@@ -236,6 +239,11 @@ struct TodayView: View {
         return nil
     }
 
+    private var visibleSyncStatus: TodaySyncStatus? {
+        guard userStore.syncStatus.isRelevant(to: userStore.selectedUserID) else { return nil }
+        return TodaySyncStatus(syncStatus: userStore.syncStatus)
+    }
+
     private func reload() async {
         do {
             guard let selectedUserID = userStore.selectedUserID else {
@@ -280,39 +288,11 @@ struct TodayView: View {
 
     @MainActor
     private func syncNow() async {
-        Self.syncLogger.info("syncNow invoked isSyncing=\(self.isSyncing, privacy: .public)")
-        let task = startSyncTask()
-        await task.value
-    }
-
-    @MainActor
-    private func startSyncTask() -> Task<Void, Never> {
-        if let syncTask {
-            Self.syncLogger.info("syncNow joined existing sync task")
-            return syncTask
-        }
-        let task = Task { @MainActor in
-            isSyncing = true
-            defer {
-                isSyncing = false
-                syncTask = nil
-            }
-            presentToast(
-                status: TodaySyncStatus(
-                    title: "Синхронизация",
-                    message: "Проверяем сервер и загружаем данные.",
-                    systemImage: "arrow.clockwise",
-                    tint: LovableSurface.primary
-                ),
-                autoDismiss: false
-            )
-            let result = await userStore.refreshFromServer()
-            Self.syncLogger.info("syncNow refresh finished")
-            await reload()
-            presentToast(for: result)
-        }
-        syncTask = task
-        return task
+        Self.syncLogger.info("syncNow invoked isSyncing=\(self.userStore.syncStatus.isSyncing, privacy: .public)")
+        let result = await userStore.refreshFromServer()
+        Self.syncLogger.info("syncNow refresh finished")
+        await reload()
+        presentToast(for: result)
     }
 
     private func presentToast(for result: AppUserRefreshResult) {
@@ -324,7 +304,7 @@ struct TodayView: View {
     }
 
     private func presentToast(forBootstrapState state: AppUserBootstrapState) {
-        guard !isSyncing else { return }
+        guard !userStore.syncStatus.isSyncing else { return }
         switch state {
         case .missingConfiguration:
             presentToast(
@@ -444,6 +424,10 @@ struct StatisticsView: View {
         .onChange(of: userStore.selectedUserID) {
             store = nil
             storeUserID = nil
+            Task { await reload() }
+        }
+        .onChange(of: userStore.bootstrapState) { _, state in
+            guard state == .loaded else { return }
             Task { await reload() }
         }
     }
@@ -580,6 +564,13 @@ private struct TodaySyncStatus: Equatable {
                 systemImage: "checkmark.circle.fill",
                 tint: oklch(0.58, 0.14, 155)
             )
+        case .loadedWithMediaWarnings:
+            self.init(
+                title: "Часть медиа не скачалась",
+                message: message,
+                systemImage: "exclamationmark.triangle.fill",
+                tint: oklch(0.64, 0.19, 35)
+            )
         case .missingConfiguration:
             self.init(
                 title: "Сервер не настроен",
@@ -608,6 +599,24 @@ private struct TodaySyncStatus: Equatable {
                 systemImage: "wifi.exclamationmark",
                 tint: oklch(0.64, 0.19, 35)
             )
+        }
+    }
+
+    init?(syncStatus: AppUserSyncStatus) {
+        switch syncStatus.phase {
+        case .idle, .completed:
+            return nil
+        case .syncing:
+            self.init(
+                title: "Синхронизация",
+                message: "Проверяем сервер и загружаем данные выбранного пользователя.",
+                systemImage: "arrow.clockwise",
+                tint: LovableSurface.primary
+            )
+        case .warning, .blocked, .failed, .cancelled:
+            guard let result = syncStatus.result,
+                  let message = result.message else { return nil }
+            self.init(result: result, message: message)
         }
     }
 
@@ -814,7 +823,9 @@ private struct UserSwitcherSheet: View {
                     Section {
                         ForEach(userStore.users) { user in
                             Button {
-                                userStore.select(user)
+                                Task {
+                                    await userStore.selectAndRefresh(user)
+                                }
                                 dismiss()
                             } label: {
                                 HStack(spacing: 12) {

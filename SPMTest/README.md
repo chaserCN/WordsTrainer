@@ -5,11 +5,12 @@
 ## Симлинки
 
 - `Models/` → `../Words Trainer/Models`
+- `Services/` → `../Words Trainer/Services`
 - `SRS/` → `../Words Trainer/SRS`
 
 Файлы в симлинках — **оригинальные исходники приложения**, не копии. Правки через `SPMTest/Models/...` или `SPMTest/SRS/...` меняют код в app target.
 
-`Package.swift` явно перечисляет, какие файлы собирать (Views, Services с UI/SQLite не включены).
+`Package.swift` явно перечисляет, какие файлы собирать. UI-зависимые Services не включены; SQLite/sync model файлы подключены из оригинальных исходников через `Services/`.
 
 ## Запуск
 
@@ -25,3 +26,4 @@ swift test
 - разбор переводов по `;` (`WordCardContent`, `MatchingPair`)
 - алгоритм колонок (`StudySession` — без дубликатов одного слова на экране)
 - SRS-очередь и статистика колоды
+- SQLite import/outbox merge-логика (`ContentDatabase`) на изолированной временной базе
