@@ -10,6 +10,9 @@ struct ContentDatabaseTests {
     private let versionID = UUID(uuidString: "33333333-3333-4333-8333-333333333333")!
     private let cardID = UUID(uuidString: "44444444-4444-4444-8444-444444444444")!
     private let mediaID = UUID(uuidString: "77777777-7777-4777-8777-777777777777")!
+    private let audioWordMediaID = UUID(uuidString: "88888888-8888-4888-8888-888888888888")!
+    private let exampleImageMediaID = UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!
+    private let audioExampleMediaID = UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!
     private let exampleID = UUID(uuidString: "99999999-9999-4999-8999-999999999999")!
 
     @Test("rebuildDerivedStats counts only passed new-card reviews")
@@ -665,6 +668,36 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("loadDecks resolves card and example media through bulk media lookup")
+    func loadDecksResolvesCardAndExampleMediaThroughBulkLookup() throws {
+        try withIsolatedDatabase { database in
+            let mediaIDs = [mediaID, audioWordMediaID, exampleImageMediaID, audioExampleMediaID]
+            try database.importServerBootstrap(
+                bootstrap(
+                    cardImageMediaID: mediaID,
+                    audioWordMediaID: audioWordMediaID,
+                    exampleImageMediaID: exampleImageMediaID,
+                    audioExampleMediaID: audioExampleMediaID,
+                    media: mediaIDs.map { mediaJSON(id: $0) }
+                ),
+                selectedUserID: userID
+            )
+            let mediaFolderURL = try AppDataPaths.deckFolderURL(deckID: deckID)
+                .appendingPathComponent(AppDataPaths.deckMediaFolderName, isDirectory: true)
+            try FileManager.default.createDirectory(at: mediaFolderURL, withIntermediateDirectories: true)
+            for id in mediaIDs {
+                try Data([1, 2, 3]).write(to: mediaFolderURL.appendingPathComponent("\(id.databaseString).png"))
+            }
+
+            let deck = try #require(database.loadDecks().first)
+            let card = try #require(deck.cards.first)
+            #expect(card.imageURL?.lastPathComponent == "\(mediaID.databaseString).png")
+            #expect(card.audioWordURL?.lastPathComponent == "\(audioWordMediaID.databaseString).png")
+            #expect(card.clozeExampleImageURL?.lastPathComponent == "\(exampleImageMediaID.databaseString).png")
+            #expect(card.audioExampleURL?.lastPathComponent == "\(audioExampleMediaID.databaseString).png")
+        }
+    }
+
     private func withIsolatedDatabase(_ operation: (ContentDatabase) throws -> Void) throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)
@@ -687,11 +720,17 @@ struct ContentDatabaseTests {
         assignmentStatus: String = "active",
         includeContent: Bool = true,
         cardImageMediaID: UUID? = nil,
+        audioWordMediaID: UUID? = nil,
+        exampleImageMediaID: UUID? = nil,
+        audioExampleMediaID: UUID? = nil,
         media: [String] = [],
         userEnabled: Bool = true,
         preferenceUpdatedAt: String? = nil
     ) throws -> ServerBootstrap {
         let cardImageMediaValue = cardImageMediaID.map { #"""# + $0.databaseString + #"""# } ?? "null"
+        let audioWordMediaValue = audioWordMediaID.map { #"""# + $0.databaseString + #"""# } ?? "null"
+        let exampleImageMediaValue = exampleImageMediaID.map { #"""# + $0.databaseString + #"""# } ?? "null"
+        let audioExampleMediaValue = audioExampleMediaID.map { #"""# + $0.databaseString + #"""# } ?? "null"
         let preferenceUpdatedAtValue = preferenceUpdatedAt.map { #"""# + $0 + #"""# } ?? "null"
         let contentJSON = includeContent
             ? """
@@ -713,7 +752,7 @@ struct ContentDatabaseTests {
                     "grammar_note": null,
                     "notes": null,
                     "image_media_id": \(cardImageMediaValue),
-                    "audio_word_media_id": null,
+                    "audio_word_media_id": \(audioWordMediaValue),
                     "sort_order": 1
                   }
                 ],
@@ -727,8 +766,8 @@ struct ContentDatabaseTests {
                     "answer_form_key": null,
                     "translation": "Это тест.",
                     "note": null,
-                    "image_media_id": null,
-                    "audio_example_media_id": null,
+                    "image_media_id": \(exampleImageMediaValue),
+                    "audio_example_media_id": \(audioExampleMediaValue),
                     "sort_order": 1
                   }
                 ],
@@ -821,11 +860,12 @@ struct ContentDatabaseTests {
         """
     }
 
-    private func mediaJSON() -> String {
-        """
+    private func mediaJSON(id: UUID? = nil) -> String {
+        let id = id ?? mediaID
+        return """
         {
-          "id": "\(mediaID.databaseString)",
-          "storage_key": "media/\(mediaID.databaseString).png",
+          "id": "\(id.databaseString)",
+          "storage_key": "media/\(id.databaseString).png",
           "sha256": null,
           "mime_type": "image/png",
           "byte_size": 3,

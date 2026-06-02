@@ -2283,6 +2283,71 @@ final class ContentDatabase {
     }
 
     private func fetchCards(deckID: UUID) throws -> [WordCardContent] {
+        let rows = try fetchCardRows(deckID: deckID)
+        let cardIDs = rows.map(\.id)
+        let examplesByCardID = try fetchPrimaryExamples(cardIDs: cardIDs)
+        let formsByCardID = try fetchForms(cardIDs: cardIDs)
+        let distractorsByExampleID = try fetchDistractors(exampleIDs: examplesByCardID.values.map(\.id))
+        let mediaIDs = Set(
+            rows.flatMap { [$0.imageMediaID, $0.audioWordMediaID] }
+                + examplesByCardID.values.flatMap { [$0.imageMediaID, $0.audioExampleMediaID] }
+        ).compactMap { $0 }
+        let mediaURLs = try fetchMediaURLMap(deckID: deckID, mediaIDs: mediaIDs)
+        func mediaURL(_ id: UUID?) -> URL? {
+            guard let id else { return nil }
+            return mediaURLs[id]
+        }
+
+        return rows.compactMap { row in
+            guard let example = examplesByCardID[row.id] else { return nil }
+            return WordCardContent(
+                id: row.id,
+                status: row.status,
+                word: row.displayWord,
+                lemma: row.lemma,
+                partOfSpeech: row.partOfSpeech,
+                translation: row.translation,
+                clozePrompt: example.template,
+                clozeTemplate: example.template,
+                clozeAnswer: example.answer,
+                clozeExampleTranslation: example.translation,
+                clozeExampleImageURL: mediaURL(example.imageMediaID ?? row.imageMediaID),
+                answerFormKey: example.answerFormKey,
+                shortDefinition: row.shortDefinition,
+                memoryHint: row.memoryHint,
+                etymology: row.etymology,
+                usageNote: row.usageNote,
+                synonymNote: row.synonymNote,
+                grammarNote: row.grammarNote,
+                explanation: row.notes,
+                imageURL: mediaURL(row.imageMediaID),
+                audioWordURL: mediaURL(row.audioWordMediaID),
+                audioExampleURL: mediaURL(example.audioExampleMediaID),
+                distractors: distractorsByExampleID[example.id] ?? [],
+                forms: formsByCardID[row.id] ?? []
+            )
+        }
+    }
+
+    private struct CardRow {
+        let id: UUID
+        let status: ContentStatus
+        let lemma: String
+        let displayWord: String
+        let partOfSpeech: String?
+        let translation: String
+        let shortDefinition: String?
+        let memoryHint: String?
+        let etymology: String?
+        let usageNote: String?
+        let synonymNote: String?
+        let grammarNote: String?
+        let notes: String?
+        let imageMediaID: UUID?
+        let audioWordMediaID: UUID?
+    }
+
+    private func fetchCardRows(deckID: UUID) throws -> [CardRow] {
         let sql = """
         SELECT id, status, lemma, display_word, part_of_speech, translation,
                short_definition, memory_hint, etymology, usage_note, synonym_note,
@@ -2298,56 +2363,33 @@ final class ContentDatabase {
         defer { sqlite3_finalize(statement) }
         try bind(statement, index: 1, uuid: deckID)
 
-        var cards: [WordCardContent] = []
+        var rows: [CardRow] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let id = uuidColumn(statement, index: 0),
                   let lemma = textColumn(statement, index: 2),
                   let displayWord = textColumn(statement, index: 3),
-                  let translation = textColumn(statement, index: 5),
-                  let example = try fetchPrimaryExample(cardID: id) else { continue }
-
-            cards.append(
-                WordCardContent(
+                  let translation = textColumn(statement, index: 5) else { continue }
+            rows.append(
+                CardRow(
                     id: id,
                     status: statusColumn(statement, index: 1),
-                    word: displayWord,
                     lemma: lemma,
+                    displayWord: displayWord,
                     partOfSpeech: textColumn(statement, index: 4),
                     translation: translation,
-                    clozePrompt: example.template,
-                    clozeTemplate: example.template,
-                    clozeAnswer: example.answer,
-                    clozeExampleTranslation: example.translation,
-                    clozeExampleImageURL: resolveMediaURL(
-                        deckID: deckID,
-                        mediaID: example.imageMediaID ?? uuidColumn(statement, index: 13)
-                    ),
-                    answerFormKey: example.answerFormKey,
                     shortDefinition: textColumn(statement, index: 6),
                     memoryHint: textColumn(statement, index: 7),
                     etymology: textColumn(statement, index: 8),
                     usageNote: textColumn(statement, index: 9),
                     synonymNote: textColumn(statement, index: 10),
                     grammarNote: textColumn(statement, index: 11),
-                    explanation: textColumn(statement, index: 12),
-                    imageURL: resolveMediaURL(
-                        deckID: deckID,
-                        mediaID: uuidColumn(statement, index: 13)
-                    ),
-                    audioWordURL: resolveMediaURL(
-                        deckID: deckID,
-                        mediaID: uuidColumn(statement, index: 14)
-                    ),
-                    audioExampleURL: resolveMediaURL(
-                        deckID: deckID,
-                        mediaID: example.audioExampleMediaID
-                    ),
-                    distractors: try fetchDistractors(exampleID: example.id),
-                    forms: try fetchForms(cardID: id)
+                    notes: textColumn(statement, index: 12),
+                    imageMediaID: uuidColumn(statement, index: 13),
+                    audioWordMediaID: uuidColumn(statement, index: 14)
                 )
             )
         }
-        return cards
+        return rows
     }
 
     private struct ExampleRow {
@@ -2360,82 +2402,117 @@ final class ContentDatabase {
         let audioExampleMediaID: UUID?
     }
 
-    private func fetchPrimaryExample(cardID: UUID) throws -> ExampleRow? {
+    private func fetchPrimaryExamples(cardIDs: [UUID]) throws -> [UUID: ExampleRow] {
+        guard !cardIDs.isEmpty else { return [:] }
         let sql = """
-        SELECT id, template, answer, answer_form_key, translation, image_media_id, audio_example_media_id
+        SELECT card_id, id, template, answer, answer_form_key, translation, image_media_id, audio_example_media_id
         FROM card_examples
-        WHERE card_id = ?
-        ORDER BY sort_order, id
-        LIMIT 1
+        WHERE card_id IN (\(placeholders(count: cardIDs.count)))
+        ORDER BY card_id, sort_order, id
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
         defer { sqlite3_finalize(statement) }
-        try bind(statement, index: 1, uuid: cardID)
+        try bindUUIDs(cardIDs, to: statement)
 
-        guard sqlite3_step(statement) == SQLITE_ROW,
-              let id = uuidColumn(statement, index: 0),
-              let template = textColumn(statement, index: 1),
-              let answer = textColumn(statement, index: 2)
-        else {
-            return nil
+        var rows: [UUID: ExampleRow] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let cardID = uuidColumn(statement, index: 0),
+                  rows[cardID] == nil,
+                  let id = uuidColumn(statement, index: 1),
+                  let template = textColumn(statement, index: 2),
+                  let answer = textColumn(statement, index: 3)
+            else { continue }
+            rows[cardID] = ExampleRow(
+                id: id,
+                template: template,
+                answer: answer,
+                answerFormKey: textColumn(statement, index: 4),
+                translation: textColumn(statement, index: 5),
+                imageMediaID: uuidColumn(statement, index: 6),
+                audioExampleMediaID: uuidColumn(statement, index: 7)
+            )
         }
-        return ExampleRow(
-            id: id,
-            template: template,
-            answer: answer,
-            answerFormKey: textColumn(statement, index: 3),
-            translation: textColumn(statement, index: 4),
-            imageMediaID: uuidColumn(statement, index: 5),
-            audioExampleMediaID: uuidColumn(statement, index: 6)
-        )
+        return rows
     }
 
-    private func fetchForms(cardID: UUID) throws -> [WordForm] {
+    private func fetchForms(cardIDs: [UUID]) throws -> [UUID: [WordForm]] {
+        guard !cardIDs.isEmpty else { return [:] }
         let sql = """
-        SELECT form_key, text
+        SELECT card_id, form_key, text
         FROM word_forms
-        WHERE card_id = ?
-        ORDER BY sort_order, form_key, text
+        WHERE card_id IN (\(placeholders(count: cardIDs.count)))
+        ORDER BY card_id, sort_order, form_key, text
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
         defer { sqlite3_finalize(statement) }
-        try bind(statement, index: 1, uuid: cardID)
+        try bindUUIDs(cardIDs, to: statement)
 
-        var forms: [WordForm] = []
+        var forms: [UUID: [WordForm]] = [:]
         while sqlite3_step(statement) == SQLITE_ROW {
-            guard let formKey = textColumn(statement, index: 0),
-                  let text = textColumn(statement, index: 1) else { continue }
-            forms.append(WordForm(formKey: formKey, text: text))
+            guard let cardID = uuidColumn(statement, index: 0),
+                  let formKey = textColumn(statement, index: 1),
+                  let text = textColumn(statement, index: 2) else { continue }
+            forms[cardID, default: []].append(WordForm(formKey: formKey, text: text))
         }
         return forms
     }
 
-    private func fetchDistractors(exampleID: UUID) throws -> [String] {
+    private func fetchDistractors(exampleIDs: [UUID]) throws -> [UUID: [String]] {
+        guard !exampleIDs.isEmpty else { return [:] }
         let sql = """
-        SELECT text
+        SELECT example_id, text
         FROM example_distractors
-        WHERE example_id = ?
-        ORDER BY priority, text
+        WHERE example_id IN (\(placeholders(count: exampleIDs.count)))
+        ORDER BY example_id, priority, text
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
         defer { sqlite3_finalize(statement) }
-        try bind(statement, index: 1, uuid: exampleID)
+        try bindUUIDs(exampleIDs, to: statement)
 
-        var distractors: [String] = []
+        var distractors: [UUID: [String]] = [:]
         while sqlite3_step(statement) == SQLITE_ROW {
-            guard let text = textColumn(statement, index: 0) else { continue }
-            distractors.append(text)
+            guard let exampleID = uuidColumn(statement, index: 0),
+                  let text = textColumn(statement, index: 1) else { continue }
+            distractors[exampleID, default: []].append(text)
         }
         return distractors
+    }
+
+    private func fetchMediaURLMap(deckID: UUID, mediaIDs: [UUID]) throws -> [UUID: URL] {
+        guard !mediaIDs.isEmpty else { return [:] }
+        let sql = """
+        SELECT id, local_path, storage_key
+        FROM media_objects
+        WHERE id IN (\(placeholders(count: mediaIDs.count)))
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bindUUIDs(mediaIDs, to: statement)
+
+        var urls: [UUID: URL] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let id = uuidColumn(statement, index: 0) else { continue }
+            if let localPath = textColumn(statement, index: 1),
+               let url = resolveMediaReference(localPath, deckID: deckID) {
+                urls[id] = url
+            } else if let storageKey = textColumn(statement, index: 2),
+                      let url = resolveMediaReference(storageKey, deckID: deckID) {
+                urls[id] = url
+            }
+        }
+        return urls
     }
 
     private func resolveMediaURL(deckID: UUID, mediaID: UUID?) -> URL? {
@@ -2471,6 +2548,16 @@ final class ContentDatabase {
     }
 
     // MARK: - SQLite helpers
+
+    private func placeholders(count: Int) -> String {
+        Array(repeating: "?", count: count).joined(separator: ", ")
+    }
+
+    private func bindUUIDs(_ ids: [UUID], to statement: OpaquePointer?) throws {
+        for (offset, id) in ids.enumerated() {
+            try bind(statement, index: Int32(offset + 1), uuid: id)
+        }
+    }
 
     private func exec(
         _ sql: String,
