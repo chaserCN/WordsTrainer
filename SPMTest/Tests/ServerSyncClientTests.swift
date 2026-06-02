@@ -75,6 +75,76 @@ struct ServerSyncClientTests {
         #expect(request.value(forHTTPHeaderField: "X-FlashGame-Cached-Deck-Version-Ids") == nil)
     }
 
+    @Test("uploadEvents sends selected user and decodes rejected ids")
+    func uploadEventsDecodesRejectedIds() async throws {
+        let suiteName = "ServerSyncClientTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("https://example.test", forKey: "server.baseURL")
+        defaults.set("test-token", forKey: "server.householdSyncToken")
+
+        let selectedUserID = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
+        let cardID = UUID(uuidString: "22222222-2222-4222-8222-222222222222")!
+        let deckID = UUID(uuidString: "33333333-3333-4333-8333-333333333333")!
+        let rejectedReviewID = UUID(uuidString: "44444444-4444-4444-8444-444444444444")!
+        let rejectedMatchingDeckID = UUID(uuidString: "55555555-5555-4555-8555-555555555555")!
+        let rejectedPreferenceDeckID = UUID(uuidString: "66666666-6666-4666-8666-666666666666")!
+        let captured = LockedRequest()
+        StubURLProtocol.handler = { request in
+            captured.request = request
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            let json = """
+            {
+              "acceptedReviewIds": [],
+              "duplicateReviewIds": [],
+              "progressCardIds": [],
+              "matchingRecordDeckIds": [],
+              "deckPreferenceDeckIds": [],
+              "rejectedReviewIds": ["\(rejectedReviewID.uuidString)"],
+              "rejectedProgressCardIds": ["\(cardID.uuidString)"],
+              "rejectedMatchingRecordDeckIds": ["\(rejectedMatchingDeckID.uuidString)"],
+              "rejectedDeckPreferenceDeckIds": ["\(rejectedPreferenceDeckID.uuidString)"],
+              "serverRevision": "42"
+            }
+            """
+            return (response, Data(json.utf8))
+        }
+        defer { StubURLProtocol.handler = nil }
+
+        let client = ServerSyncClient(session: Self.stubSession(), userDefaultsSuiteName: suiteName)
+        let response = try await client.uploadEvents(
+            ServerSyncEventsPayload(
+                progress: [
+                    ServerProgressPayload(
+                        cardId: cardID,
+                        deckId: deckID,
+                        fsrsData: .object(["state": .string("review")]),
+                        dueAt: nil,
+                        state: "review",
+                        updatedAt: "2026-06-02T12:00:00.000Z"
+                    )
+                ]
+            ),
+            selectedUserID: selectedUserID
+        )
+
+        let request = try #require(captured.request)
+        #expect(request.url?.absoluteString == "https://example.test/v1/sync/events")
+        #expect(request.httpMethod == "POST")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
+        #expect(request.value(forHTTPHeaderField: "X-FlashGame-User-Id") == selectedUserID.databaseString)
+        #expect(response.rejectedReviewIds == [rejectedReviewID])
+        #expect(response.rejectedProgressCardIds == [cardID])
+        #expect(response.rejectedMatchingRecordDeckIds == [rejectedMatchingDeckID])
+        #expect(response.rejectedDeckPreferenceDeckIds == [rejectedPreferenceDeckID])
+        #expect(response.serverRevision == "42")
+    }
+
     private static func stubSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]

@@ -16,12 +16,30 @@ struct ContentCacheCleanupResult {
     let removedDeckIDs: [UUID]
 }
 
+struct PendingProgressSnapshot {
+    let cardID: UUID
+    let updatedAt: Date
+}
+
+struct PendingMatchingRecordSnapshot {
+    let deckID: UUID
+    let achievedAt: Date
+}
+
+struct PendingDeckPreferenceSnapshot {
+    let deckID: UUID
+    let updatedAt: Date
+}
+
 struct PendingServerSyncBatch {
     let payload: ServerSyncEventsPayload
     let reviewIDs: [UUID]
     let progressCardIDs: [UUID]
     let matchingDeckIDs: [UUID]
     let deckPreferenceDeckIDs: [UUID]
+    let progressSnapshots: [PendingProgressSnapshot]
+    let matchingSnapshots: [PendingMatchingRecordSnapshot]
+    let deckPreferenceSnapshots: [PendingDeckPreferenceSnapshot]
 
     var isEmpty: Bool {
         payload.isEmpty
@@ -713,9 +731,12 @@ final class ContentDatabase {
                 deckPreferences: deckPreferences.payload
             ),
             reviewIDs: reviews.ids,
-            progressCardIDs: progress.cardIDs,
-            matchingDeckIDs: matchingRecords.deckIDs,
-            deckPreferenceDeckIDs: deckPreferences.deckIDs
+            progressCardIDs: progress.snapshots.map(\.cardID),
+            matchingDeckIDs: matchingRecords.snapshots.map(\.deckID),
+            deckPreferenceDeckIDs: deckPreferences.snapshots.map(\.deckID),
+            progressSnapshots: progress.snapshots,
+            matchingSnapshots: matchingRecords.snapshots,
+            deckPreferenceSnapshots: deckPreferences.snapshots
         )
     }
 
@@ -724,14 +745,14 @@ final class ContentDatabase {
         for reviewID in batch.reviewIDs {
             try markReviewSynced(reviewID: reviewID, syncedAt: timestamp)
         }
-        for cardID in batch.progressCardIDs {
-            try markProgressSynced(cardID: cardID, syncedAt: timestamp)
+        for snapshot in batch.progressSnapshots {
+            try markProgressSynced(snapshot: snapshot, syncedAt: timestamp)
         }
-        for deckID in batch.matchingDeckIDs {
-            try markMatchingRecordSynced(deckID: deckID, syncedAt: timestamp)
+        for snapshot in batch.matchingSnapshots {
+            try markMatchingRecordSynced(snapshot: snapshot, syncedAt: timestamp)
         }
-        for deckID in batch.deckPreferenceDeckIDs {
-            try markDeckPreferenceSynced(deckID: deckID, syncedAt: timestamp)
+        for snapshot in batch.deckPreferenceSnapshots {
+            try markDeckPreferenceSynced(snapshot: snapshot, syncedAt: timestamp)
         }
     }
 
@@ -793,7 +814,7 @@ final class ContentDatabase {
         return (payload, ids)
     }
 
-    private func pendingProgressItems(limit: Int) throws -> (payload: [ServerProgressPayload], cardIDs: [UUID]) {
+    private func pendingProgressItems(limit: Int) throws -> (payload: [ServerProgressPayload], snapshots: [PendingProgressSnapshot]) {
         let sql = """
         SELECT card_progress.card_id, card_progress.deck_id, card_progress.fsrs_data, card_progress.updated_at
         FROM card_progress
@@ -816,7 +837,7 @@ final class ContentDatabase {
         try bind(statement, index: 2, int: limit)
 
         var payload: [ServerProgressPayload] = []
-        var cardIDs: [UUID] = []
+        var snapshots: [PendingProgressSnapshot] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let cardID = uuidColumn(statement, index: 0),
                   let deckID = uuidColumn(statement, index: 1),
@@ -829,7 +850,7 @@ final class ContentDatabase {
                 throw ContentDatabaseError.queryFailed
             }
             let updatedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 3))
-            cardIDs.append(cardID)
+            snapshots.append(PendingProgressSnapshot(cardID: cardID, updatedAt: updatedAt))
             payload.append(
                 ServerProgressPayload(
                     cardId: cardID,
@@ -841,10 +862,10 @@ final class ContentDatabase {
                 )
             )
         }
-        return (payload, cardIDs)
+        return (payload, snapshots)
     }
 
-    private func pendingMatchingRecords(limit: Int) throws -> (payload: [ServerMatchingRecordPayload], deckIDs: [UUID]) {
+    private func pendingMatchingRecords(limit: Int) throws -> (payload: [ServerMatchingRecordPayload], snapshots: [PendingMatchingRecordSnapshot]) {
         let sql = """
         SELECT deck_matching_records.deck_id, deck_matching_records.best_duration_seconds,
                deck_matching_records.pair_count, deck_matching_records.achieved_at
@@ -866,24 +887,25 @@ final class ContentDatabase {
         try bind(statement, index: 2, int: limit)
 
         var payload: [ServerMatchingRecordPayload] = []
-        var deckIDs: [UUID] = []
+        var snapshots: [PendingMatchingRecordSnapshot] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let deckID = uuidColumn(statement, index: 0) else { continue }
-            deckIDs.append(deckID)
+            let achievedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 3))
+            snapshots.append(PendingMatchingRecordSnapshot(deckID: deckID, achievedAt: achievedAt))
             payload.append(
                 ServerMatchingRecordPayload(
                     deckId: deckID,
                     deckVersionId: nil,
                     bestDurationSeconds: sqlite3_column_double(statement, 1),
                     pairCount: Int(sqlite3_column_int(statement, 2)),
-                    achievedAt: isoString(Date(timeIntervalSince1970: sqlite3_column_double(statement, 3)))
+                    achievedAt: isoString(achievedAt)
                 )
             )
         }
-        return (payload, deckIDs)
+        return (payload, snapshots)
     }
 
-    private func pendingDeckPreferences(limit: Int) throws -> (payload: [ServerDeckPreferencePayload], deckIDs: [UUID]) {
+    private func pendingDeckPreferences(limit: Int) throws -> (payload: [ServerDeckPreferencePayload], snapshots: [PendingDeckPreferenceSnapshot]) {
         let sql = """
         SELECT user_deck_preferences.deck_id,
                user_deck_preferences.is_enabled,
@@ -905,11 +927,11 @@ final class ContentDatabase {
         try bind(statement, index: 2, int: limit)
 
         var payload: [ServerDeckPreferencePayload] = []
-        var deckIDs: [UUID] = []
+        var snapshots: [PendingDeckPreferenceSnapshot] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let deckID = uuidColumn(statement, index: 0) else { continue }
             let updatedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 2))
-            deckIDs.append(deckID)
+            snapshots.append(PendingDeckPreferenceSnapshot(deckID: deckID, updatedAt: updatedAt))
             payload.append(
                 ServerDeckPreferencePayload(
                     deckId: deckID,
@@ -918,7 +940,7 @@ final class ContentDatabase {
                 )
             )
         }
-        return (payload, deckIDs)
+        return (payload, snapshots)
     }
 
     private func markReviewSynced(reviewID: UUID, syncedAt: Double) throws {
@@ -929,31 +951,34 @@ final class ContentDatabase {
         )
     }
 
-    private func markProgressSynced(cardID: UUID, syncedAt: Double) throws {
+    private func markProgressSynced(snapshot: PendingProgressSnapshot, syncedAt: Double) throws {
         try markSynced(
-            sql: "UPDATE card_progress SET synced_at = ? WHERE user_id = ? AND card_id = ?",
-            id: cardID,
-            syncedAt: syncedAt
+            sql: "UPDATE card_progress SET synced_at = ? WHERE user_id = ? AND card_id = ? AND updated_at = ?",
+            id: snapshot.cardID,
+            syncedAt: syncedAt,
+            unchangedAt: snapshot.updatedAt.timeIntervalSince1970
         )
     }
 
-    private func markMatchingRecordSynced(deckID: UUID, syncedAt: Double) throws {
+    private func markMatchingRecordSynced(snapshot: PendingMatchingRecordSnapshot, syncedAt: Double) throws {
         try markSynced(
-            sql: "UPDATE deck_matching_records SET synced_at = ? WHERE user_id = ? AND deck_id = ?",
-            id: deckID,
-            syncedAt: syncedAt
+            sql: "UPDATE deck_matching_records SET synced_at = ? WHERE user_id = ? AND deck_id = ? AND achieved_at = ?",
+            id: snapshot.deckID,
+            syncedAt: syncedAt,
+            unchangedAt: snapshot.achievedAt.timeIntervalSince1970
         )
     }
 
-    private func markDeckPreferenceSynced(deckID: UUID, syncedAt: Double) throws {
+    private func markDeckPreferenceSynced(snapshot: PendingDeckPreferenceSnapshot, syncedAt: Double) throws {
         try markSynced(
-            sql: "UPDATE user_deck_preferences SET synced_at = ? WHERE user_id = ? AND deck_id = ?",
-            id: deckID,
-            syncedAt: syncedAt
+            sql: "UPDATE user_deck_preferences SET synced_at = ? WHERE user_id = ? AND deck_id = ? AND updated_at = ?",
+            id: snapshot.deckID,
+            syncedAt: syncedAt,
+            unchangedAt: snapshot.updatedAt.timeIntervalSince1970
         )
     }
 
-    private func markSynced(sql: String, id: UUID, syncedAt: Double) throws {
+    private func markSynced(sql: String, id: UUID, syncedAt: Double, unchangedAt: Double? = nil) throws {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
@@ -964,6 +989,11 @@ final class ContentDatabase {
         }
         try bind(statement, index: 2, uuid: userID)
         try bind(statement, index: 3, uuid: id)
+        if let unchangedAt {
+            guard sqlite3_bind_double(statement, 4, unchangedAt) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+        }
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw ContentDatabaseError.queryFailed
         }

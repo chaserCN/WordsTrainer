@@ -327,7 +327,62 @@ struct ServerSyncEventsResponse: Decodable, Sendable {
     let progressCardIds: [UUID]
     let matchingRecordDeckIds: [UUID]
     let deckPreferenceDeckIds: [UUID]
+    let rejectedReviewIds: [UUID]
+    let rejectedProgressCardIds: [UUID]
+    let rejectedMatchingRecordDeckIds: [UUID]
+    let rejectedDeckPreferenceDeckIds: [UUID]
     let serverRevision: String?
+
+    init(
+        acceptedReviewIds: [UUID],
+        duplicateReviewIds: [UUID],
+        progressCardIds: [UUID],
+        matchingRecordDeckIds: [UUID],
+        deckPreferenceDeckIds: [UUID],
+        rejectedReviewIds: [UUID] = [],
+        rejectedProgressCardIds: [UUID] = [],
+        rejectedMatchingRecordDeckIds: [UUID] = [],
+        rejectedDeckPreferenceDeckIds: [UUID] = [],
+        serverRevision: String?
+    ) {
+        self.acceptedReviewIds = acceptedReviewIds
+        self.duplicateReviewIds = duplicateReviewIds
+        self.progressCardIds = progressCardIds
+        self.matchingRecordDeckIds = matchingRecordDeckIds
+        self.deckPreferenceDeckIds = deckPreferenceDeckIds
+        self.rejectedReviewIds = rejectedReviewIds
+        self.rejectedProgressCardIds = rejectedProgressCardIds
+        self.rejectedMatchingRecordDeckIds = rejectedMatchingRecordDeckIds
+        self.rejectedDeckPreferenceDeckIds = rejectedDeckPreferenceDeckIds
+        self.serverRevision = serverRevision
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case acceptedReviewIds
+        case duplicateReviewIds
+        case progressCardIds
+        case matchingRecordDeckIds
+        case deckPreferenceDeckIds
+        case rejectedReviewIds
+        case rejectedProgressCardIds
+        case rejectedMatchingRecordDeckIds
+        case rejectedDeckPreferenceDeckIds
+        case serverRevision
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        acceptedReviewIds = try container.decodeIfPresent([UUID].self, forKey: .acceptedReviewIds) ?? []
+        duplicateReviewIds = try container.decodeIfPresent([UUID].self, forKey: .duplicateReviewIds) ?? []
+        progressCardIds = try container.decodeIfPresent([UUID].self, forKey: .progressCardIds) ?? []
+        matchingRecordDeckIds = try container.decodeIfPresent([UUID].self, forKey: .matchingRecordDeckIds) ?? []
+        deckPreferenceDeckIds = try container.decodeIfPresent([UUID].self, forKey: .deckPreferenceDeckIds) ?? []
+        rejectedReviewIds = try container.decodeIfPresent([UUID].self, forKey: .rejectedReviewIds) ?? []
+        rejectedProgressCardIds = try container.decodeIfPresent([UUID].self, forKey: .rejectedProgressCardIds) ?? []
+        rejectedMatchingRecordDeckIds = try container.decodeIfPresent([UUID].self, forKey: .rejectedMatchingRecordDeckIds) ?? []
+        rejectedDeckPreferenceDeckIds = try container.decodeIfPresent([UUID].self, forKey: .rejectedDeckPreferenceDeckIds) ?? []
+        serverRevision = try container.decodeIfPresent(String.self, forKey: .serverRevision)
+    }
 }
 
 enum JSONValue: Codable, Sendable {

@@ -29,10 +29,32 @@ enum AppUserBootstrapState: Equatable {
 final class AppUserStore {
     static let shared = AppUserStore(defaults: .standard, syncClient: ServerSyncClient.shared)
     private static let logger = Logger(subsystem: "com.uniweb.wordtrainer.Words-Trainer", category: "AppUserStore")
+    private static let maxConcurrentMediaDownloads = 4
 
     private enum Keys {
         static let users = "app.users"
         static let selectedUserID = "app.selectedUserID"
+    }
+
+    private struct MediaCacheCandidate: Sendable {
+        let media: ServerMediaObject
+        let deckID: UUID
+        let relativePath: String
+    }
+
+    private struct MediaDownloadResult: Sendable {
+        let candidate: MediaCacheCandidate
+        let data: Data
+    }
+
+    private enum MediaDownloadFailure: Sendable {
+        case cancelled
+        case failed(String)
+    }
+
+    private enum MediaDownloadOutcome: Sendable {
+        case success(MediaDownloadResult)
+        case failure(MediaCacheCandidate, MediaDownloadFailure)
     }
 
     private let defaults: UserDefaults
@@ -285,11 +307,14 @@ final class AppUserStore {
             uniqueKeysWithValues: bootstrap.media.map { ($0.id, $0) }
         )
         var failureCount = 0
+        var downloadCandidates: [MediaCacheCandidate] = []
         for (mediaID, deckIDs) in mediaDeckIDs {
             guard let media = mediaObjects[mediaID] else { continue }
             for deckID in deckIDs {
                 do {
-                    try await cacheMediaObject(media, deckID: deckID, database: database)
+                    if let candidate = try prepareMediaCacheObject(media, deckID: deckID, database: database) {
+                        downloadCandidates.append(candidate)
+                    }
                 } catch ServerSyncError.cancelled {
                     throw ServerSyncError.cancelled
                 } catch let error as CancellationError {
@@ -302,28 +327,118 @@ final class AppUserStore {
                 }
             }
         }
+
+        let downloadOutcomes = await downloadMediaObjects(downloadCandidates)
+        for outcome in downloadOutcomes {
+            switch outcome {
+            case .success(let result):
+                do {
+                    try storeDownloadedMedia(result, database: database)
+                } catch ServerSyncError.cancelled {
+                    throw ServerSyncError.cancelled
+                } catch let error as CancellationError {
+                    throw error
+                } catch {
+                    failureCount += 1
+                    Self.logger.error(
+                        "storeDownloadedMedia failed mediaID=\(result.candidate.media.id.uuidString, privacy: .public) deckID=\(result.candidate.deckID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+            case .failure(_, .cancelled):
+                throw ServerSyncError.cancelled
+            case .failure(let candidate, .failed(let message)):
+                failureCount += 1
+                Self.logger.error(
+                    "downloadMedia failed mediaID=\(candidate.media.id.uuidString, privacy: .public) deckID=\(candidate.deckID.uuidString, privacy: .public): \(message, privacy: .public)"
+                )
+            }
+        }
         return failureCount
     }
 
-    private func cacheMediaObject(_ media: ServerMediaObject, deckID: UUID, database: ContentDatabase) async throws {
+    private func prepareMediaCacheObject(
+        _ media: ServerMediaObject,
+        deckID: UUID,
+        database: ContentDatabase
+    ) throws -> MediaCacheCandidate? {
         let relativePath = "media/\(media.id.uuidString.lowercased()).\(fileExtension(for: media))"
         if let existingURL = try AppDataPaths.mediaFileURL(deckID: deckID, relativePath: relativePath) {
             if media.sha256 == nil {
                 let fileSize = try? existingURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
                 if media.byteSize == nil || fileSize == media.byteSize {
                     try database.updateMediaLocalPath(mediaID: media.id, localPath: relativePath)
-                    return
+                    return nil
                 }
             }
             let existingData = try Data(contentsOf: existingURL)
-            if sha256Hex(for: existingData) == media.sha256 {
+            if Self.sha256Hex(for: existingData) == media.sha256 {
                 try database.updateMediaLocalPath(mediaID: media.id, localPath: relativePath)
-                return
+                return nil
             }
         }
 
-        let data = try await syncClient.downloadMedia(id: media.id)
-        if let expectedHash = media.sha256, sha256Hex(for: data) != expectedHash {
+        return MediaCacheCandidate(media: media, deckID: deckID, relativePath: relativePath)
+    }
+
+    private func downloadMediaObjects(_ candidates: [MediaCacheCandidate]) async -> [MediaDownloadOutcome] {
+        guard !candidates.isEmpty else { return [] }
+        let syncClient = syncClient
+        let limit = min(Self.maxConcurrentMediaDownloads, candidates.count)
+
+        return await withTaskGroup(of: MediaDownloadOutcome.self) { group in
+            var iterator = candidates.makeIterator()
+            var outcomes: [MediaDownloadOutcome] = []
+            var isCancelling = false
+
+            func addNextDownload() {
+                guard let candidate = iterator.next() else { return }
+                group.addTask {
+                    if Task.isCancelled {
+                        return .failure(candidate, .cancelled)
+                    }
+                    do {
+                        let data = try await syncClient.downloadMedia(id: candidate.media.id)
+                        if let expectedHash = candidate.media.sha256,
+                           Self.sha256Hex(for: data) != expectedHash {
+                            return .failure(candidate, .failed(ServerSyncError.invalidResponse.localizedDescription))
+                        }
+                        return .success(MediaDownloadResult(candidate: candidate, data: data))
+                    } catch ServerSyncError.cancelled {
+                        return .failure(candidate, .cancelled)
+                    } catch is CancellationError {
+                        return .failure(candidate, .cancelled)
+                    } catch {
+                        return .failure(candidate, .failed(error.localizedDescription))
+                    }
+                }
+            }
+
+            for _ in 0..<limit {
+                addNextDownload()
+            }
+
+            while let outcome = await group.next() {
+                if case .failure(_, .cancelled) = outcome {
+                    isCancelling = true
+                    group.cancelAll()
+                }
+                outcomes.append(outcome)
+                if !isCancelling {
+                    addNextDownload()
+                }
+            }
+
+            return outcomes
+        }
+    }
+
+    private func storeDownloadedMedia(_ result: MediaDownloadResult, database: ContentDatabase) throws {
+        let candidate = result.candidate
+        let media = candidate.media
+        let deckID = candidate.deckID
+        let relativePath = candidate.relativePath
+        let data = result.data
+        if let expectedHash = media.sha256, Self.sha256Hex(for: data) != expectedHash {
             throw ServerSyncError.invalidResponse
         }
         let deckURL = try AppDataPaths.deckFolderURL(deckID: deckID)
@@ -353,7 +468,7 @@ final class AppUserStore {
         }
     }
 
-    private func sha256Hex(for data: Data) -> String {
+    nonisolated private static func sha256Hex(for data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 

@@ -394,6 +394,56 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("mark uploaded keeps newer progress pending when it changed after batch snapshot")
+    func markUploadedKeepsNewerProgressPending() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
+            let firstDate = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
+            let secondDate = try #require(Self.isoDate("2026-06-02T12:01:00.000Z"))
+            try database.saveProgress(
+                deckID: deckID,
+                progress: CardProgress.newCard(cardID: cardID, now: firstDate)
+            )
+
+            let inFlightBatch = try database.pendingServerSyncBatch()
+            #expect(inFlightBatch.progressCardIDs == [cardID])
+            try database.saveProgress(
+                deckID: deckID,
+                progress: CardProgress.newCard(cardID: cardID, now: secondDate)
+            )
+            try database.markServerSyncBatchUploaded(inFlightBatch, syncedAt: firstDate)
+
+            let nextBatch = try database.pendingServerSyncBatch()
+            let progressPayload = try #require(nextBatch.payload.progress.first)
+            #expect(nextBatch.progressCardIDs == [cardID])
+            #expect(progressPayload.updatedAt == "2026-06-02T12:01:00.000Z")
+        }
+    }
+
+    @Test("mark uploaded keeps newer matching record pending when it changed after batch snapshot")
+    func markUploadedKeepsNewerMatchingRecordPending() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
+            let firstDate = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
+            let secondDate = try #require(Self.isoDate("2026-06-02T12:01:00.000Z"))
+            try database.saveMatchingRecord(
+                DeckMatchingRecord(deckID: deckID, bestDuration: 18.5, pairCount: 4, achievedAt: firstDate)
+            )
+
+            let inFlightBatch = try database.pendingServerSyncBatch()
+            #expect(inFlightBatch.matchingDeckIDs == [deckID])
+            try database.saveMatchingRecord(
+                DeckMatchingRecord(deckID: deckID, bestDuration: 15.2, pairCount: 4, achievedAt: secondDate)
+            )
+            try database.markServerSyncBatchUploaded(inFlightBatch, syncedAt: firstDate)
+
+            let nextBatch = try database.pendingServerSyncBatch()
+            let matchingPayload = try #require(nextBatch.payload.matchingRecords.first)
+            #expect(nextBatch.matchingDeckIDs == [deckID])
+            #expect(matchingPayload.achievedAt == "2026-06-02T12:01:00.000Z")
+        }
+    }
+
     @Test("local deck preference disables deck and syncs through outbox")
     func localDeckPreferenceDisablesDeckAndSyncsThroughOutbox() throws {
         try withIsolatedDatabase { database in
@@ -412,6 +462,27 @@ struct ContentDatabaseTests {
 
             try database.markServerSyncBatchUploaded(batch, syncedAt: updatedAt)
             #expect(try database.pendingServerSyncBatch().isEmpty)
+        }
+    }
+
+    @Test("mark uploaded keeps newer deck preference pending when it changed after batch snapshot")
+    func markUploadedKeepsNewerDeckPreferencePending() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
+            let firstDate = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
+            let secondDate = try #require(Self.isoDate("2026-06-02T12:01:00.000Z"))
+            try database.setDeckUserEnabled(false, deckID: deckID, updatedAt: firstDate)
+
+            let inFlightBatch = try database.pendingServerSyncBatch()
+            #expect(inFlightBatch.deckPreferenceDeckIDs == [deckID])
+            try database.setDeckUserEnabled(true, deckID: deckID, updatedAt: secondDate)
+            try database.markServerSyncBatchUploaded(inFlightBatch, syncedAt: firstDate)
+
+            let nextBatch = try database.pendingServerSyncBatch()
+            let preferencePayload = try #require(nextBatch.payload.deckPreferences.first)
+            #expect(nextBatch.deckPreferenceDeckIDs == [deckID])
+            #expect(preferencePayload.isEnabled)
+            #expect(preferencePayload.updatedAt == "2026-06-02T12:01:00.000Z")
         }
     }
 
