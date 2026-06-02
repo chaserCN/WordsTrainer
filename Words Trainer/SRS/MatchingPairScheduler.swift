@@ -1,6 +1,6 @@
 import Foundation
 
-/// Selects and tracks matching-column pairs without showing two senses of the same word at once.
+/// Selects and tracks matching-column pairs without showing two senses of the same lemma at once.
 struct MatchingPairScheduler: Sendable {
     static let slotCount = 5
 
@@ -37,11 +37,21 @@ struct MatchingPairScheduler: Sendable {
         return Set(cardIDs).count == cardIDs.count
     }
 
+    /// Visible pairs must not share the same lemma, even if they come from different cards.
+    var visibleLemmasAreUnique: Bool {
+        let lemmas = visible.map(\.lemmaKey)
+        return Set(lemmas).count == lemmas.count
+    }
+
     mutating func pickNext(rng: inout some RandomNumberGenerator) -> MatchingPair? {
         guard !pool.isEmpty else { return nil }
 
         let visibleCardIDs = Set(visible.map(\.cardID))
-        let eligible = pool.indices.filter { !visibleCardIDs.contains(pool[$0].cardID) }
+        let visibleLemmaKeys = Set(visible.map(\.lemmaKey))
+        let eligible = pool.indices.filter {
+            !visibleCardIDs.contains(pool[$0].cardID)
+                && !visibleLemmaKeys.contains(pool[$0].lemmaKey)
+        }
 
         if let index = eligible.randomElement(using: &rng) {
             return pool.remove(at: index)
@@ -59,6 +69,12 @@ struct MatchingPairScheduler: Sendable {
             guard let pair = pickNext(rng: &rng) else { break }
             visible.append(pair)
         }
+    }
+}
+
+private extension MatchingPair {
+    var lemmaKey: String {
+        card.lemma.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }
 

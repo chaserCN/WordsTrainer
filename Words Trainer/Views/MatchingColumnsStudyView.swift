@@ -17,7 +17,7 @@ struct MatchingColumnsStudyView: View {
     /// `pairID` — содержимое: его и перемешиваем при подстановке.
     private struct Slot: Identifiable, Equatable {
         let id = UUID()
-        var pairID: String
+        var pairID: String?
     }
 
     @State private var wordColumn: [Slot] = []
@@ -116,7 +116,7 @@ struct MatchingColumnsStudyView: View {
 
     @ViewBuilder
     private func wordCell(_ slot: Slot) -> some View {
-        let pair = pairCache[slot.pairID]
+        let pair = slot.pairID.flatMap { pairCache[$0] }
         MatchingCell(
             label: pair?.card.word ?? "",
             isSelected: selectedWordSlot == slot.id,
@@ -136,13 +136,14 @@ struct MatchingColumnsStudyView: View {
         )
         .opacity(wordSlotOpacity[slot.id] ?? 1)
         .scaleEffect(scale(for: wordSlotOpacity[slot.id]))
-        .allowsHitTesting(isWordTappable(slot.id))
+        .opacity(slot.pairID == nil ? 0 : 1)
+        .allowsHitTesting(slot.pairID != nil && isWordTappable(slot.id))
     }
 
     @ViewBuilder
     private func translationCell(_ slot: Slot) -> some View {
         MatchingCell(
-            label: pairCache[slot.pairID]?.translation ?? "",
+            label: slot.pairID.flatMap { pairCache[$0]?.translation } ?? "",
             isSelected: selectedTranslationSlot == slot.id,
             isWrong: wrongTranslationSlot == slot.id,
             isCorrect: correctTranslationSlots.contains(slot.id),
@@ -150,7 +151,8 @@ struct MatchingColumnsStudyView: View {
         )
         .opacity(translationSlotOpacity[slot.id] ?? 1)
         .scaleEffect(scale(for: translationSlotOpacity[slot.id]))
-        .allowsHitTesting(isTranslationTappable(slot.id))
+        .opacity(slot.pairID == nil ? 0 : 1)
+        .allowsHitTesting(slot.pairID != nil && isTranslationTappable(slot.id))
     }
 
     private func scale(for opacity: Double?) -> Double {
@@ -173,8 +175,14 @@ struct MatchingColumnsStudyView: View {
         let pairs = session.matchingVisibleItems
         guard !pairs.isEmpty else { return }
         for pair in pairs { pairCache[pair.id] = pair }
-        wordColumn = pairs.shuffled().map { Slot(pairID: $0.id) }
-        translationColumn = pairs.shuffled().map { Slot(pairID: $0.id) }
+        wordColumn = fixedSlots(from: pairs.shuffled().map(\.id))
+        translationColumn = fixedSlots(from: pairs.shuffled().map(\.id))
+    }
+
+    private func fixedSlots(from pairIDs: [String]) -> [Slot] {
+        (0..<MatchingPairScheduler.slotCount).map { index in
+            Slot(pairID: index < pairIDs.count ? pairIDs[index] : nil)
+        }
     }
 
     // MARK: - Selection
@@ -190,8 +198,9 @@ struct MatchingColumnsStudyView: View {
             return
         }
         selectedWordSlot = slot.id
-        accelerateIfPartnerMissing(pairID: slot.pairID, selectedWord: true)
-        if let pair = pairCache[slot.pairID] {
+        guard let pairID = slot.pairID else { return }
+        accelerateIfPartnerMissing(pairID: pairID, selectedWord: true)
+        if let pair = pairCache[pairID] {
             WordAudioPlayer.shared.playWord(from: pair.card)
         }
         checkPairIfReady()
@@ -204,7 +213,8 @@ struct MatchingColumnsStudyView: View {
             return
         }
         selectedTranslationSlot = slot.id
-        accelerateIfPartnerMissing(pairID: slot.pairID, selectedWord: false)
+        guard let pairID = slot.pairID else { return }
+        accelerateIfPartnerMissing(pairID: pairID, selectedWord: false)
         checkPairIfReady()
     }
 
@@ -236,19 +246,20 @@ struct MatchingColumnsStudyView: View {
             return
         }
 
-        if wordSlot.pairID == translationSlot.pairID {
-            let matchedID = wordSlot.pairID
+        guard let wordPairID = wordSlot.pairID else { return }
+
+        if wordPairID == translationSlot.pairID {
             let shuffle = shouldShuffleAfterMatch(wordSlot: wordSlotID, translationSlot: translationSlotID)
             selectedWordSlot = nil
             selectedTranslationSlot = nil
             beginMatchTransition(
-                matchedID: matchedID,
+                matchedID: wordPairID,
                 wordSlotID: wordSlotID,
                 translationSlotID: translationSlotID,
                 shuffle: shuffle
             )
         } else {
-            if let pair = pairCache[wordSlot.pairID] {
+            if let pair = pairCache[wordPairID] {
                 WordAudioPlayer.shared.playWord(from: pair.card, style: .wrong)
             }
             wrongWordSlot = wordSlotID
@@ -380,13 +391,13 @@ struct MatchingColumnsStudyView: View {
     private func commitMatch(wordSlotID: UUID, translationSlotID: UUID) {
         guard let wordIndex = wordColumn.firstIndex(where: { $0.id == wordSlotID }),
               let translationIndex = translationColumn.firstIndex(where: { $0.id == translationSlotID }) else {
-            return // ячейки уже нет (перетасовка) — ничего не делаем
+            return // ячейки уже нет — ничего не делаем
         }
 
-        // Конец колоды: подставлять нечего — схлопываем эту пару ячеек.
+        // Конец колоды: подставлять нечего — очищаем ячейки, но сохраняем их место.
         guard !pendingWords.isEmpty, !pendingTranslations.isEmpty else {
-            wordColumn.remove(at: wordIndex)
-            translationColumn.remove(at: translationIndex)
+            wordColumn[wordIndex].pairID = nil
+            translationColumn[translationIndex].pairID = nil
             wordSlotOpacity.removeValue(forKey: wordSlotID)
             translationSlotOpacity.removeValue(forKey: translationSlotID)
             finishIfBoardEmpty()
@@ -421,19 +432,23 @@ struct MatchingColumnsStudyView: View {
         let pairs = session.matchingVisibleItems
         for pair in pairs { pairCache[pair.id] = pair }
         guard !pairs.isEmpty else {
-            wordColumn = []
-            translationColumn = []
+            clearBoardSlots()
             finishIfBoardEmpty()
             return
         }
-        wordColumn = pairs.shuffled().map { Slot(pairID: $0.id) }
-        translationColumn = pairs.shuffled().map { Slot(pairID: $0.id) }
+        wordColumn = fixedSlots(from: pairs.shuffled().map(\.id))
+        translationColumn = fixedSlots(from: pairs.shuffled().map(\.id))
     }
 
     private func finishIfBoardEmpty() {
-        if wordColumn.isEmpty, translationColumn.isEmpty {
+        if wordColumn.allSatisfy({ $0.pairID == nil }), translationColumn.allSatisfy({ $0.pairID == nil }) {
             onFinished()
         }
+    }
+
+    private func clearBoardSlots() {
+        wordColumn = fixedSlots(from: [])
+        translationColumn = fixedSlots(from: [])
     }
 
     /// Проявляем новую лексику в тех же ячейках, где был матч.
@@ -599,9 +614,11 @@ private struct MatchingFlashcardPreviewOverlay: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
 
                             if let exampleTranslation {
-                                Text(exampleTranslation)
-                                    .font(.body)
-                                    .foregroundStyle(oklch(0.92, 0.01, 260))
+                                HTMLText(
+                                    html: exampleTranslation,
+                                    foregroundColor: oklch(0.92, 0.01, 260),
+                                    font: .body
+                                )
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
 

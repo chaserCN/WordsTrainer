@@ -124,6 +124,34 @@ struct MatchingPairSchedulerTests {
         }
     }
 
+    @Test("same lemma from different cards is not visible together")
+    func sameLemmaFromDifferentCardsIsNotVisibleTogether() {
+        let first = TestFixtures.card(
+            word: "load (noun)",
+            lemma: "load",
+            translation: "груз"
+        )
+        let second = TestFixtures.card(
+            word: "to load",
+            lemma: "load",
+            translation: "загружать"
+        )
+        let third = TestFixtures.card(
+            word: "to run",
+            lemma: "run",
+            translation: "бежать"
+        )
+        let pairs = [first, second, third].flatMap { MatchingPair.pairs(from: TestFixtures.queueItem(card: $0)) }
+        var scheduler = TestFixtures.scheduler(pairs: pairs, seed: 71)
+        var rng = SeededRNG(seed: 72)
+
+        while !scheduler.isFinished {
+            #expect(scheduler.visibleLemmasAreUnique)
+            guard let id = scheduler.visible.first?.id else { break }
+            scheduler.removeMatched(id: id, rng: &rng)
+        }
+    }
+
     @Test("after matching one sense, only one sibling sense appears next")
     func refillShowsNextSenseOneAtATime() {
         var scheduler = TestFixtures.scheduler(
@@ -141,6 +169,7 @@ struct MatchingPairSchedulerTests {
         #expect(scheduler.pool.count == 1)
         #expect(scheduler.remainingCount == 2)
         #expect(scheduler.visibleCardIDsAreUnique)
+        #expect(scheduler.visibleLemmasAreUnique)
     }
 
     // MARK: - Slot filling
@@ -158,6 +187,7 @@ struct MatchingPairSchedulerTests {
 
         #expect(scheduler.visible.count == MatchingPairScheduler.slotCount)
         #expect(scheduler.visibleCardIDsAreUnique)
+        #expect(scheduler.visibleLemmasAreUnique)
         #expect(scheduler.remainingCount == 5)
         #expect(scheduler.pool.isEmpty)
     }
@@ -178,6 +208,7 @@ struct MatchingPairSchedulerTests {
         #expect(scheduler.pool.count == 1)
         #expect(scheduler.remainingCount == 6)
         #expect(scheduler.visibleCardIDsAreUnique)
+        #expect(scheduler.visibleLemmasAreUnique)
     }
 
     @Test("three cards with two senses each cap visible at three")
@@ -193,6 +224,7 @@ struct MatchingPairSchedulerTests {
         #expect(scheduler.pool.count == 3)
         #expect(scheduler.remainingCount == 6)
         #expect(scheduler.visibleCardIDsAreUnique)
+        #expect(scheduler.visibleLemmasAreUnique)
     }
 
     // MARK: - Pick next / remove edge cases
@@ -304,12 +336,14 @@ struct MatchingPairSchedulerTests {
             #expect(scheduler.remainingCount == total)
             #expect(scheduler.visible.count <= MatchingPairScheduler.slotCount)
             #expect(scheduler.visibleCardIDsAreUnique)
+            #expect(scheduler.visibleLemmasAreUnique)
 
             var rng = SeededRNG(seed: UInt64(seed &+ 1000))
             var steps = total
             while !scheduler.isFinished, steps > 0 {
                 #expect(scheduler.remainingCount == scheduler.visible.count + scheduler.pool.count)
                 #expect(scheduler.visibleCardIDsAreUnique)
+                #expect(scheduler.visibleLemmasAreUnique)
                 #expect(scheduler.visible.count <= MatchingPairScheduler.slotCount)
 
                 guard let id = scheduler.visible.first?.id else { break }

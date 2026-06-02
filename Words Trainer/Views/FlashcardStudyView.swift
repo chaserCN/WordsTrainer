@@ -475,9 +475,11 @@ struct FlashcardStudyView: View {
 
             if let translation = card.clozeExampleTranslation?.trimmingCharacters(in: .whitespacesAndNewlines),
                !translation.isEmpty {
-                Text(translation)
-                    .font(.body)
-                    .foregroundStyle(FlashcardPalette.secondaryText)
+                HTMLText(
+                    html: translation,
+                    foregroundColor: FlashcardPalette.secondaryText,
+                    font: .body
+                )
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 

@@ -118,7 +118,7 @@ struct StudySessionView: View {
         let isNewRecord = session.mode == .matching && beatRecord
         return ContentUnavailableView {
             Label(
-                isNewRecord ? "Новый рекорд!" : "Готово",
+                isNewRecord ? newRecordTitle : "Готово",
                 systemImage: isNewRecord ? "trophy.fill" : "checkmark.circle"
             )
         } description: {
@@ -129,6 +129,17 @@ struct StudySessionView: View {
             }
         }
         .foregroundStyle(finishedTint)
+    }
+
+    private var newRecordTitle: String {
+        switch session.matchingRecordScope {
+        case .today:
+            return "Новый рекорд за сегодня"
+        case .deck:
+            return "Новый рекорд для колоды"
+        case .none:
+            return "Новый рекорд"
+        }
     }
 
     private var finishedTint: Color {
