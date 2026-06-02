@@ -9,52 +9,9 @@ struct DeckListView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                LovableBackground(variant: .decks)
-
-                if let loadError {
-                    DataPlaceholderView(
-                        title: "Ошибка",
-                        systemImage: "exclamationmark.triangle",
-                        message: loadError
-                    )
-                } else if userStore.selectedUserID == nil {
-                    DataPlaceholderView(
-                        title: noUserTitle,
-                        systemImage: noUserSystemImage,
-                        message: noUserMessage
-                    )
-                } else if decks.isEmpty, store != nil {
-                    DataPlaceholderView(
-                        title: "Нет колод",
-                        systemImage: "books.vertical",
-                        message: emptyDecksMessage
-                    )
-                } else if let store {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
-                            DeckListHeader(deckCount: activeDecks.count)
-
-                            LazyVStack(spacing: 16) {
-                                ForEach(sortedDeckBindings) { $deck in
-                                    NavigationLink {
-                                        DeckDetailView(deck: $deck, store: store)
-                                    } label: {
-                                        LovableDeckCard(deck: deck)
-                                            .opacity(deck.isActive ? 1 : 0.45)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 28)
-                        .padding(.bottom, 32)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background { LovableBackground(variant: .decks) }
             .toolbar(.hidden, for: .navigationBar)
         }
         .task {
@@ -71,6 +28,53 @@ struct DeckListView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: DeckStore.localDataDidChangeNotification)) { _ in
             Task { await bootstrap() }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let loadError {
+            DataPlaceholderView(
+                title: "Ошибка",
+                systemImage: "exclamationmark.triangle",
+                message: loadError
+            )
+        } else if userStore.selectedUserID == nil {
+            DataPlaceholderView(
+                title: noUserTitle,
+                systemImage: noUserSystemImage,
+                message: noUserMessage
+            )
+        } else if decks.isEmpty, store != nil {
+            DataPlaceholderView(
+                title: "Нет колод",
+                systemImage: "books.vertical",
+                message: emptyDecksMessage
+            )
+        } else if let store {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    DeckListHeader(deckCount: activeDecks.count)
+
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        ForEach(sortedDeckBindings) { $deck in
+                            NavigationLink {
+                                DeckDetailView(deck: $deck, store: store)
+                            } label: {
+                                LovableDeckCard(deck: deck)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .opacity(deck.isActive ? 1 : 0.45)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 28)
+                .padding(.bottom, 32)
+            }
         }
     }
 
@@ -242,12 +246,14 @@ struct LovableDeckCard: View {
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
+                        .truncationMode(.tail)
                     Text("\(deck.activeCards.count) \(cardsGenitive(deck.activeCards.count)) · \(deck.languageCode.uppercased())")
                         .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(.white.opacity(0.55))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
-
-                Spacer(minLength: 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 if showsChevron {
                     Image(systemName: "chevron.right")
@@ -268,6 +274,7 @@ struct LovableDeckCard: View {
             }
         }
         .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .lovablePanel(cornerRadius: 24)
     }
 }

@@ -84,9 +84,7 @@ struct TodayView: View {
                         )
                     }
 
-                    if let visibleSyncStatus {
-                        TodaySyncStatusCard(status: visibleSyncStatus)
-                    } else if let contentStatus {
+                    if let contentStatus {
                         TodaySyncStatusCard(status: contentStatus)
                     }
 
@@ -230,11 +228,6 @@ struct TodayView: View {
             )
         }
         return nil
-    }
-
-    private var visibleSyncStatus: TodaySyncStatus? {
-        guard userStore.syncStatus.isRelevant(to: userStore.selectedUserID) else { return nil }
-        return TodaySyncStatus(syncStatus: userStore.syncStatus)
     }
 
     private func reload() async {
@@ -1583,6 +1576,7 @@ private struct LovableStat: View {
 private struct ForecastSection: View {
     let days: [ScheduledReviewDay]
     private var maxCount: Int { max(days.map(\.dueCount).max() ?? 0, 1) }
+    private var countColumnLabel: String { "\(days.map(\.dueCount).max() ?? 0)" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1615,11 +1609,16 @@ private struct ForecastSection: View {
                             }
                         }
                         .frame(height: 8)
-                        Text("\(day.dueCount)")
-                            .font(.system(size: 14, weight: .semibold))
-                            .monospacedDigit()
-                            .foregroundStyle(oklch(0.97, 0.01, 240))
-                            .frame(width: 18, alignment: .trailing)
+                        ZStack(alignment: .trailing) {
+                            Text(countColumnLabel)
+                                .hidden()
+                            Text("\(day.dueCount)")
+                                .lineLimit(1)
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(oklch(0.97, 0.01, 240))
+                        .fixedSize(horizontal: true, vertical: false)
                     }
                 }
             }
