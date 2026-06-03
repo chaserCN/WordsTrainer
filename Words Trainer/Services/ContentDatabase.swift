@@ -12,6 +12,10 @@ private enum SyncMetadataKey {
     static let statsSummarySnapshot = "stats_summary_snapshot"
 }
 
+private enum WeakCardFilter {
+    static let minimumFailureRate = 0.25
+}
+
 struct ContentCacheCleanupResult {
     let removedDeckIDs: [UUID]
 }
@@ -574,7 +578,14 @@ final class ContentDatabase {
 
         var cards: [WeakCardStat] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            guard try isCurrentWeakCard(statement, fsrsDataIndex: 7) else { continue }
+            let failedCount = Int(sqlite3_column_int(statement, 4))
+            let reviewedCount = Int(sqlite3_column_int(statement, 5))
+            guard try isCurrentWeakCard(
+                statement,
+                fsrsDataIndex: 7,
+                failedCount: failedCount,
+                reviewedCount: reviewedCount
+            ) else { continue }
             guard let cardID = uuidColumn(statement, index: 0),
                   let deckID = uuidColumn(statement, index: 1),
                   let word = textColumn(statement, index: 2),
@@ -591,8 +602,8 @@ final class ContentDatabase {
                     deckID: deckID,
                     word: word,
                     translation: translation,
-                    failedCount: Int(sqlite3_column_int(statement, 4)),
-                    reviewedCount: Int(sqlite3_column_int(statement, 5)),
+                    failedCount: failedCount,
+                    reviewedCount: reviewedCount,
                     lastFailedAt: lastFailedAt
                 )
             )
@@ -698,7 +709,14 @@ final class ContentDatabase {
 
         var cards: [WeakCardStat] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            guard try isCurrentWeakCard(statement, fsrsDataIndex: 7) else { continue }
+            let failedCount = Int(sqlite3_column_int(statement, 4))
+            let reviewedCount = Int(sqlite3_column_int(statement, 5))
+            guard try isCurrentWeakCard(
+                statement,
+                fsrsDataIndex: 7,
+                failedCount: failedCount,
+                reviewedCount: reviewedCount
+            ) else { continue }
             guard let cardID = uuidColumn(statement, index: 0),
                   let deckID = uuidColumn(statement, index: 1),
                   let word = textColumn(statement, index: 2),
@@ -715,8 +733,8 @@ final class ContentDatabase {
                     deckID: deckID,
                     word: word,
                     translation: translation,
-                    failedCount: Int(sqlite3_column_int(statement, 4)),
-                    reviewedCount: Int(sqlite3_column_int(statement, 5)),
+                    failedCount: failedCount,
+                    reviewedCount: reviewedCount,
                     lastFailedAt: lastFailedAt
                 )
             )
@@ -2620,7 +2638,12 @@ final class ContentDatabase {
         }
     }
 
-    private func isCurrentWeakCard(_ statement: OpaquePointer?, fsrsDataIndex: Int32) throws -> Bool {
+    private func isCurrentWeakCard(
+        _ statement: OpaquePointer?,
+        fsrsDataIndex: Int32,
+        failedCount: Int,
+        reviewedCount: Int
+    ) throws -> Bool {
         guard sqlite3_column_type(statement, fsrsDataIndex) != SQLITE_NULL,
               let blob = sqlite3_column_blob(statement, fsrsDataIndex) else {
             return true
@@ -2628,7 +2651,12 @@ final class ContentDatabase {
         let length = Int(sqlite3_column_bytes(statement, fsrsDataIndex))
         let data = Data(bytes: blob, count: length)
         let fsrsCard = try JSONDecoder().decode(Card.self, from: data)
-        return fsrsCard.state != .review
+        if fsrsCard.state != .review {
+            return true
+        }
+        guard reviewedCount > 0 else { return false }
+        let failureRate = Double(failedCount) / Double(reviewedCount)
+        return failureRate >= WeakCardFilter.minimumFailureRate
     }
 
     private func exec(
