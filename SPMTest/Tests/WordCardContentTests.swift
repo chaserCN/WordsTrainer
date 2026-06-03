@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import WordsTrainerLogic
 
@@ -164,7 +165,41 @@ struct WordCardContentTests {
             ),
         ]
 
-        #expect(card.clozeChoices(answerPool: pool) == ["hips", "loads", "heels", "settle"])
+        let choices = card.clozeChoices(answerPool: pool)
+        #expect(choices.first == "hips")
+        #expect(Set(choices) == ["hips", "loads", "heels", "settle"])
+    }
+
+    @Test("clozeChoices vary dynamic distractors by card")
+    func clozeChoicesVaryDynamicDistractorsByCard() {
+        func baseCard(_ index: Int, _ answer: String) -> WordCardContent {
+            WordCardContent(
+                id: UUID(uuidString: "00000000-0000-4000-8000-\(String(format: "%012d", index))")!,
+                word: answer,
+                translation: answer,
+                clozePrompt: "They ___ it.",
+                clozeAnswer: answer,
+                answerFormKey: "base",
+                forms: [WordForm(formKey: "base", text: answer)]
+            )
+        }
+        let pool = [
+            baseCard(1, "dilute"),
+            baseCard(2, "enclose"),
+            baseCard(3, "hoist"),
+            baseCard(4, "jeopardize"),
+            baseCard(5, "outweigh"),
+            baseCard(6, "sprawl"),
+            baseCard(7, "tarnish"),
+            baseCard(8, "mystify"),
+        ]
+
+        let first = pool[0].clozeChoices(answerPool: pool)
+        let second = pool[1].clozeChoices(answerPool: pool)
+
+        #expect(first.first == "dilute")
+        #expect(second.first == "enclose")
+        #expect(Set(first.dropFirst()) != Set(second.dropFirst()))
     }
 
     @Test("clozeChoices fall back to deck pool when session is nearly exhausted")
@@ -202,6 +237,7 @@ struct WordCardContentTests {
     func clozeChoicesPreferMatchingVerbForm() {
         let card = WordCardContent(
             word: "rap",
+            partOfSpeech: "verb",
             translation: "стучать",
             clozePrompt: "The teacher <b>rapped</b> on the table.",
             answerFormKey: "past",
@@ -211,6 +247,7 @@ struct WordCardContentTests {
             card,
             WordCardContent(
                 word: "load",
+                partOfSpeech: "verb",
                 translation: "грузить",
                 clozePrompt: "They <b>loaded</b> the van.",
                 answerFormKey: "past",
@@ -218,6 +255,7 @@ struct WordCardContentTests {
             ),
             WordCardContent(
                 word: "cast",
+                partOfSpeech: "verb",
                 translation: "бросать",
                 clozePrompt: "He <b>cast</b> the net.",
                 answerFormKey: "past",
@@ -233,6 +271,37 @@ struct WordCardContentTests {
         ]
 
         #expect(card.clozeChoices(answerPool: pool) == ["rapped", "loaded", "cast", "settle"])
+    }
+
+    @Test("clozeChoices prefer matching part of speech")
+    func clozeChoicesPreferMatchingPartOfSpeech() {
+        func card(_ index: Int, _ answer: String, _ partOfSpeech: String) -> WordCardContent {
+            WordCardContent(
+                id: UUID(uuidString: "00000000-0000-4000-8001-\(String(format: "%012d", index))")!,
+                word: answer,
+                partOfSpeech: partOfSpeech,
+                translation: answer,
+                clozePrompt: "They ___ it.",
+                clozeAnswer: answer,
+                answerFormKey: "base",
+                forms: [WordForm(formKey: "base", text: answer)]
+            )
+        }
+        let target = card(1, "dilute", "verb")
+        let pool = [
+            target,
+            card(2, "feral", "adjective"),
+            card(3, "dormant", "adjective"),
+            card(4, "hoist", "verb"),
+            card(5, "enclose", "verb"),
+            card(6, "tarnish", "verb"),
+            card(7, "vigorous", "adjective"),
+        ]
+
+        let choices = target.clozeChoices(answerPool: pool)
+
+        #expect(choices.first == "dilute")
+        #expect(Set(choices.dropFirst()) == ["hoist", "enclose", "tarnish"])
     }
 }
 

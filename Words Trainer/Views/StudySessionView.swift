@@ -95,7 +95,7 @@ struct StudySessionView: View {
                     MatchingSettingsMenu()
                         .tint(navbarButtonTint)
                 }
-            } else if session.mode == .matchingAudio || session.mode == .flashcards {
+            } else if session.mode == .matchingAudio || session.mode == .flashcards || session.mode == .clozeMultipleChoice {
                 ToolbarItem(placement: .topBarTrailing) {
                     SoundToggleButton()
                         .tint(navbarButtonTint)

@@ -22,10 +22,6 @@ struct ClozeMCQStudyView: View {
         ) == .orderedSame
     }
 
-    private var hasAudio: Bool {
-        card.audioExampleURL != nil || !card.clozeExamplePlainText.isEmpty
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             StudyProgressHeader(totalCount: totalCount, remainingCount: remainingCount)
@@ -89,46 +85,26 @@ struct ClozeMCQStudyView: View {
     }
 
     private var sentenceCard: some View {
-        ZStack(alignment: .topTrailing) {
-            Group {
-                if let parts = card.clozeSentenceParts {
-                    ClozeSentenceText(
-                        parts: parts,
-                        filledWord: answered && passed ? selected : nil
-                    )
-                } else {
-                    HTMLText(
-                        html: card.clozePromptWithGap,
-                        foregroundColor: ClozeSentencePalette.text,
-                        font: .title3.weight(.semibold)
-                    )
-                }
-            }
-            .multilineTextAlignment(.leading)
-            .lineSpacing(4)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 16)
-            .padding(.trailing, hasAudio ? 46 : 16)
-
-            if hasAudio {
-                Button {
-                    WordAudioPlayer.shared.playExample(from: card)
-                } label: {
-                    Image(systemName: "speaker.wave.2.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(ClozeSentencePalette.audioTint)
-                        .frame(width: 34, height: 34)
-                        .background(Circle().fill(oklch(0.62, 0.2, 245, 0.18)))
-                        .opacity(answered ? 1 : 0.4)
-                }
-                .buttonStyle(.plain)
-                .disabled(!answered)
-                .padding(10)
-                .accessibilityLabel("Прослушать")
+        Group {
+            if let parts = card.clozeSentenceParts {
+                ClozeSentenceText(
+                    parts: parts,
+                    filledWord: answered && passed ? selected : nil
+                )
+            } else {
+                HTMLText(
+                    html: card.clozePromptWithGap,
+                    foregroundColor: ClozeSentencePalette.text,
+                    font: .title3.weight(.semibold)
+                )
             }
         }
+        .multilineTextAlignment(.leading)
+        .lineSpacing(4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 16)
         .background(
             clozeSentenceShape
                 .fill(clozeSentenceGradient)
@@ -156,6 +132,8 @@ struct ClozeMCQStudyView: View {
         }
         if !isCorrect {
             shakeCount += 1
+        } else {
+            WordAudioPlayer.shared.playClozeAnswer(from: card)
         }
     }
 
@@ -197,7 +175,6 @@ private let clozeSentenceGradient = LinearGradient(
 private enum ClozeSentencePalette {
     static let text = Color.white.opacity(0.92)
     static let filled = oklch(0.78, 0.16, 155)
-    static let audioTint = oklch(0.78, 0.18, 245)
 }
 
 private struct ClozeSentenceText: View {

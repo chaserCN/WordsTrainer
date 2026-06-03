@@ -139,7 +139,8 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         targetCount: Int = 4
     ) -> [String] {
         let sessionOthers = sessionPool.filter { $0.id != id }
-        var distractors = distractorTexts(from: sessionOthers)
+        var distractors = distractors
+        distractors += dynamicDistractorTexts(from: sessionOthers, salt: "session")
         var choices = Self.uniqueChoices(
             correctAnswer: effectiveClozeAnswer,
             distractors: distractors
@@ -148,7 +149,7 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         if choices.count < targetCount {
             let sessionIDs = Set(sessionPool.map(\.id))
             let deckOthers = deckPool.filter { $0.id != id && !sessionIDs.contains($0.id) }
-            distractors += distractorTexts(from: deckOthers)
+            distractors += dynamicDistractorTexts(from: deckOthers, salt: "deck")
             choices = Self.uniqueChoices(
                 correctAnswer: effectiveClozeAnswer,
                 distractors: distractors
@@ -158,17 +159,46 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         return Array(choices.prefix(max(1, targetCount)))
     }
 
-    private func distractorTexts(from otherCards: [WordCardContent]) -> [String] {
-        let exactMatches = otherCards.compactMap { card -> (UUID, String)? in
+    private func dynamicDistractorTexts(from otherCards: [WordCardContent], salt: String) -> [String] {
+        let exactMatches = otherCards.compactMap { card -> DynamicDistractor? in
             guard let text = card.choiceText(exactlyMatching: answerFormKey) else { return nil }
-            return (card.id, text)
+            return DynamicDistractor(cardID: card.id, text: text, matchesPartOfSpeech: matchesPartOfSpeech(card))
         }
-        let exactFormDistractors = exactMatches.map(\.1)
-        let exactCardIDs = Set(exactMatches.map(\.0))
+        let exactFormDistractors = prioritizedDistractorTexts(from: exactMatches, salt: "\(salt)-exact")
+        let exactCardIDs = Set(exactMatches.map(\.cardID))
         let fallbackDistractors = otherCards
             .filter { !exactCardIDs.contains($0.id) }
-            .compactMap { $0.fallbackChoiceText() }
-        return distractors + exactFormDistractors + fallbackDistractors
+            .compactMap { card -> DynamicDistractor? in
+                guard let text = card.fallbackChoiceText() else { return nil }
+                return DynamicDistractor(cardID: card.id, text: text, matchesPartOfSpeech: matchesPartOfSpeech(card))
+            }
+        let fallbackTexts = prioritizedDistractorTexts(from: fallbackDistractors, salt: "\(salt)-fallback")
+        return exactFormDistractors + fallbackTexts
+    }
+
+    private func prioritizedDistractorTexts(from distractors: [DynamicDistractor], salt: String) -> [String] {
+        let samePartOfSpeech = distractors.filter(\.matchesPartOfSpeech).map(\.text)
+        let otherPartOfSpeech = distractors.filter { !$0.matchesPartOfSpeech }.map(\.text)
+        return rotated(samePartOfSpeech, salt: "\(salt)-same-pos")
+            + rotated(otherPartOfSpeech, salt: "\(salt)-other-pos")
+    }
+
+    private func matchesPartOfSpeech(_ otherCard: WordCardContent) -> Bool {
+        guard let target = Self.normalizedPartOfSpeech(partOfSpeech) else { return true }
+        return Self.normalizedPartOfSpeech(otherCard.partOfSpeech) == target
+    }
+
+    private struct DynamicDistractor {
+        let cardID: UUID
+        let text: String
+        let matchesPartOfSpeech: Bool
+    }
+
+    private func rotated(_ values: [String], salt: String) -> [String] {
+        guard values.count > 1 else { return values }
+        let offset = Self.stableOffset(seed: "\(id.uuidString)|\(effectiveClozeAnswer)|\(salt)", count: values.count)
+        guard offset > 0 else { return values }
+        return Array(values[offset...]) + values[..<offset]
     }
 
     func clozePromptFilled(with answer: String) -> String {
@@ -306,6 +336,20 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func normalizedPartOfSpeech(_ value: String?) -> String? {
+        trimmedNonEmpty(value)?.lowercased()
+    }
+
+    private static func stableOffset(seed: String, count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in seed.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return Int(hash % UInt64(count))
     }
 }
 
