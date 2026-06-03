@@ -1,5 +1,8 @@
 import SwiftUI
 import OSLog
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct AppRootView: View {
     @Environment(AppUserStore.self) private var userStore
@@ -793,7 +796,7 @@ private struct UserAvatarButton: View {
 
     var body: some View {
         Button(action: action) {
-            UserAvatar(user: user, size: 56)
+            UserAvatar(user: user, size: 64)
                 .overlay(alignment: .bottomTrailing) {
                     if streakDays > 3 {
                         StreakBadge(days: streakDays)
@@ -813,7 +816,7 @@ private struct UserAvatar: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+            Circle()
                 .fill(
                     LinearGradient(
                         colors: [
@@ -826,17 +829,7 @@ private struct UserAvatar: View {
                 )
 
             if let url = user.avatarImageURL {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    } else {
-                        Text(user.initials)
-                            .font(.system(size: size * 0.34, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                }
+                UserAvatarImage(url: url, initials: user.initials, size: size)
             } else {
                 Text(user.initials)
                     .font(.system(size: size * 0.34, weight: .bold))
@@ -844,14 +837,72 @@ private struct UserAvatar: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+        .clipShape(Circle())
         .overlay {
-            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+            Circle()
                 .stroke(.white.opacity(0.92), lineWidth: 2)
         }
         .shadow(color: oklch(0.18, 0.05, 260, 0.16), radius: 12, x: 0, y: 7)
     }
 }
+
+private struct UserAvatarImage: View {
+    let url: URL
+    let initials: String
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            #if canImport(UIKit)
+            if url.isFileURL, let image = UserAvatarImageCache.image(for: url) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                remoteImage
+            }
+            #else
+            remoteImage
+            #endif
+        }
+    }
+
+    private var remoteImage: some View {
+        AsyncImage(url: url) { phase in
+            if let image = phase.image {
+                image
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                initialsFallback
+            }
+        }
+    }
+
+    private var initialsFallback: some View {
+        Text(initials)
+            .font(.system(size: size * 0.34, weight: .bold))
+            .foregroundStyle(.white)
+    }
+}
+
+#if canImport(UIKit)
+@MainActor
+private enum UserAvatarImageCache {
+    private static var images: [URL: UIImage] = [:]
+
+    static func image(for url: URL) -> UIImage? {
+        if let image = images[url] {
+            return image
+        }
+        guard let image = UIImage(contentsOfFile: url.path) else {
+            return nil
+        }
+        images[url] = image
+        return image
+    }
+}
+#endif
 
 private struct StreakBadge: View {
     let days: Int
