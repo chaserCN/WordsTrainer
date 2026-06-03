@@ -150,7 +150,7 @@ enum TodayStudySessionBuilder {
     }
 
     private static func practiceQueue(_ items: [StudyQueueItem], for mode: StudyMode) -> [StudyQueueItem] {
-        if mode == .matching || mode == .recall || mode == .clozeMultipleChoice {
+        if mode.isMatching || mode == .recall || mode == .clozeMultipleChoice {
             return items.shuffled()
         }
         return items

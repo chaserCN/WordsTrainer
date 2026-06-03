@@ -414,6 +414,16 @@ struct DeckDetailView: View {
                     ) {
                         start(.matching)
                     }
+
+                    StudyActionButton(
+                        title: "Колонки аудио",
+                        subtitle: "Слушай слово и выбирай перевод",
+                        systemImage: "speaker.wave.2.fill",
+                        accent: .cyan,
+                        isEnabled: !scopedStudyCards.isEmpty
+                    ) {
+                        start(.matchingAudio)
+                    }
                 }
 
                 StudySection(title: "Сбросить") {

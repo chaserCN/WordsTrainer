@@ -23,13 +23,13 @@ final class StudySession {
 
     var current: StudyQueueItem? { queue.first }
     var remainingCount: Int {
-        if mode == .matching {
+        if mode.isMatching {
             return matchingScheduler?.remainingCount ?? 0
         }
         return queue.count
     }
     var isFinished: Bool {
-        if mode == .matching {
+        if mode.isMatching {
             return matchingScheduler?.isFinished ?? true
         }
         return queue.isEmpty
@@ -56,12 +56,12 @@ final class StudySession {
         self.deckID = deckID
         self.mode = mode
         self.savesProgress = savesProgress
-        self.matchingRecordScope = matchingRecordScope ?? (savesProgress ? .deck(deckID) : .none)
+        self.matchingRecordScope = matchingRecordScope ?? (savesProgress && !mode.isAudioMatching ? .deck(deckID) : .none)
         self.dailyUsage = dailyUsage
         self.engine = engine
         sessionChoicePool = queue.map(\.card)
         deckChoicePool = deckCards
-        if mode == .matching {
+        if mode.isMatching {
             let pairs = queue.flatMap { MatchingPair.pairs(from: $0) }
             matchingTotalPairCount = pairs.count
             matchingStartedAt = Date()
@@ -80,7 +80,7 @@ final class StudySession {
     }
 
     func removeMatchedPair(id: String) {
-        guard mode == .matching else { return }
+        guard mode.isMatching else { return }
         var rng = SystemRandomNumberGenerator()
         matchingScheduler?.removeMatched(id: id, rng: &rng)
     }

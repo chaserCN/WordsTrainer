@@ -26,7 +26,7 @@ struct StudySessionView: View {
                 AppBackground()
             }
             Group {
-                if session.mode == .matching {
+                if session.mode.isMatching {
                     if matchingFinished {
                         finishedView
                     } else {
@@ -36,7 +36,7 @@ struct StudySessionView: View {
                             onFinished: {
                                 matchingFinished = true
                                 // Поздравление только при новом рекорде.
-                                if beatRecord {
+                                if session.mode == .matching, beatRecord {
                                     confettiBurst += 1
                                     WordAudioPlayer.shared.playEffect(named: "new_record")
                                 }
@@ -74,7 +74,7 @@ struct StudySessionView: View {
                         ) { outcome in
                             submit(outcome)
                         }
-                    case .matching, .clozeTyping:
+                    case .matching, .matchingAudio, .clozeTyping:
                         EmptyView()
                     }
                 }
@@ -95,7 +95,7 @@ struct StudySessionView: View {
                     MatchingSettingsMenu()
                         .tint(navbarButtonTint)
                 }
-            } else if session.mode == .flashcards {
+            } else if session.mode == .matchingAudio || session.mode == .flashcards {
                 ToolbarItem(placement: .topBarTrailing) {
                     SoundToggleButton()
                         .tint(navbarButtonTint)
@@ -155,7 +155,7 @@ struct StudySessionView: View {
     }
 
     private var usesLightStudyTheme: Bool {
-        session.mode == .matching
+        session.mode.isMatching
             || session.mode == .clozeMultipleChoice
             || session.mode == .recall
             || session.mode == .flashcards

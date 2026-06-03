@@ -182,7 +182,7 @@ final class DeckStore {
         let progress = try database.progressMap(deckID: deck.id)
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
         let queue: [StudyQueueItem]
-        if mode == .matching || mode == .recall {
+        if mode.isMatching || mode == .recall {
             let items = studyCards.map { card in
                 StudyQueueItem(
                     card: card,
@@ -300,7 +300,7 @@ final class DeckStore {
             deckCards: studyCards,
             dailyUsage: usage,
             engine: engine,
-            matchingRecordScope: mode == .matching ? .none : .deck(deck.id)
+            matchingRecordScope: mode.isMatching ? .none : .deck(deck.id)
         )
     }
 

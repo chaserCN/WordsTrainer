@@ -65,9 +65,13 @@ struct MatchingColumnsStudyView: View {
         return Array(zip(wordColumn, translationColumn))
     }
 
+    private var usesAudioPrompts: Bool {
+        session.mode.isAudioMatching
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Соедини пары")
+            Text(usesAudioPrompts ? "Послушай и соедини" : "Соедини пары")
                 .font(.largeTitle.bold())
                 .foregroundStyle(MatchPalette.foreground)
                 .padding(.top, 12)
@@ -117,23 +121,37 @@ struct MatchingColumnsStudyView: View {
     @ViewBuilder
     private func wordCell(_ slot: Slot) -> some View {
         let pair = slot.pairID.flatMap { pairCache[$0] }
-        MatchingCell(
-            label: pair?.card.word ?? "",
-            isSelected: selectedWordSlot == slot.id,
-            isWrong: wrongWordSlot == slot.id,
-            isCorrect: correctWordSlots.contains(slot.id),
-            action: { selectWord(slot) }
-        )
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.45)
-                .onEnded { _ in
-                    guard let pair else { return }
-                    suppressedWordTapSlot = slot.id
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        previewPair = pair
-                    }
-                }
-        )
+        Group {
+            if usesAudioPrompts {
+                MatchingCell(
+                    label: "",
+                    systemImage: "speaker.wave.2.fill",
+                    accessibilityLabel: "Проиграть слово",
+                    isSelected: selectedWordSlot == slot.id,
+                    isWrong: wrongWordSlot == slot.id,
+                    isCorrect: correctWordSlots.contains(slot.id),
+                    action: { selectWord(slot) }
+                )
+            } else {
+                MatchingCell(
+                    label: pair?.card.word ?? "",
+                    isSelected: selectedWordSlot == slot.id,
+                    isWrong: wrongWordSlot == slot.id,
+                    isCorrect: correctWordSlots.contains(slot.id),
+                    action: { selectWord(slot) }
+                )
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.45)
+                        .onEnded { _ in
+                            guard let pair else { return }
+                            suppressedWordTapSlot = slot.id
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                previewPair = pair
+                            }
+                        }
+                )
+            }
+        }
         .opacity(wordSlotOpacity[slot.id] ?? 1)
         .scaleEffect(scale(for: wordSlotOpacity[slot.id]))
         .opacity(slot.pairID == nil ? 0 : 1)
@@ -166,7 +184,9 @@ struct MatchingColumnsStudyView: View {
     }
 
     private func isTranslationTappable(_ id: UUID) -> Bool {
-        translationSlotOpacity[id] == nil || appearingTranslationSlots.contains(id)
+        let canTap = translationSlotOpacity[id] == nil || appearingTranslationSlots.contains(id)
+        guard canTap else { return false }
+        return !usesAudioPrompts || selectedWordSlot != nil
     }
 
     /// Первичная раздача: лексика по ячейкам, колонки мешаем независимо.
@@ -193,12 +213,16 @@ struct MatchingColumnsStudyView: View {
             suppressedWordTapSlot = nil
             return
         }
+        guard let pairID = slot.pairID else { return }
         if selectedWordSlot == slot.id {
+            if usesAudioPrompts, let pair = pairCache[pairID] {
+                WordAudioPlayer.shared.playWord(from: pair.card)
+                return
+            }
             selectedWordSlot = nil
             return
         }
         selectedWordSlot = slot.id
-        guard let pairID = slot.pairID else { return }
         accelerateIfPartnerMissing(pairID: pairID, selectedWord: true)
         if let pair = pairCache[pairID] {
             WordAudioPlayer.shared.playWord(from: pair.card)
@@ -704,6 +728,8 @@ private struct MatchingPreviewCardFrameKey: PreferenceKey {
 
 private struct MatchingCell: View {
     let label: String
+    var systemImage: String?
+    var accessibilityLabel: String?
     let isSelected: Bool
     let isWrong: Bool
     let isCorrect: Bool
@@ -711,25 +737,37 @@ private struct MatchingCell: View {
 
     var body: some View {
         Button(action: action) {
-            Text(label)
-                .font(.headline)
-                .foregroundStyle(MatchPalette.cardForeground)
-                .multilineTextAlignment(.center)
-                .lineLimit(3)
-                .minimumScaleFactor(0.8)
-                .frame(maxWidth: .infinity, minHeight: 68, alignment: .center)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(studyCardShape.fill(cardFill))
-                .overlay(studyCardShape.strokeBorder(ringColor, lineWidth: ringWidth))
-                .shadow(color: primaryShadow.color, radius: primaryShadow.radius, x: 0, y: primaryShadow.y)
-                .shadow(color: secondaryShadow.color, radius: secondaryShadow.radius, x: 0, y: secondaryShadow.y)
+            cellContent
+            .foregroundStyle(MatchPalette.cardForeground)
+            .frame(maxWidth: .infinity, minHeight: 68, alignment: .center)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(studyCardShape.fill(cardFill))
+            .overlay(studyCardShape.strokeBorder(ringColor, lineWidth: ringWidth))
+            .shadow(color: primaryShadow.color, radius: primaryShadow.radius, x: 0, y: primaryShadow.y)
+            .shadow(color: secondaryShadow.color, radius: secondaryShadow.radius, x: 0, y: secondaryShadow.y)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel ?? label)
         .frame(maxWidth: .infinity)
         .modifier(ShakeEffect(animatableData: isWrong ? 1 : 0))
         .animation(.linear(duration: 0.4), value: isWrong)
         .transition(.scale.combined(with: .opacity))
+    }
+
+    @ViewBuilder
+    private var cellContent: some View {
+        if let systemImage {
+            Image(systemName: systemImage)
+                .font(.system(size: 18, weight: .semibold))
+                .imageScale(.medium)
+        } else {
+            Text(label)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .minimumScaleFactor(0.8)
+        }
     }
 
     private var cardFill: LinearGradient {

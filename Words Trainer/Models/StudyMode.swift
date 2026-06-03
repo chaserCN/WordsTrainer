@@ -6,6 +6,7 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable {
     case clozeMultipleChoice
     case clozeTyping
     case matching
+    case matchingAudio
 
     var id: String { rawValue }
 
@@ -16,12 +17,24 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable {
         case .clozeMultipleChoice: "Предложения"
         case .clozeTyping: "Пропуск — ввод"
         case .matching: "Колонки"
+        case .matchingAudio: "Колонки аудио"
         }
+    }
+
+    var isMatching: Bool {
+        switch self {
+        case .matching, .matchingAudio: true
+        default: false
+        }
+    }
+
+    var isAudioMatching: Bool {
+        self == .matchingAudio
     }
 
     var updatesSRS: Bool {
         switch self {
-        case .matching: false
+        case .matching, .matchingAudio: false
         default: true
         }
     }
