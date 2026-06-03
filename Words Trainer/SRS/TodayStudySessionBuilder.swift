@@ -72,7 +72,7 @@ enum TodayStudySessionBuilder {
             deckCards: choicePool,
             dailyUsage: nil,
             engine: engine,
-            matchingRecordScope: .today(dayKey: dayKey)
+            matchingRecordScope: matchingRecordScope(for: mode, dayKey: dayKey)
         )
     }
 
@@ -109,7 +109,7 @@ enum TodayStudySessionBuilder {
             deckCards: choicePool,
             dailyUsage: nil,
             engine: engine,
-            matchingRecordScope: .today(dayKey: dayKey),
+            matchingRecordScope: matchingRecordScope(for: mode, dayKey: dayKey),
             savesProgress: false
         )
     }
@@ -130,7 +130,7 @@ enum TodayStudySessionBuilder {
             deckCards: studyCards,
             dailyUsage: nil,
             engine: engine,
-            matchingRecordScope: .deck(snapshot.deck.id),
+            matchingRecordScope: matchingRecordScope(for: mode, deckID: snapshot.deck.id),
             savesProgress: false
         )
     }
@@ -154,5 +154,13 @@ enum TodayStudySessionBuilder {
             return items.shuffled()
         }
         return items
+    }
+
+    private static func matchingRecordScope(for mode: StudyMode, dayKey: String) -> MatchingRecordScope {
+        mode.isAudioMatching ? .none : .today(dayKey: dayKey)
+    }
+
+    private static func matchingRecordScope(for mode: StudyMode, deckID: UUID) -> MatchingRecordScope {
+        mode.isAudioMatching ? .none : .deck(deckID)
     }
 }

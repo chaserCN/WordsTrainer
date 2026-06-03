@@ -1021,6 +1021,16 @@ private struct TodayStudyModesView: View {
                     ) {
                         start(.matching)
                     }
+
+                    TodayModeButton(
+                        title: "Колонки аудио",
+                        subtitle: "Слушай слово и выбирай перевод",
+                        systemImage: "speaker.wave.2.fill",
+                        accent: .cyan,
+                        isEnabled: canStart
+                    ) {
+                        start(.matchingAudio)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
