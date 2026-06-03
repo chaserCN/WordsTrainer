@@ -714,14 +714,70 @@ struct ServerSyncClient: Sendable {
     }
 
     private var baseURLString: String? {
-        stringValue(userDefaultsKeys: [Keys.baseURL], bundleKeys: ["SERVER_BASE_URL"])
+        serverConfigValue(
+            localKey: "LOCAL_SERVER_BASE_URL",
+            remoteKey: "REMOTE_SERVER_BASE_URL",
+            legacyKey: "SERVER_BASE_URL"
+        ) ?? stringValue(userDefaultsKeys: [Keys.baseURL], bundleKeys: ["SERVER_BASE_URL"])
     }
 
     private var householdSyncToken: String? {
-        stringValue(
+        serverConfigValue(
+            localKey: "LOCAL_HOUSEHOLD_SYNC_TOKEN",
+            remoteKey: "REMOTE_HOUSEHOLD_SYNC_TOKEN",
+            legacyKey: "HOUSEHOLD_SYNC_TOKEN"
+        ) ?? stringValue(
             userDefaultsKeys: [Keys.householdSyncToken],
             bundleKeys: ["HOUSEHOLD_SYNC_TOKEN"]
         )
+    }
+
+    private func serverConfigValue(localKey: String, remoteKey: String, legacyKey: String) -> String? {
+        for resourceName in ["ServerConfig.local", "ServerConfig"] {
+            guard let config = serverConfig(named: resourceName) else { continue }
+
+            let selectedKey = useLocalServer(in: config) ? localKey : remoteKey
+            if let value = trimmedString(config[selectedKey]) {
+                return value
+            }
+            if let value = trimmedString(config[legacyKey]) {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private func serverConfig(named resourceName: String) -> [String: Any]? {
+        guard let configURL = Bundle.main.url(forResource: resourceName, withExtension: "plist"),
+              let data = try? Data(contentsOf: configURL),
+              let config = try? PropertyListSerialization.propertyList(
+                  from: data,
+                  options: [],
+                  format: nil
+              ) as? [String: Any] else {
+            return nil
+        }
+        return config
+    }
+
+    private func useLocalServer(in config: [String: Any]) -> Bool {
+        switch config["USE_LOCAL_SERVER"] {
+        case let value as Bool:
+            return value
+        case let value as Int:
+            return value != 0
+        case let value as String:
+            let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return ["1", "true", "yes", "local"].contains(normalized)
+        default:
+            return false
+        }
+    }
+
+    private func trimmedString(_ rawValue: Any?) -> String? {
+        guard let value = rawValue as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func stringValue(userDefaultsKeys: [String], bundleKeys: [String]) -> String? {

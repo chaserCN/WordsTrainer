@@ -482,9 +482,11 @@ struct FlashcardStudyView: View {
             }
 
             if let notesText {
-                Text(notesText)
-                    .font(.subheadline)
-                    .foregroundStyle(FlashcardPalette.mutedText)
+                HTMLText(
+                    html: notesText,
+                    foregroundColor: FlashcardPalette.mutedText,
+                    font: .subheadline
+                )
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }

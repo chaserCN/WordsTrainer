@@ -623,9 +623,11 @@ private struct MatchingFlashcardPreviewOverlay: View {
                             }
 
                             if let notesText {
-                                Text(notesText)
-                                    .font(.subheadline)
-                                    .foregroundStyle(oklch(0.72, 0.015, 260))
+                                HTMLText(
+                                    html: notesText,
+                                    foregroundColor: oklch(0.72, 0.015, 260),
+                                    font: .subheadline
+                                )
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }

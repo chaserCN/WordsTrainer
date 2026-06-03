@@ -2,9 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>SERVER_BASE_URL</key>
+	<key>USE_LOCAL_SERVER</key>
+	<integer>1</integer>
+	<key>LOCAL_SERVER_BASE_URL</key>
+	<string>http://127.0.0.1:3000</string>
+	<key>LOCAL_HOUSEHOLD_SYNC_TOKEN</key>
+	<string>local-dev-household-sync-token</string>
+	<key>REMOTE_SERVER_BASE_URL</key>
 	<string>https://example.up.railway.app</string>
-	<key>HOUSEHOLD_SYNC_TOKEN</key>
+	<key>REMOTE_HOUSEHOLD_SYNC_TOKEN</key>
 	<string>replace-with-private-sync-token</string>
 </dict>
 </plist>

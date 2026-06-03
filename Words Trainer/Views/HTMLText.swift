@@ -35,7 +35,11 @@ struct HTMLText: View {
         for run in runs {
             var piece = AttributedString(run.text)
             if let font {
-                piece.font = run.isBold ? font.weight(.bold) : font
+                var resolvedFont = run.isBold ? font.weight(.bold) : font
+                if run.isItalic {
+                    resolvedFont = resolvedFont.italic()
+                }
+                piece.font = resolvedFont
             }
             if run.isBold, let emphasisColor {
                 piece.foregroundColor = emphasisColor
@@ -50,18 +54,20 @@ struct HTMLText: View {
     private struct HTMLRun {
         var text: String
         var isBold: Bool
+        var isItalic: Bool
     }
 
     private static func htmlRuns(from html: String) -> [HTMLRun] {
         var runs: [HTMLRun] = []
         var buffer = ""
         var boldDepth = 0
+        var italicDepth = 0
         var index = html.startIndex
 
         func flush() {
             let text = decodeEntities(buffer)
             if !text.isEmpty {
-                runs.append(HTMLRun(text: text, isBold: boldDepth > 0))
+                runs.append(HTMLRun(text: text, isBold: boldDepth > 0, isItalic: italicDepth > 0))
             }
             buffer = ""
         }
@@ -78,9 +84,13 @@ struct HTMLText: View {
                 if rawTag.hasPrefix("/") {
                     if tagName == "b" || tagName == "strong" {
                         boldDepth = max(0, boldDepth - 1)
+                    } else if tagName == "i" || tagName == "em" {
+                        italicDepth = max(0, italicDepth - 1)
                     }
                 } else if tagName == "b" || tagName == "strong" {
                     boldDepth += 1
+                } else if tagName == "i" || tagName == "em" {
+                    italicDepth += 1
                 } else if tagName == "br" {
                     buffer.append("\n")
                 }
