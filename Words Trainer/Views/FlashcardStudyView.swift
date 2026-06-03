@@ -18,6 +18,7 @@ struct FlashcardStudyView: View {
     @State private var cardChangeDirection: StudyCardChangeDirection = .right
     @State private var isFlipAnimating = false
     @State private var flipGeneration = 0
+    @State private var renderedCardID: UUID?
     @State private var progressHeaderBottom: CGFloat = 0
     @State private var collapsedCardTop: CGFloat = 0
 
@@ -97,6 +98,18 @@ struct FlashcardStudyView: View {
         }
     }
 
+    private var isUsingCurrentCardState: Bool {
+        renderedCardID == nil || renderedCardID == card.id
+    }
+
+    private var isShowingBack: Bool {
+        isUsingCurrentCardState && isFlipped
+    }
+
+    private var isShowingExampleExpanded: Bool {
+        isUsingCurrentCardState && isExampleExpanded
+    }
+
     private var actionButtons: some View {
         ReviewOutcomeControls(
             forgotTitle: "Снова",
@@ -130,7 +143,7 @@ struct FlashcardStudyView: View {
                 )
         }
         .onPreferenceChange(FlashcardCollapsedTopPreferenceKey.self) { top in
-            guard top > 0, !isExampleExpanded else { return }
+            guard top > 0, !isShowingExampleExpanded else { return }
             collapsedCardTop = top
         }
     }
@@ -174,8 +187,8 @@ struct FlashcardStudyView: View {
 
         return ZStack(alignment: .topTrailing) {
             Group {
-                if isFlipped {
-                    if isExampleExpanded {
+                if isShowingBack {
+                    if isShowingExampleExpanded {
                         if expandedCardContentHeight > maxHeight {
                             ScrollView(.vertical, showsIndicators: false) {
                                 expandedCardBody(minHeight: baseHeight)
@@ -195,7 +208,7 @@ struct FlashcardStudyView: View {
                         .frame(height: cardHeight, alignment: .top)
                 }
             }
-            .animation(.spring(response: 0.35, dampingFraction: 0.86), value: isExampleExpanded)
+            .animation(.spring(response: 0.35, dampingFraction: 0.86), value: isShowingExampleExpanded)
 
             if hasWordAudio {
                 Button {
@@ -225,7 +238,7 @@ struct FlashcardStudyView: View {
         )
         .overlay(flashcardShape.strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5))
         .rotation3DEffect(
-            .degrees(cardRotation),
+            .degrees(isUsingCurrentCardState ? cardRotation : 0),
             axis: (x: 0, y: 1, z: 0),
             perspective: Self.flipPerspective
         )
@@ -236,7 +249,7 @@ struct FlashcardStudyView: View {
 
     /// Передняя сторона — холодный сине-фиолетовый, обратная — мягкая сирень (как в Lovable).
     private var cardGradient: LinearGradient {
-        let stops: [Gradient.Stop] = isFlipped
+        let stops: [Gradient.Stop] = isShowingBack
             ? [
                 .init(color: oklch(0.26, 0.05, 300), location: 0),
                 .init(color: oklch(0.19, 0.05, 300), location: 0.6),
@@ -252,16 +265,16 @@ struct FlashcardStudyView: View {
 
     /// Цвет точки-индикатора перед словом: синий спереди, сиреневый на обороте.
     private var wordDotColor: Color {
-        isFlipped ? oklch(0.72, 0.14, 300) : oklch(0.65, 0.2, 245)
+        isShowingBack ? oklch(0.72, 0.14, 300) : oklch(0.65, 0.2, 245)
     }
 
     /// Мягкое цветное свечение в углу карты.
     private var cardGlow: some View {
         Circle()
-            .fill(isFlipped ? oklch(0.65, 0.18, 300, 0.22) : oklch(0.7, 0.18, 245, 0.25))
+            .fill(isShowingBack ? oklch(0.65, 0.18, 300, 0.22) : oklch(0.7, 0.18, 245, 0.25))
             .frame(width: 200, height: 200)
             .blur(radius: 55)
-            .offset(x: isFlipped ? -70 : 80, y: isFlipped ? 90 : -70)
+            .offset(x: isShowingBack ? -70 : 80, y: isShowingBack ? 90 : -70)
     }
 
     private func cardHeightMeasurementViews(baseHeight: CGFloat) -> some View {
@@ -320,7 +333,7 @@ struct FlashcardStudyView: View {
 
     private func resolvedCardHeight(baseHeight: CGFloat, maxHeight: CGFloat) -> CGFloat {
         let sideHeight = max(frontCardContentHeight, backCardContentHeight)
-        let expandedHeight = isExampleExpanded ? measuredExpandedCardHeight(maxHeight: maxHeight) ?? 0 : 0
+        let expandedHeight = isShowingExampleExpanded ? measuredExpandedCardHeight(maxHeight: maxHeight) ?? 0 : 0
         return min(max(baseHeight, sideHeight, expandedHeight), maxHeight)
     }
 
@@ -354,7 +367,7 @@ struct FlashcardStudyView: View {
                     .padding(.horizontal, 18)
                     .padding(.top, layout == .expanded ? 12 : 4)
 
-                if isExampleExpanded {
+                if isShowingExampleExpanded {
                     exampleDetails
                         .padding(.horizontal, 18)
                         .padding(.top, 12)
@@ -448,7 +461,7 @@ struct FlashcardStudyView: View {
                 Text("Подробнее")
                     .font(.subheadline.weight(.semibold))
                 Spacer(minLength: 0)
-                Image(systemName: isExampleExpanded ? "chevron.up" : "chevron.down")
+                Image(systemName: isShowingExampleExpanded ? "chevron.up" : "chevron.down")
                     .font(.caption.weight(.bold))
             }
             .foregroundStyle(FlashcardPalette.primaryText)
@@ -512,6 +525,7 @@ struct FlashcardStudyView: View {
 
     private func flipCard() {
         guard !isFlipAnimating else { return }
+        renderedCardID = card.id
 
         if reduceMotion {
             isFlipped.toggle()
@@ -563,6 +577,7 @@ struct FlashcardStudyView: View {
 
     private func resetForNewCard() {
         flipGeneration += 1
+        renderedCardID = card.id
         isFlipped = false
         isExampleExpanded = false
         frontCardContentHeight = 0

@@ -117,14 +117,14 @@ struct StudyCardChangeTransition: ViewModifier {
 
     private var removalOffset: CGSize {
         direction == .left
-            ? CGSize(width: 6, height: -3)
-            : CGSize(width: -6, height: -3)
+            ? CGSize(width: 8, height: -3)
+            : CGSize(width: -8, height: -3)
     }
 
     private var insertionOffset: CGSize {
         direction == .left
-            ? CGSize(width: -6, height: 3)
-            : CGSize(width: 6, height: 3)
+            ? CGSize(width: -8, height: 3)
+            : CGSize(width: 8, height: 3)
     }
 
     func body(content: Content) -> some View {
@@ -136,7 +136,7 @@ struct StudyCardChangeTransition: ViewModifier {
                     removal: .opacity.combined(with: .offset(x: removalOffset.width, y: removalOffset.height))
                 )
             )
-            .animation(.easeOut(duration: 0.18), value: cardID)
+            .animation(.easeOut(duration: 0.2), value: cardID)
     }
 }
 
