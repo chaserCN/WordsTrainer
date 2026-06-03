@@ -1,5 +1,6 @@
 import FirebaseCore
 import SwiftUI
+import UIKit
 
 @main
 struct Words_TrainerApp: App {
@@ -8,6 +9,7 @@ struct Words_TrainerApp: App {
 
     init() {
         FirebaseApp.configure()
+        UIRefreshControl.appearance().tintColor = UIColor(red: 0.18, green: 0.20, blue: 0.27, alpha: 1)
     }
 
     var body: some Scene {

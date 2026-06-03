@@ -127,7 +127,9 @@ struct TodayView: View {
             TodayHeader(
                 user: selectedUser,
                 streakDays: streakDays,
-                showUserSwitcher: { showUserSwitcher = true }
+                syncStatus: userStore.syncStatus,
+                showUserSwitcher: { showUserSwitcher = true },
+                sync: { _ = Task { await syncNow() } }
             )
         } else if showsNoUserConnectionCard {
             TodayServerConnectionCard(
@@ -490,10 +492,18 @@ struct StatisticsView: View {
 private struct TodayHeader: View {
     let user: AppUser
     let streakDays: Int
+    let syncStatus: AppUserSyncStatus
     let showUserSwitcher: () -> Void
+    let sync: () -> Void
+
+    private var isSyncing: Bool {
+        syncStatus.isSyncing
+    }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 16) {
+        HStack(alignment: .center, spacing: 14) {
+            UserAvatarButton(user: user, streakDays: streakDays, action: showUserSwitcher)
+
             Text("Сегодня")
                 .font(.system(size: 40, weight: .bold))
                 .foregroundStyle(LovableSurface.foreground)
@@ -502,7 +512,24 @@ private struct TodayHeader: View {
 
             Spacer(minLength: 12)
 
-            UserAvatarButton(user: user, streakDays: streakDays, action: showUserSwitcher)
+            Button(action: sync) {
+                ZStack {
+                    if isSyncing {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(LovableSurface.foreground)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(LovableSurface.foreground)
+                    }
+                }
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isSyncing)
+            .accessibilityLabel(isSyncing ? "Синхронизация выполняется" : "Синхронизировать")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
