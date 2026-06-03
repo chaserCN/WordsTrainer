@@ -17,6 +17,7 @@ struct Words_TrainerApp: App {
             AppRootView()
                 .environment(settings)
                 .environment(userStore)
+                .preferredColorScheme(.light)
         }
     }
 }
