@@ -733,17 +733,19 @@ struct ServerSyncClient: Sendable {
                 }
             }
         }
-        if let configURL = Bundle.main.url(forResource: "ServerConfig", withExtension: "plist"),
-           let data = try? Data(contentsOf: configURL),
-           let config = try? PropertyListSerialization.propertyList(
-               from: data,
-               options: [],
-               format: nil
-           ) as? [String: String] {
-            for bundleKey in bundleKeys {
-                if let value = config[bundleKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !value.isEmpty {
-                    return value
+        for resourceName in ["ServerConfig.local", "ServerConfig"] {
+            if let configURL = Bundle.main.url(forResource: resourceName, withExtension: "plist"),
+               let data = try? Data(contentsOf: configURL),
+               let config = try? PropertyListSerialization.propertyList(
+                   from: data,
+                   options: [],
+                   format: nil
+               ) as? [String: String] {
+                for bundleKey in bundleKeys {
+                    if let value = config[bundleKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !value.isEmpty {
+                        return value
+                    }
                 }
             }
         }

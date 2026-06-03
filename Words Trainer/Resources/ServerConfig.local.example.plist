@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>SERVER_BASE_URL</key>
+	<string>https://example.up.railway.app</string>
+	<key>HOUSEHOLD_SYNC_TOKEN</key>
+	<string>replace-with-private-sync-token</string>
+</dict>
+</plist>

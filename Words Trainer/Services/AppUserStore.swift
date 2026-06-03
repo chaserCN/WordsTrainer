@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Observation
 import OSLog
 
 enum AppUserBootstrapState: Equatable {
@@ -36,9 +37,14 @@ final class AppUserStore {
         static let selectedUserID = "app.selectedUserID"
     }
 
+    private enum MediaCacheScope: Hashable, Sendable {
+        case deck(UUID)
+        case userAvatar
+    }
+
     private struct MediaCacheCandidate: Sendable {
         let media: ServerMediaObject
-        let deckID: UUID
+        let scope: MediaCacheScope
         let relativePath: String
     }
 
@@ -85,7 +91,7 @@ final class AppUserStore {
     private var refreshTask: Task<AppUserRefreshResult, Never>?
     private var refreshTaskID: UUID?
 
-    private init(defaults: UserDefaults, syncClient: ServerSyncClient) {
+    init(defaults: UserDefaults, syncClient: ServerSyncClient) {
         self.defaults = defaults
         self.syncClient = syncClient
         if let data = defaults.data(forKey: Keys.users),
@@ -182,6 +188,7 @@ final class AppUserStore {
                 let database = try ContentDatabase(userID: resolvedUserID)
                 try database.importServerBootstrap(bootstrap, selectedUserID: resolvedUserID)
                 let mediaFailureCount = try await cacheMedia(from: bootstrap, database: database)
+                try applyCachedUserAvatarURLs(from: bootstrap)
                 guard isCurrentRefreshTask(taskID) else { return .cancelled }
                 try await uploadPendingEvents(database: database, selectedUserID: resolvedUserID)
                 guard isCurrentRefreshTask(taskID) else { return .cancelled }
@@ -278,28 +285,33 @@ final class AppUserStore {
                 return (versionID, assignment.deckId)
             }
         )
-        var mediaDeckIDs: [UUID: Set<UUID>] = [:]
+        var mediaScopes: [UUID: Set<MediaCacheScope>] = [:]
+        for user in bootstrap.users {
+            if let mediaID = user.avatarMediaId {
+                mediaScopes[mediaID, default: []].insert(.userAvatar)
+            }
+        }
         for assignment in bootstrap.assignments {
             if let mediaID = assignment.avatarMediaId {
-                mediaDeckIDs[mediaID, default: []].insert(assignment.deckId)
+                mediaScopes[mediaID, default: []].insert(.deck(assignment.deckId))
             }
         }
         for card in bootstrap.content.cards {
             guard let deckID = versionDeckIDs[card.deckVersionId] else { continue }
             if let mediaID = card.imageMediaId {
-                mediaDeckIDs[mediaID, default: []].insert(deckID)
+                mediaScopes[mediaID, default: []].insert(.deck(deckID))
             }
             if let mediaID = card.audioWordMediaId {
-                mediaDeckIDs[mediaID, default: []].insert(deckID)
+                mediaScopes[mediaID, default: []].insert(.deck(deckID))
             }
         }
         for example in bootstrap.content.examples {
             guard let deckID = versionDeckIDs[example.deckVersionId] else { continue }
             if let mediaID = example.imageMediaId {
-                mediaDeckIDs[mediaID, default: []].insert(deckID)
+                mediaScopes[mediaID, default: []].insert(.deck(deckID))
             }
             if let mediaID = example.audioExampleMediaId {
-                mediaDeckIDs[mediaID, default: []].insert(deckID)
+                mediaScopes[mediaID, default: []].insert(.deck(deckID))
             }
         }
 
@@ -308,11 +320,11 @@ final class AppUserStore {
         )
         var failureCount = 0
         var downloadCandidates: [MediaCacheCandidate] = []
-        for (mediaID, deckIDs) in mediaDeckIDs {
+        for (mediaID, scopes) in mediaScopes {
             guard let media = mediaObjects[mediaID] else { continue }
-            for deckID in deckIDs {
+            for scope in scopes {
                 do {
-                    if let candidate = try prepareMediaCacheObject(media, deckID: deckID, database: database) {
+                    if let candidate = try prepareMediaCacheObject(media, scope: scope, database: database) {
                         downloadCandidates.append(candidate)
                     }
                 } catch ServerSyncError.cancelled {
@@ -322,7 +334,7 @@ final class AppUserStore {
                 } catch {
                     failureCount += 1
                     Self.logger.error(
-                        "cacheMediaObject failed mediaID=\(media.id.uuidString, privacy: .public) deckID=\(deckID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                        "cacheMediaObject failed mediaID=\(media.id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
                     )
                 }
             }
@@ -341,7 +353,7 @@ final class AppUserStore {
                 } catch {
                     failureCount += 1
                     Self.logger.error(
-                        "storeDownloadedMedia failed mediaID=\(result.candidate.media.id.uuidString, privacy: .public) deckID=\(result.candidate.deckID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                        "storeDownloadedMedia failed mediaID=\(result.candidate.media.id.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
                     )
                 }
             case .failure(_, .cancelled):
@@ -349,7 +361,7 @@ final class AppUserStore {
             case .failure(let candidate, .failed(let message)):
                 failureCount += 1
                 Self.logger.error(
-                    "downloadMedia failed mediaID=\(candidate.media.id.uuidString, privacy: .public) deckID=\(candidate.deckID.uuidString, privacy: .public): \(message, privacy: .public)"
+                    "downloadMedia failed mediaID=\(candidate.media.id.uuidString, privacy: .public): \(message, privacy: .public)"
                 )
             }
         }
@@ -358,26 +370,26 @@ final class AppUserStore {
 
     private func prepareMediaCacheObject(
         _ media: ServerMediaObject,
-        deckID: UUID,
+        scope: MediaCacheScope,
         database: ContentDatabase
     ) throws -> MediaCacheCandidate? {
         let relativePath = "media/\(media.id.uuidString.lowercased()).\(fileExtension(for: media))"
-        if let existingURL = try AppDataPaths.mediaFileURL(deckID: deckID, relativePath: relativePath) {
+        if let existingURL = try existingMediaFileURL(scope: scope, relativePath: relativePath) {
             if media.sha256 == nil {
                 let fileSize = try? existingURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
                 if media.byteSize == nil || fileSize == media.byteSize {
-                    try database.updateMediaLocalPath(mediaID: media.id, localPath: relativePath)
+                    try updateDeckMediaLocalPathIfNeeded(mediaID: media.id, scope: scope, localPath: relativePath, database: database)
                     return nil
                 }
             }
             let existingData = try Data(contentsOf: existingURL)
             if Self.sha256Hex(for: existingData) == media.sha256 {
-                try database.updateMediaLocalPath(mediaID: media.id, localPath: relativePath)
+                try updateDeckMediaLocalPathIfNeeded(mediaID: media.id, scope: scope, localPath: relativePath, database: database)
                 return nil
             }
         }
 
-        return MediaCacheCandidate(media: media, deckID: deckID, relativePath: relativePath)
+        return MediaCacheCandidate(media: media, scope: scope, relativePath: relativePath)
     }
 
     private func downloadMediaObjects(_ candidates: [MediaCacheCandidate]) async -> [MediaDownloadOutcome] {
@@ -435,18 +447,68 @@ final class AppUserStore {
     private func storeDownloadedMedia(_ result: MediaDownloadResult, database: ContentDatabase) throws {
         let candidate = result.candidate
         let media = candidate.media
-        let deckID = candidate.deckID
         let relativePath = candidate.relativePath
         let data = result.data
         if let expectedHash = media.sha256, Self.sha256Hex(for: data) != expectedHash {
             throw ServerSyncError.invalidResponse
         }
-        let deckURL = try AppDataPaths.deckFolderURL(deckID: deckID)
-        let mediaDirectory = deckURL.appendingPathComponent(AppDataPaths.deckMediaFolderName, isDirectory: true)
+        let rootURL = try mediaRootURL(scope: candidate.scope)
+        let mediaDirectory = rootURL.appendingPathComponent(AppDataPaths.deckMediaFolderName, isDirectory: true)
         try FileManager.default.createDirectory(at: mediaDirectory, withIntermediateDirectories: true)
-        let fileURL = deckURL.appendingPathComponent(relativePath)
+        let fileURL = rootURL.appendingPathComponent(relativePath)
         try data.write(to: fileURL, options: .atomic)
-        try database.updateMediaLocalPath(mediaID: media.id, localPath: relativePath)
+        try updateDeckMediaLocalPathIfNeeded(
+            mediaID: media.id,
+            scope: candidate.scope,
+            localPath: relativePath,
+            database: database
+        )
+    }
+
+    private func applyCachedUserAvatarURLs(from bootstrap: ServerBootstrap) throws {
+        let mediaObjects = Dictionary(
+            uniqueKeysWithValues: bootstrap.media.map { ($0.id, $0) }
+        )
+        users = try users.map { user in
+            var updated = user
+            guard let mediaID = user.avatarMediaID,
+                  let media = mediaObjects[mediaID] else {
+                updated.avatarImageURL = nil
+                return updated
+            }
+            let relativePath = "media/\(media.id.uuidString.lowercased()).\(fileExtension(for: media))"
+            updated.avatarImageURL = try AppDataPaths.appMediaFileURL(relativePath: relativePath)
+            return updated
+        }
+    }
+
+    private func existingMediaFileURL(scope: MediaCacheScope, relativePath: String) throws -> URL? {
+        switch scope {
+        case .deck(let deckID):
+            try AppDataPaths.mediaFileURL(deckID: deckID, relativePath: relativePath)
+        case .userAvatar:
+            try AppDataPaths.appMediaFileURL(relativePath: relativePath)
+        }
+    }
+
+    private func mediaRootURL(scope: MediaCacheScope) throws -> URL {
+        switch scope {
+        case .deck(let deckID):
+            try AppDataPaths.deckFolderURL(deckID: deckID)
+        case .userAvatar:
+            try AppDataPaths.appMediaRootURL()
+        }
+    }
+
+    private func updateDeckMediaLocalPathIfNeeded(
+        mediaID: UUID,
+        scope: MediaCacheScope,
+        localPath: String,
+        database: ContentDatabase
+    ) throws {
+        if case .deck = scope {
+            try database.updateMediaLocalPath(mediaID: mediaID, localPath: localPath)
+        }
     }
 
     private func fileExtension(for media: ServerMediaObject) -> String {

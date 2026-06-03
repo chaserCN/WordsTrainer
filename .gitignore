@@ -1,3 +1,4 @@
 .build/
 .swiftpm/
 *.xcodeproj/xcuserdata/
+Words Trainer/Resources/ServerConfig.local.plist

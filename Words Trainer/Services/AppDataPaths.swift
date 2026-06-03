@@ -5,6 +5,7 @@ import Foundation
 /// ```
 /// Documents/Data/
 ///   flashgame.db
+///   media/
 ///   <deck-uuid>/
 ///     media/
 /// ```
@@ -36,6 +37,10 @@ enum AppDataPaths {
 
     static func deckFolderURL(deckID: UUID) throws -> URL {
         try dataDirectoryURL().appendingPathComponent(deckID.databaseString, isDirectory: true)
+    }
+
+    static func appMediaRootURL() throws -> URL {
+        try dataDirectoryURL()
     }
 
     /// Renames deck media folders whose names used uppercase UUIDs.
@@ -73,6 +78,14 @@ enum AppDataPaths {
         guard !trimmed.isEmpty else { return nil }
         let deckRoot = try deckFolderURL(deckID: deckID)
         let url = deckRoot.appendingPathComponent(trimmed)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    static func appMediaFileURL(relativePath: String) throws -> URL? {
+        let trimmed = relativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let root = try appMediaRootURL()
+        let url = root.appendingPathComponent(trimmed)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 }

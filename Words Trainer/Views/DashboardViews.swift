@@ -795,14 +795,14 @@ private struct StreakBadge: View {
     var body: some View {
         HStack(spacing: 3) {
             Image(systemName: "flame.fill")
-                .font(.system(size: 11, weight: .black))
+                .font(.system(size: 9, weight: .black))
             Text("\(days)")
-                .font(.system(size: 16, weight: .bold))
+                .font(.system(size: 14, weight: .bold))
                 .monospacedDigit()
         }
         .foregroundStyle(.white)
-        .padding(.horizontal, 9)
-        .frame(height: 25)
+        .padding(.horizontal, 7)
+        .frame(height: 21)
         .background(
             LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing),
             in: Capsule()
@@ -850,9 +850,12 @@ private struct UserSwitcherSheet: View {
                                             .foregroundStyle(LovableSurface.primary)
                                     }
                                 }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.vertical, 4)
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityHint("Выбрать пользователя")
                         }
                     }
                 }
