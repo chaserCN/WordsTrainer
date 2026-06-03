@@ -53,11 +53,19 @@ final class WordAudioPlayer {
         configureAudioSession()
         do {
             let player = try AVAudioPlayer(contentsOf: url)
+            player.volume = outputVolume
             effectPlayer = player
             player.play()
         } catch {
             // Best-effort: a missing/broken effect should not disrupt the round.
         }
+    }
+
+    func applyVolume(_ volume: Double) {
+        let value = Float(min(max(volume, 0), 1))
+        playerNode.volume = value
+        engine.mainMixerNode.outputVolume = value
+        effectPlayer?.volume = value
     }
 
     func stop() {
@@ -79,6 +87,7 @@ final class WordAudioPlayer {
 
         timePitch.pitch = pitchCents
         timePitch.rate = 1
+        applyVolume(AppSettings.shared.soundVolume)
 
         let format = file.processingFormat
         engine.attach(playerNode)
@@ -105,6 +114,7 @@ final class WordAudioPlayer {
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         utterance.pitchMultiplier = pitchMultiplier
+        utterance.volume = outputVolume
         speechSynthesizer.speak(utterance)
     }
 
@@ -116,6 +126,7 @@ final class WordAudioPlayer {
         let utterance = AVSpeechUtterance(string: sentence)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        utterance.volume = outputVolume
         speechSynthesizer.speak(utterance)
     }
 
@@ -131,5 +142,9 @@ final class WordAudioPlayer {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .default, options: [.duckOthers])
         try? session.setActive(true)
+    }
+
+    private var outputVolume: Float {
+        Float(min(max(AppSettings.shared.soundVolume, 0), 1))
     }
 }

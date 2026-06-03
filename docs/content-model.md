@@ -4,8 +4,8 @@ This document fixes the current learning-content model used by the iOS app and
 the local SQLite database `flashgame.db`.
 
 The app is early-stage, so the schema is allowed to be replaced instead of
-migrated. A stale simulator database must be overwritten with a freshly built
-`test_data/Data/flashgame.db`.
+migrated. The main source of truth is server sync; local generated SQLite test
+data, when needed, is written under `.generated/test_data/Data/`.
 
 ## Storage layout
 

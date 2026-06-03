@@ -73,6 +73,7 @@ struct TodayView: View {
             .refreshable {
                 await syncNow()
             }
+            .tint(LovableSurface.foreground)
             .background { LovableBackground(variant: .today) }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showTodayModes) { todayModesDestination }
