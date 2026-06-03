@@ -445,7 +445,7 @@ struct FlashcardStudyView: View {
             HStack(spacing: 8) {
                 Image(systemName: "text.quote")
                     .font(.subheadline.weight(.semibold))
-                Text("Пример")
+                Text("Подробнее")
                     .font(.subheadline.weight(.semibold))
                 Spacer(minLength: 0)
                 Image(systemName: isExampleExpanded ? "chevron.up" : "chevron.down")
@@ -468,9 +468,7 @@ struct FlashcardStudyView: View {
 
     private var exampleDetails: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(card.clozeExamplePlainText)
-                .font(.body)
-                .foregroundStyle(FlashcardPalette.secondaryText)
+            Text(exampleSentence(font: .body, color: FlashcardPalette.secondaryText))
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if let translation = card.clozeExampleTranslation?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -493,15 +491,19 @@ struct FlashcardStudyView: View {
     }
 
     private var frontExample: AttributedString {
+        exampleSentence(font: .title3.weight(.medium), color: FlashcardPalette.primaryText)
+    }
+
+    private func exampleSentence(font: Font, color: Color) -> AttributedString {
         let example = card.clozeExamplePlainText
         var attributed = AttributedString(example)
-        attributed.font = .title3.weight(.medium)
-        attributed.foregroundColor = FlashcardPalette.primaryText
+        attributed.font = font
+        attributed.foregroundColor = color
 
         let answer = card.effectiveClozeAnswer
         if let stringRange = example.range(of: answer, options: [.caseInsensitive, .diacriticInsensitive]),
            let range = Range(stringRange, in: attributed) {
-            attributed[range].font = .title3.weight(.bold)
+            attributed[range].font = font.weight(.bold)
         }
         return attributed
     }
