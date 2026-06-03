@@ -86,6 +86,13 @@ struct StudyProgressHeader: View {
     let totalCount: Int
     let remainingCount: Int
 
+    @State private var countDisplayMode: CountDisplayMode = .remaining
+
+    private enum CountDisplayMode {
+        case position
+        case remaining
+    }
+
     private var completedCount: Int {
         max(0, totalCount - remainingCount)
     }
@@ -95,13 +102,30 @@ struct StudyProgressHeader: View {
         return min(completedCount + 1, totalCount)
     }
 
+    private var countText: String {
+        switch countDisplayMode {
+        case .position:
+            return "\(currentIndex) / \(totalCount)"
+        case .remaining:
+            return "\(remainingCount)"
+        }
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             StudySessionProgressBar(completed: completedCount, total: totalCount)
-            Text("\(currentIndex) / \(totalCount)")
+            Button {
+                countDisplayMode = countDisplayMode == .position ? .remaining : .position
+            } label: {
+                Text(countText)
+                    .lineLimit(1)
+                    .contentTransition(.numericText())
+            }
+            .buttonStyle(.plain)
                 .font(.system(size: 13, weight: .semibold))
                 .monospacedDigit()
                 .foregroundStyle(oklch(0.55, 0.03, 260))
+                .animation(.easeOut(duration: 0.18), value: countDisplayMode)
         }
     }
 }

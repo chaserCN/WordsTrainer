@@ -254,12 +254,6 @@ struct LovableDeckCard: View {
                         .truncationMode(.tail)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-
-                if showsChevron {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.4))
-                }
             }
 
             if let footnote {
@@ -274,7 +268,16 @@ struct LovableDeckCard: View {
             }
         }
         .padding(16)
+        .padding(.trailing, showsChevron ? 24 : 0)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .trailing) {
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .padding(.trailing, 16)
+            }
+        }
         .lovablePanel(cornerRadius: 24)
     }
 }
@@ -379,7 +382,17 @@ struct DeckDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                LovableDeckCard(deck: deck, showsChevron: false, footnote: deckFootnote)
+                NavigationLink {
+                    WordListView(
+                        title: "Слова",
+                        cards: deck.activeCards,
+                        emptyMessage: "В этой колоде пока нет активных карточек.",
+                        backgroundVariant: .decks
+                    )
+                } label: {
+                    LovableDeckCard(deck: deck, showsChevron: true, footnote: deckFootnote)
+                }
+                .buttonStyle(.plain)
 
                 StudySection(
                     title: "Упражнения",
@@ -539,6 +552,150 @@ struct DeckDetailView: View {
             stats = (try? store.stats(for: deck)) ?? .zero
         } catch {
             statusError = error.localizedDescription
+        }
+    }
+}
+
+struct WordListView: View {
+    let title: String
+    let emptyMessage: String
+    let backgroundVariant: LovableBackgroundVariant
+    private let sortedCards: [WordCardContent]
+
+    init(
+        title: String,
+        cards: [WordCardContent],
+        emptyMessage: String,
+        backgroundVariant: LovableBackgroundVariant
+    ) {
+        self.title = title
+        self.emptyMessage = emptyMessage
+        self.backgroundVariant = backgroundVariant
+        self.sortedCards = cards.sorted { lhs, rhs in
+            let lemmaOrder = lhs.lemma.localizedCaseInsensitiveCompare(rhs.lemma)
+            if lemmaOrder != .orderedSame {
+                return lemmaOrder == .orderedAscending
+            }
+
+            let wordOrder = lhs.word.localizedCaseInsensitiveCompare(rhs.word)
+            if wordOrder != .orderedSame {
+                return wordOrder == .orderedAscending
+            }
+
+            return lhs.translation.localizedCaseInsensitiveCompare(rhs.translation) == .orderedAscending
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if sortedCards.isEmpty {
+                    DataPlaceholderView(
+                        title: "Нет слов",
+                        systemImage: "text.book.closed",
+                        message: emptyMessage
+                    )
+                    .frame(minHeight: 360)
+                } else {
+                    ForEach(Array(sortedCards.enumerated()), id: \.element.id) { index, card in
+                        DeckWordRow(
+                            card: card,
+                            position: rowPosition(index: index, count: sortedCards.count)
+                        )
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 32)
+        }
+        .background { LovableBackground(variant: backgroundVariant) }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarColorScheme(.light, for: .navigationBar)
+        .tint(LovableSurface.foreground)
+    }
+
+    private func rowPosition(index: Int, count: Int) -> DeckWordRow.Position {
+        if count == 1 { return .single }
+        if index == 0 { return .top }
+        if index == count - 1 { return .bottom }
+        return .middle
+    }
+}
+
+private struct DeckWordRow: View {
+    enum Position: Equatable {
+        case single
+        case top
+        case middle
+        case bottom
+
+        var hasSeparator: Bool {
+            self == .top || self == .middle
+        }
+
+        var cornerRadii: RectangleCornerRadii {
+            let radius: CGFloat = 18
+            switch self {
+            case .single:
+                return RectangleCornerRadii(
+                    topLeading: radius,
+                    bottomLeading: radius,
+                    bottomTrailing: radius,
+                    topTrailing: radius
+                )
+            case .top:
+                return RectangleCornerRadii(topLeading: radius, topTrailing: radius)
+            case .middle:
+                return RectangleCornerRadii()
+            case .bottom:
+                return RectangleCornerRadii(bottomLeading: radius, bottomTrailing: radius)
+            }
+        }
+    }
+
+    let card: WordCardContent
+    let position: Position
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(card.word)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+
+            Text(card.translation)
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(.white.opacity(0.62))
+                .lineLimit(3)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [
+                    oklch(0.25, 0.04, 265),
+                    oklch(0.18, 0.04, 270)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: UnevenRoundedRectangle(cornerRadii: position.cornerRadii, style: .continuous)
+        )
+        .overlay {
+            UnevenRoundedRectangle(cornerRadii: position.cornerRadii, style: .continuous)
+                .stroke(.white.opacity(0.05), lineWidth: 0.5)
+        }
+        .overlay(alignment: .bottom) {
+            if position.hasSeparator {
+                Rectangle()
+                    .fill(.white.opacity(0.07))
+                    .frame(height: 0.5)
+                    .padding(.leading, 16)
+            }
         }
     }
 }

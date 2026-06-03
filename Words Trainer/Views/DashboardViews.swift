@@ -496,6 +496,36 @@ struct StatisticsView: View {
     }
 }
 
+private struct StatisticsPanel: ViewModifier {
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                LinearGradient(
+                    colors: [
+                        oklch(0.25, 0.04, 265),
+                        oklch(0.18, 0.04, 270)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(.white.opacity(0.05), lineWidth: 0.5)
+            }
+            .shadow(color: oklch(0.1, 0.04, 265, 0.14), radius: 8, x: 0, y: 4)
+    }
+}
+
+private extension View {
+    func statisticsPanel(cornerRadius: CGFloat = 24) -> some View {
+        modifier(StatisticsPanel(cornerRadius: cornerRadius))
+    }
+}
+
 private struct TodayHeader: View {
     let user: AppUser
     let streakDays: Int
@@ -968,23 +998,50 @@ private struct TodayStudyModesView: View {
     var laterCount: Int = 0
     var practiceCount: Int = 0
     var deck: DeckContent? = nil
+    var wordListCards: [WordCardContent] = []
     let start: (StudyMode) -> Void
 
     private var canStart: Bool {
         queueCount > 0 || practiceCount > 0
     }
 
+    private var canShowWordList: Bool {
+        !wordListCards.isEmpty
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                QueueSummaryCard(
-                    queueCount: queueCount,
-                    newCount: newCount,
-                    dueCount: dueCount,
-                    laterCount: laterCount,
-                    practiceCount: practiceCount,
-                    deck: deck
-                )
+                if canShowWordList {
+                    NavigationLink {
+                        WordListView(
+                            title: "Слова",
+                            cards: wordListCards,
+                            emptyMessage: "На сегодня пока нет слов.",
+                            backgroundVariant: .today
+                        )
+                    } label: {
+                        QueueSummaryCard(
+                            queueCount: queueCount,
+                            newCount: newCount,
+                            dueCount: dueCount,
+                            laterCount: laterCount,
+                            practiceCount: practiceCount,
+                            deck: deck,
+                            showsChevron: true
+                        )
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    QueueSummaryCard(
+                        queueCount: queueCount,
+                        newCount: newCount,
+                        dueCount: dueCount,
+                        laterCount: laterCount,
+                        practiceCount: practiceCount,
+                        deck: deck
+                    )
+                }
 
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Упражнения")
@@ -1059,6 +1116,7 @@ private struct TodayAllDecksModesView: View {
     @State private var sessionDeckTitle = ""
     @State private var showStudy = false
     @State private var practiceCount = 0
+    @State private var wordListCards: [WordCardContent] = []
     @State private var loadError: String?
 
     var body: some View {
@@ -1068,6 +1126,7 @@ private struct TodayAllDecksModesView: View {
             dueCount: dueCount,
             laterCount: laterCount,
             practiceCount: practiceCount,
+            wordListCards: wordListCards,
             start: start
         )
         .navigationDestination(isPresented: $showStudy) {
@@ -1120,6 +1179,7 @@ private struct TodayAllDecksModesView: View {
 
     private func reloadPracticeCount() async {
         practiceCount = (try? store.todayPracticeCardCount()) ?? 0
+        wordListCards = (try? store.todayStudyCards()) ?? []
     }
 }
 
@@ -1131,6 +1191,7 @@ private struct TodayDeckModesView: View {
 
     @State private var stats: DeckStats = .zero
     @State private var practiceCount = 0
+    @State private var wordListCards: [WordCardContent] = []
     @State private var session: StudySession?
     @State private var showStudy = false
 
@@ -1142,6 +1203,7 @@ private struct TodayDeckModesView: View {
             laterCount: stats.dueLaterToday,
             practiceCount: practiceCount,
             deck: deck,
+            wordListCards: wordListCards,
             start: start
         )
         .navigationDestination(isPresented: $showStudy) {
@@ -1159,6 +1221,7 @@ private struct TodayDeckModesView: View {
     private func reload() async {
         stats = (try? store.stats(for: deck)) ?? .zero
         practiceCount = (try? store.todayPracticeCardCount(deck: deck)) ?? 0
+        wordListCards = (try? store.todayStudyCards(deck: deck)) ?? []
     }
 
     private func start(_ mode: StudyMode) {
@@ -1178,6 +1241,7 @@ private struct QueueSummaryCard: View {
     let laterCount: Int
     var practiceCount: Int = 0
     var deck: DeckContent? = nil
+    var showsChevron: Bool = false
 
     private var todayDayNumber: String {
         "\(Calendar.current.component(.day, from: .now))"
@@ -1251,6 +1315,15 @@ private struct QueueSummaryCard: View {
             }
         }
         .padding(16)
+        .padding(.trailing, showsChevron ? 24 : 0)
+        .overlay(alignment: .trailing) {
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .padding(.trailing, 16)
+            }
+        }
         .lovablePanel(cornerRadius: 24)
     }
 
@@ -1326,7 +1399,7 @@ private struct DashboardMetric: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .lovablePanel(cornerRadius: 20)
+        .statisticsPanel(cornerRadius: 20)
     }
 }
 
@@ -1370,7 +1443,7 @@ private struct ActivityHeatmap: View {
             }
         }
         .padding(18)
-        .lovablePanel(cornerRadius: 24)
+        .statisticsPanel(cornerRadius: 24)
     }
 
 }
@@ -1419,7 +1492,6 @@ private struct ActivityMonthView: View, Equatable {
             }
         }
         .frame(width: 162, alignment: .leading)
-        .drawingGroup()
     }
 
     private func color(for count: Int) -> Color {
@@ -1718,7 +1790,7 @@ private struct ForecastSection: View {
                 }
             }
             .padding(16)
-            .lovablePanel(cornerRadius: 24)
+            .statisticsPanel(cornerRadius: 24)
         }
     }
 }
@@ -1761,28 +1833,100 @@ private struct WeakCardsSection: View {
                     .foregroundStyle(.white.opacity(0.6))
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .lovablePanel(cornerRadius: 20)
+                    .statisticsPanel(cornerRadius: 20)
             } else {
-                VStack(spacing: 10) {
-                    ForEach(cards) { card in
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(card.word)
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(oklch(0.99, 0.01, 240))
-                                    .lineLimit(1)
-                                Text(card.translation)
-                                    .font(.system(size: 13, weight: .regular))
-                                    .foregroundStyle(oklch(0.82, 0.03, 250, 0.65))
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 8)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .lovablePanel(cornerRadius: 20)
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(cards.enumerated()), id: \.element.id) { index, card in
+                        WeakCardStatRow(
+                            card: card,
+                            position: rowPosition(index: index, count: cards.count)
+                        )
                     }
                 }
+            }
+        }
+    }
+
+    private func rowPosition(index: Int, count: Int) -> WeakCardStatRow.Position {
+        if count == 1 { return .single }
+        if index == 0 { return .top }
+        if index == count - 1 { return .bottom }
+        return .middle
+    }
+}
+
+private struct WeakCardStatRow: View {
+    enum Position: Equatable {
+        case single
+        case top
+        case middle
+        case bottom
+
+        var hasSeparator: Bool {
+            self == .top || self == .middle
+        }
+
+        var cornerRadii: RectangleCornerRadii {
+            let radius: CGFloat = 20
+            switch self {
+            case .single:
+                return RectangleCornerRadii(
+                    topLeading: radius,
+                    bottomLeading: radius,
+                    bottomTrailing: radius,
+                    topTrailing: radius
+                )
+            case .top:
+                return RectangleCornerRadii(topLeading: radius, topTrailing: radius)
+            case .middle:
+                return RectangleCornerRadii()
+            case .bottom:
+                return RectangleCornerRadii(bottomLeading: radius, bottomTrailing: radius)
+            }
+        }
+    }
+
+    let card: WeakCardStat
+    let position: Position
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(card.word)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(oklch(0.99, 0.01, 240))
+                    .lineLimit(1)
+                Text(card.translation)
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(oklch(0.82, 0.03, 250, 0.65))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [
+                    oklch(0.25, 0.04, 265),
+                    oklch(0.18, 0.04, 270)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: UnevenRoundedRectangle(cornerRadii: position.cornerRadii, style: .continuous)
+        )
+        .overlay {
+            UnevenRoundedRectangle(cornerRadii: position.cornerRadii, style: .continuous)
+                .stroke(.white.opacity(0.05), lineWidth: 0.5)
+        }
+        .overlay(alignment: .bottom) {
+            if position.hasSeparator {
+                Rectangle()
+                    .fill(.white.opacity(0.07))
+                    .frame(height: 0.5)
+                    .padding(.leading, 16)
             }
         }
     }

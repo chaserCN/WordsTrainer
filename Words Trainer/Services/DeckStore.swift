@@ -159,6 +159,27 @@ final class DeckStore {
         )
     }
 
+    func todayStudyCards() throws -> [WordCardContent] {
+        if let session = try startTodaySession(mode: .flashcards) {
+            return uniqueCards(session.queue.map(\.card))
+        }
+        if let session = try startTodayPracticeSession(mode: .flashcards) {
+            return uniqueCards(session.queue.map(\.card))
+        }
+        return []
+    }
+
+    func todayStudyCards(deck: DeckContent) throws -> [WordCardContent] {
+        let todaySession = try startTodaySession(deck: deck, mode: .flashcards)
+        if !todaySession.queue.isEmpty {
+            return uniqueCards(todaySession.queue.map(\.card))
+        }
+        if let practiceSession = try startTodayPracticeSession(deck: deck, mode: .flashcards) {
+            return uniqueCards(practiceSession.queue.map(\.card))
+        }
+        return []
+    }
+
     func todayPracticeCardCount() throws -> Int {
         try TodayStudySessionBuilder.todayPracticeCardCount(snapshots: todaySnapshots())
     }
@@ -420,6 +441,13 @@ final class DeckStore {
             dailyUsage: database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey()),
             reviewedCardIDs: database.reviewedCardIDs(deckID: deck.id)
         )
+    }
+
+    private func uniqueCards(_ cards: [WordCardContent]) -> [WordCardContent] {
+        var seen: Set<UUID> = []
+        return cards.filter { card in
+            seen.insert(card.id).inserted
+        }
     }
 }
 
