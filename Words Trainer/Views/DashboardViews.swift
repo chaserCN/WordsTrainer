@@ -390,7 +390,7 @@ struct StatisticsView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 24) {
                     StatisticsHeader()
 
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
@@ -1470,28 +1470,18 @@ private struct ActivityHeatmap: View {
             }
             .foregroundStyle(.white)
 
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal) {
-                    HStack(alignment: .top, spacing: 18) {
-                        ForEach(months) { month in
-                            ActivityMonthView(month: month, maxCount: maxCount)
-                                .equatable()
-                        }
-                        Color.clear
-                            .frame(width: 1, height: 1)
-                            .id("activity-latest")
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 18) {
+                    ForEach(months) { month in
+                        ActivityMonthView(month: month, maxCount: maxCount)
+                            .equatable()
                     }
-                    .padding(.vertical, 2)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                .scrollIndicators(.hidden)
-                .onAppear {
-                    proxy.scrollTo("activity-latest", anchor: .trailing)
-                }
-                .onChange(of: months) {
-                    proxy.scrollTo("activity-latest", anchor: .trailing)
-                }
+                .padding(.vertical, 2)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
+            .defaultScrollAnchor(.trailing)
+            .scrollIndicators(.hidden)
         }
         .padding(18)
         .statisticsPanel(cornerRadius: 24)
@@ -1503,7 +1493,11 @@ private struct ActivityMonthView: View, Equatable {
     let month: ActivityMonth
     let maxCount: Int
 
-    private let columns = Array(repeating: GridItem(.fixed(18), spacing: 6), count: 7)
+    private var cellRows: [[ActivityCalendarCell]] {
+        stride(from: 0, to: month.cells.count, by: 7).map { start in
+            Array(month.cells[start..<min(start + 7, month.cells.count)])
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -1511,33 +1505,39 @@ private struct ActivityMonthView: View, Equatable {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.white.opacity(0.72))
 
-            LazyVGrid(columns: columns, spacing: 7) {
-                ForEach(Array(month.weekdays.enumerated()), id: \.offset) { _, weekday in
-                    Text(weekday)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.34))
-                        .frame(width: 18, height: 10)
+            Grid(horizontalSpacing: 6, verticalSpacing: 7) {
+                GridRow {
+                    ForEach(Array(month.weekdays.enumerated()), id: \.offset) { _, weekday in
+                        Text(weekday)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.34))
+                            .frame(width: 18, height: 10)
+                    }
                 }
 
-                ForEach(month.cells) { cell in
-                    if let day = cell.day {
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(day.isToday ? oklch(0.78, 0.2, 235) : color(for: day.reviewedCount))
-                            .frame(width: 15, height: 15)
-                            .frame(width: 18, height: 18)
-                            .overlay {
-                                if day.isToday {
-                                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                        .stroke(.white.opacity(0.9), lineWidth: 1.5)
-                                        .frame(width: 15, height: 15)
-                                        .shadow(color: oklch(0.7, 0.18, 235, 0.6), radius: 5)
-                                }
+                ForEach(Array(cellRows.enumerated()), id: \.offset) { _, row in
+                    GridRow {
+                        ForEach(row) { cell in
+                            if let day = cell.day {
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .fill(day.isToday ? ActivityHeatmapPalette.today : color(for: day.reviewedCount))
+                                    .frame(width: 15, height: 15)
+                                    .frame(width: 18, height: 18)
+                                    .overlay {
+                                        if day.isToday {
+                                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                                .stroke(.white.opacity(0.9), lineWidth: 1.5)
+                                                .frame(width: 15, height: 15)
+                                                .shadow(color: ActivityHeatmapPalette.todayGlow, radius: 5)
+                                        }
+                                    }
+                                    .accessibilityLabel("\(day.dayKey): \(day.reviewedCount) карточек")
+                            } else {
+                                Color.clear
+                                    .frame(width: 18, height: 18)
+                                    .accessibilityHidden(true)
                             }
-                            .accessibilityLabel("\(day.dayKey): \(day.reviewedCount) карточек")
-                    } else {
-                        Color.clear
-                            .frame(width: 18, height: 18)
-                            .accessibilityHidden(true)
+                        }
                     }
                 }
             }
@@ -1546,15 +1546,25 @@ private struct ActivityMonthView: View, Equatable {
     }
 
     private func color(for count: Int) -> Color {
-        guard count > 0 else { return oklch(0.32, 0.02, 265, 0.5) }
+        guard count > 0 else { return ActivityHeatmapPalette.empty }
         let ratio = Double(count) / Double(maxCount)
         switch ratio {
-        case ..<0.25: return oklch(0.55, 0.1, 235, 0.55)
-        case ..<0.5: return oklch(0.65, 0.15, 235, 0.75)
-        case ..<0.75: return oklch(0.72, 0.18, 235, 0.9)
-        default: return oklch(0.8, 0.2, 235)
+        case ..<0.25: return ActivityHeatmapPalette.low
+        case ..<0.5: return ActivityHeatmapPalette.medium
+        case ..<0.75: return ActivityHeatmapPalette.high
+        default: return ActivityHeatmapPalette.peak
         }
     }
+}
+
+private enum ActivityHeatmapPalette {
+    static let empty = oklch(0.32, 0.02, 265, 0.5)
+    static let low = oklch(0.55, 0.1, 235, 0.55)
+    static let medium = oklch(0.65, 0.15, 235, 0.75)
+    static let high = oklch(0.72, 0.18, 235, 0.9)
+    static let peak = oklch(0.8, 0.2, 235)
+    static let today = oklch(0.78, 0.2, 235)
+    static let todayGlow = oklch(0.7, 0.18, 235, 0.6)
 }
 
 private struct ActivityMonth: Identifiable, Hashable {
@@ -1617,6 +1627,12 @@ private enum ActivityCalendarBuilder {
                 isToday: key == todayKey
             )
             cells.append(ActivityCalendarCell(id: key, day: day))
+        }
+        let trailingSlots = (7 - cells.count % 7) % 7
+        if trailingSlots > 0 {
+            cells.append(contentsOf: (0..<trailingSlots).map {
+                ActivityCalendarCell(id: "\(monthKey)-trailing-\($0)", day: nil)
+            })
         }
 
         return ActivityMonth(
