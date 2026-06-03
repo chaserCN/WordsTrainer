@@ -504,7 +504,7 @@ private struct TodayHeader: View {
         HStack(alignment: .center, spacing: 14) {
             UserAvatarButton(user: user, streakDays: streakDays, action: showUserSwitcher)
 
-            Text("Сегодня")
+            Text(user.displayName)
                 .font(.system(size: 40, weight: .bold))
                 .foregroundStyle(LovableSurface.foreground)
                 .lineLimit(1)
@@ -525,10 +525,17 @@ private struct TodayHeader: View {
                     }
                 }
                 .frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(0.58), lineWidth: 0.8)
+                }
+                .shadow(color: oklch(0.18, 0.05, 260, 0.12), radius: 12, x: 0, y: 6)
                 .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .disabled(isSyncing)
+            .opacity(isSyncing ? 0.72 : 1)
             .accessibilityLabel(isSyncing ? "Синхронизация выполняется" : "Синхронизировать")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -910,18 +917,14 @@ private struct StudyTodayCard: View {
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.white.opacity(0.72))
                 }
-                Spacer()
-                Image(systemName: "play.fill")
-                    .font(.system(size: 18, weight: .bold))
-                    .frame(width: 48, height: 48)
-                    .background(.white.opacity(0.22), in: Circle())
-                    .overlay {
-                        Circle()
-                            .stroke(.white.opacity(0.2), lineWidth: 0.5)
-                    }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.4))
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 24)
+            .padding(.leading, 24)
+            .padding(.trailing, 16)
             .padding(.vertical, 24)
             .background(
                 LinearGradient(
@@ -1519,9 +1522,10 @@ private struct TodayDeckSummary: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("По колодам")
+            Text("Карточки за сегодня по колодам")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(LovableSurface.foreground)
+                .lineLimit(2)
                 .padding(.horizontal, 4)
 
             if decks.isEmpty {
@@ -1552,34 +1556,36 @@ private struct TodayDeckCard: View {
     private var dueTotal: Int { stats.learningDue + stats.reviewDue }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                DeckAvatarView(deck: deck, size: 56)
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    DeckAvatarView(deck: deck, size: 56)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(deck.title)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    Text("\(stats.studyTotal) на сегодня")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.55))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(deck.title)
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        Text("\(stats.studyTotal) на сегодня")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
                 }
 
-                Spacer(minLength: 8)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.4))
+                HStack(spacing: 10) {
+                    LovableStat(count: stats.newAvailable, label: "Новые", color: LovableSurface.blueText)
+                    Rectangle()
+                        .fill(.white.opacity(0.1))
+                        .frame(width: 1, height: 12)
+                    LovableStat(count: dueTotal, label: "Повторить", color: LovableSurface.amberText)
+                }
             }
 
-            HStack(spacing: 10) {
-                LovableStat(count: stats.newAvailable, label: "Новые", color: LovableSurface.blueText)
-                Rectangle()
-                    .fill(.white.opacity(0.1))
-                    .frame(width: 1, height: 12)
-                LovableStat(count: dueTotal, label: "Повторить", color: LovableSurface.amberText)
-            }
+            Spacer(minLength: 8)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.white.opacity(0.4))
         }
         .padding(16)
         .lovablePanel(cornerRadius: 24)
