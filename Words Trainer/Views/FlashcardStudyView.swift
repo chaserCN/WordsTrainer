@@ -374,11 +374,23 @@ struct FlashcardStudyView: View {
                         .padding(.bottom, 20)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 } else if layout == .fixed {
-                    Spacer(minLength: 0)
-                        .frame(minHeight: 12)
+                    bottomFlipArea
                 }
             }
         }
+    }
+
+    private var bottomFlipArea: some View {
+        Button {
+            flipCard()
+        } label: {
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, minHeight: 12, maxHeight: .infinity)
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder
