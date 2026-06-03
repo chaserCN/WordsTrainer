@@ -150,11 +150,20 @@ final class AppUserStore {
         syncStatus = .syncing(userID: targetUserID, startedAt: startedAt)
         do {
             var cachedDeckVersionIDs: [UUID] = []
+            var bootstrapSinceRevision = "0"
+            var bootstrapDeviceID: UUID?
             if let targetUserID {
                 do {
                     let database = try ContentDatabase(userID: targetUserID)
+                    let deviceID = try database.deviceID()
+                    bootstrapDeviceID = deviceID
+                    bootstrapSinceRevision = try database.serverRevision()
                     cachedDeckVersionIDs = try database.cachedDeckVersionIDs()
-                    try await uploadPendingEvents(database: database, selectedUserID: targetUserID)
+                    try await uploadPendingEvents(
+                        database: database,
+                        selectedUserID: targetUserID,
+                        deviceID: deviceID
+                    )
                 } catch ServerSyncError.cancelled {
                     throw ServerSyncError.cancelled
                 } catch let error as CancellationError {
@@ -168,7 +177,9 @@ final class AppUserStore {
 
             let bootstrap = try await syncClient.bootstrap(
                 selectedUserID: targetUserID,
-                cachedDeckVersionIDs: cachedDeckVersionIDs
+                cachedDeckVersionIDs: cachedDeckVersionIDs,
+                sinceRevision: bootstrapSinceRevision,
+                deviceID: bootstrapDeviceID
             )
             guard isCurrentRefreshTask(taskID) else { return .cancelled }
             let serverUsers = bootstrap.users.map(\.appUser)
@@ -186,11 +197,22 @@ final class AppUserStore {
             }
             if let resolvedUserID {
                 let database = try ContentDatabase(userID: resolvedUserID)
+                let deviceID = try database.deviceID()
                 try database.importServerBootstrap(bootstrap, selectedUserID: resolvedUserID)
                 let mediaFailureCount = try await cacheMedia(from: bootstrap, database: database)
                 try applyCachedUserAvatarURLs(from: bootstrap)
                 guard isCurrentRefreshTask(taskID) else { return .cancelled }
-                try await uploadPendingEvents(database: database, selectedUserID: resolvedUserID)
+                do {
+                    try await uploadPendingEvents(database: database, selectedUserID: resolvedUserID, deviceID: deviceID)
+                } catch ServerSyncError.cancelled {
+                    throw ServerSyncError.cancelled
+                } catch let error as CancellationError {
+                    throw error
+                } catch {
+                    Self.logger.warning(
+                        "post-bootstrap pending upload failed; refresh will keep loaded content: \(error.localizedDescription, privacy: .public)"
+                    )
+                }
                 guard isCurrentRefreshTask(taskID) else { return .cancelled }
                 bootstrapState = serverUsers.isEmpty ? .emptyServer : .loaded
                 let activeAssignmentCount = bootstrap.assignments.filter { $0.assignmentStatus == "active" }.count
@@ -247,17 +269,21 @@ final class AppUserStore {
               let selectedUserID else { return }
         do {
             let database = try ContentDatabase(userID: selectedUserID)
-            try await uploadPendingEvents(database: database, selectedUserID: selectedUserID)
+            try await uploadPendingEvents(
+                database: database,
+                selectedUserID: selectedUserID,
+                deviceID: try database.deviceID()
+            )
         } catch {
             // Keep the local outbox pending; the next foreground or manual sync will retry.
         }
     }
 
-    private func uploadPendingEvents(database: ContentDatabase, selectedUserID: UUID) async throws {
+    private func uploadPendingEvents(database: ContentDatabase, selectedUserID: UUID, deviceID: UUID) async throws {
         while true {
             let batch = try database.pendingServerSyncBatch()
             guard !batch.isEmpty else { return }
-            _ = try await syncClient.uploadEvents(batch.payload, selectedUserID: selectedUserID)
+            _ = try await syncClient.uploadEvents(batch.payload, selectedUserID: selectedUserID, deviceID: deviceID)
             try database.markServerSyncBatchUploaded(batch)
         }
     }

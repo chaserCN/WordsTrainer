@@ -13,6 +13,7 @@ struct ServerSyncClientTests {
         defaults.set("test-token", forKey: "server.householdSyncToken")
 
         let selectedUserID = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
+        let deviceID = UUID(uuidString: "77777777-7777-4777-8777-777777777777")!
         let cachedVersionA = UUID(uuidString: "22222222-2222-4222-8222-222222222222")!
         let cachedVersionB = UUID(uuidString: "33333333-3333-4333-8333-333333333333")!
         let captured = LockedRequest()
@@ -31,14 +32,17 @@ struct ServerSyncClientTests {
         let client = ServerSyncClient(session: Self.stubSession(), userDefaultsSuiteName: suiteName)
         _ = try await client.bootstrap(
             selectedUserID: selectedUserID,
-            cachedDeckVersionIDs: [cachedVersionA, cachedVersionB]
+            cachedDeckVersionIDs: [cachedVersionA, cachedVersionB],
+            sinceRevision: "42",
+            deviceID: deviceID
         )
 
         let request = try #require(captured.request)
-        #expect(request.url?.absoluteString == "https://example.test/root/v1/bootstrap")
+        #expect(request.url?.absoluteString == "https://example.test/root/v1/bootstrap?sinceRevision=42")
         #expect(request.httpMethod == "GET")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
         #expect(request.value(forHTTPHeaderField: "X-FlashGame-User-Id") == selectedUserID.databaseString)
+        #expect(request.value(forHTTPHeaderField: "X-FlashGame-Device-Id") == deviceID.databaseString)
         #expect(request.value(forHTTPHeaderField: "X-FlashGame-Time-Zone") == TimeZone.current.identifier)
         #expect(
             request.value(forHTTPHeaderField: "X-FlashGame-Cached-Deck-Version-Ids")
@@ -68,10 +72,11 @@ struct ServerSyncClientTests {
         defer { StubURLProtocol.handler = nil }
 
         let client = ServerSyncClient(session: Self.stubSession(), userDefaultsSuiteName: suiteName)
-        _ = try await client.bootstrap(selectedUserID: nil)
+        _ = try await client.bootstrap(selectedUserID: nil, sinceRevision: "0", deviceID: nil)
 
         let request = try #require(captured.request)
         #expect(request.value(forHTTPHeaderField: "X-FlashGame-User-Id") == nil)
+        #expect(request.value(forHTTPHeaderField: "X-FlashGame-Device-Id") == nil)
         #expect(request.value(forHTTPHeaderField: "X-FlashGame-Cached-Deck-Version-Ids") == nil)
     }
 
@@ -84,6 +89,7 @@ struct ServerSyncClientTests {
         defaults.set("test-token", forKey: "server.householdSyncToken")
 
         let selectedUserID = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
+        let deviceID = UUID(uuidString: "77777777-7777-4777-8777-777777777777")!
         let cardID = UUID(uuidString: "22222222-2222-4222-8222-222222222222")!
         let deckID = UUID(uuidString: "33333333-3333-4333-8333-333333333333")!
         let rejectedReviewID = UUID(uuidString: "44444444-4444-4444-8444-444444444444")!
@@ -130,7 +136,8 @@ struct ServerSyncClientTests {
                     )
                 ]
             ),
-            selectedUserID: selectedUserID
+            selectedUserID: selectedUserID,
+            deviceID: deviceID
         )
 
         let request = try #require(captured.request)
@@ -138,11 +145,51 @@ struct ServerSyncClientTests {
         #expect(request.httpMethod == "POST")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
         #expect(request.value(forHTTPHeaderField: "X-FlashGame-User-Id") == selectedUserID.databaseString)
+        #expect(request.value(forHTTPHeaderField: "X-FlashGame-Device-Id") == deviceID.databaseString)
         #expect(response.rejectedReviewIds == [rejectedReviewID])
         #expect(response.rejectedProgressCardIds == [cardID])
         #expect(response.rejectedMatchingRecordDeckIds == [rejectedMatchingDeckID])
         #expect(response.rejectedDeckPreferenceDeckIds == [rejectedPreferenceDeckID])
         #expect(response.serverRevision == "42")
+    }
+
+    @Test("changes sends selected user and device id")
+    func changesSendsDeviceHeader() async throws {
+        let suiteName = "ServerSyncClientTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("https://example.test", forKey: "server.baseURL")
+        defaults.set("test-token", forKey: "server.householdSyncToken")
+
+        let selectedUserID = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
+        let deviceID = UUID(uuidString: "77777777-7777-4777-8777-777777777777")!
+        let captured = LockedRequest()
+        StubURLProtocol.handler = { request in
+            captured.request = request
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, Data(#"{"progress":[],"reviews":[],"matching_records":[],"server_revision":"42"}"#.utf8))
+        }
+        defer { StubURLProtocol.handler = nil }
+
+        let client = ServerSyncClient(session: Self.stubSession(), userDefaultsSuiteName: suiteName)
+        let changes = try await client.changes(
+            sinceRevision: "7",
+            selectedUserID: selectedUserID,
+            deviceID: deviceID
+        )
+
+        let request = try #require(captured.request)
+        #expect(request.url?.absoluteString == "https://example.test/v1/sync/changes?sinceRevision=7")
+        #expect(request.httpMethod == "GET")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
+        #expect(request.value(forHTTPHeaderField: "X-FlashGame-User-Id") == selectedUserID.databaseString)
+        #expect(request.value(forHTTPHeaderField: "X-FlashGame-Device-Id") == deviceID.databaseString)
+        #expect(changes.serverRevision == "42")
     }
 
     private static func stubSession() -> URLSession {

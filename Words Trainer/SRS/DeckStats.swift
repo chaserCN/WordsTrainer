@@ -49,13 +49,13 @@ enum DeckStatsCalculator {
             case .learning, .relearning:
                 if fsrs.due <= now {
                     learningDue += 1
-                } else if calendar.isDate(fsrs.due, inSameDayAs: now) {
+                } else if StudyDay.isDate(fsrs.due, inSameStudyDayAs: now, calendar: calendar) {
                     learningLaterToday += 1
                 }
             case .review:
                 if fsrs.due <= now {
                     reviewDue += 1
-                } else if calendar.isDate(fsrs.due, inSameDayAs: now) {
+                } else if StudyDay.isDate(fsrs.due, inSameStudyDayAs: now, calendar: calendar) {
                     reviewLaterToday += 1
                 }
             }

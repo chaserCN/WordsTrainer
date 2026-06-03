@@ -143,6 +143,7 @@ struct ContentDatabaseTests {
                     deckID: deckID,
                     mode: .clozeMultipleChoice,
                     outcome: .correct,
+                    source: .todayQueue,
                     reviewedAt: reviewedAt,
                     durationMS: 1000,
                     wasNew: false,
@@ -153,6 +154,8 @@ struct ContentDatabaseTests {
 
             #expect(try database.reviewedCardIDs(day: reviewedAt, calendar: calendar) == [cardID])
             #expect(try database.reviewedCardIDs(day: reviewedAt, deckID: deckID, calendar: calendar) == [cardID])
+            #expect(try database.reviewedCardIDs(day: reviewedAt, deckID: deckID, source: .todayQueue, calendar: calendar) == [cardID])
+            #expect(try database.reviewedCardIDs(day: reviewedAt, deckID: deckID, source: .deckSession, calendar: calendar).isEmpty)
             #expect(try database.reviewedCardIDs(day: reviewedAt, deckID: UUID(), calendar: calendar).isEmpty)
             #expect(
                 try database.reviewedCardIDs(
@@ -540,6 +543,38 @@ struct ContentDatabaseTests {
 
             let emptyBatch = try database.pendingServerSyncBatch()
             #expect(emptyBatch.isEmpty)
+        }
+    }
+
+    @Test("pending reviews are exported after assignment becomes inactive")
+    func pendingReviewsAreExportedAfterAssignmentBecomesInactive() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
+            let reviewedAt = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
+            let reviewID = UUID(uuidString: "77777777-7777-4777-8777-777777777777")!
+
+            try database.saveStudyReview(
+                StudyReviewEvent(
+                    id: reviewID,
+                    cardID: cardID,
+                    deckID: deckID,
+                    mode: .flashcards,
+                    outcome: .remembered,
+                    reviewedAt: reviewedAt,
+                    durationMS: 1200,
+                    wasNew: true,
+                    previousState: "new",
+                    newState: "review"
+                )
+            )
+            try database.importServerBootstrap(
+                bootstrap(assignmentStatus: "inactive", includeContent: false),
+                selectedUserID: userID
+            )
+
+            let batch = try database.pendingServerSyncBatch()
+            #expect(batch.reviewIDs == [reviewID])
+            #expect(batch.payload.reviews.map(\.clientEventId) == [reviewID])
         }
     }
 

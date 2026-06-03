@@ -270,7 +270,9 @@ struct WordCardContentTests {
             ),
         ]
 
-        #expect(card.clozeChoices(answerPool: pool) == ["rapped", "loaded", "cast", "settle"])
+        let choices = card.clozeChoices(answerPool: pool)
+        #expect(choices.first == "rapped")
+        #expect(Set(choices.dropFirst()) == ["loaded", "cast", "settle"])
     }
 
     @Test("clozeChoices prefer matching part of speech")

@@ -7,6 +7,7 @@ final class StudySession {
     let deckID: UUID
     let mode: StudyMode
     let matchingRecordScope: MatchingRecordScope
+    let reviewSource: StudyReviewSource
     /// Когда false — чистая практика: учебный прогресс и review events не сохраняются.
     /// Matching-рекорд управляется отдельно через `matchingRecordScope`.
     let savesProgress: Bool
@@ -51,12 +52,14 @@ final class StudySession {
         dailyUsage: DeckDailyUsage?,
         engine: StudySessionEngine,
         matchingRecordScope: MatchingRecordScope? = nil,
+        reviewSource: StudyReviewSource = .deckSession,
         savesProgress: Bool = true
     ) {
         self.deckID = deckID
         self.mode = mode
         self.savesProgress = savesProgress
         self.matchingRecordScope = matchingRecordScope ?? (savesProgress && !mode.isAudioMatching ? .deck(deckID) : .none)
+        self.reviewSource = reviewSource
         self.dailyUsage = dailyUsage
         self.engine = engine
         sessionChoicePool = queue.map(\.card)
@@ -108,6 +111,7 @@ final class StudySession {
                     deckID: eventDeckID,
                     mode: mode,
                     outcome: outcome,
+                    source: reviewSource,
                     reviewedAt: reviewedAt,
                     wasNew: wasNew,
                     previousState: String(describing: item.progress.fsrsCard.state),

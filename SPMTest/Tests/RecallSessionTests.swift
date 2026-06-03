@@ -171,14 +171,18 @@ struct RecallSessionTests {
             queue: [item],
             dailyUsage: nil,
             engine: engine,
-            matchingRecordScope: .today(dayKey: "2026-06-02")
+            matchingRecordScope: .today(dayKey: "2026-06-02"),
+            reviewSource: .todayQueue
         )
 
         var reviewDeckID: UUID?
+        var reviewSource: StudyReviewSource?
         try session.advanceAfterReview(outcome: .remembered) { _, _ in } onReview: { event in
             reviewDeckID = event.deckID
+            reviewSource = event.source
         }
 
         #expect(reviewDeckID == sourceDeckID)
+        #expect(reviewSource == .todayQueue)
     }
 }

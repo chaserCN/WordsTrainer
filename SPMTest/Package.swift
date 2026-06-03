@@ -44,6 +44,7 @@ let package = Package(
                 "SRS/CardProgress.swift",
                 "SRS/DeckStats.swift",
                 "SRS/MatchingPairScheduler.swift",
+                "SRS/StudyDay.swift",
                 "SRS/StudyQueue.swift",
                 "SRS/StudySession.swift",
                 "SRS/TodayStudySessionBuilder.swift",

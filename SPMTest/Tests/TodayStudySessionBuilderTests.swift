@@ -67,6 +67,7 @@ struct TodayStudySessionBuilderTests {
         )
 
         #expect(session.savesProgress == false)
+        #expect(session.reviewSource == .todayPractice)
         #expect(session.matchingRecordScope == .today(dayKey: "2026-06-02"))
         #expect(session.queue.map(\.card.id) == [reviewedCard.id])
         #expect(session.queue.compactMap(\.deckID) == [activeDeck.id])

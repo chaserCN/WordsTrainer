@@ -27,10 +27,14 @@ struct DeckDailyUsage: Codable, Sendable, Hashable {
     }
 
     static func todayKey(calendar: Calendar = .current) -> String {
-        dayKey(for: Date(), calendar: calendar)
+        StudyDay.key(calendar: calendar)
     }
 
     static func dayKey(for date: Date, calendar: Calendar = .current) -> String {
+        StudyDay.key(for: date, calendar: calendar)
+    }
+
+    static func calendarDayKey(for date: Date, calendar: Calendar = .current) -> String {
         let y = calendar.component(.year, from: date)
         let m = calendar.component(.month, from: date)
         let day = calendar.component(.day, from: date)

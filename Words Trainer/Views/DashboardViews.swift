@@ -469,7 +469,7 @@ struct StatisticsView: View {
                 storeUserID = selectedUserID
             }
             let calendar = Calendar.current
-            let todayStart = calendar.startOfDay(for: .now)
+            let todayStart = StudyDay.start(for: .now, calendar: calendar)
             let weekStart = calendar.date(byAdding: .day, value: -6, to: todayStart) ?? todayStart
             let monthStart = calendar.date(byAdding: .day, value: -29, to: todayStart) ?? todayStart
             let activityDays = try deckStore.studyActivity(days: 120)
@@ -1035,10 +1035,7 @@ private struct StudyTodayCard: View {
         if stats.studyTotal > 0 {
             return "\(stats.studyTotal) карточек в очереди"
         }
-        if practiceCount > 0 {
-            return "\(practiceCount) карточек для практики"
-        }
-        return "На сегодня всё готово"
+        return "Пока всё"
     }
 }
 
@@ -1380,7 +1377,7 @@ private struct QueueSummaryCard: View {
 
     private var summaryText: String {
         if queueCount == 0, practiceCount > 0 {
-            return "\(practiceCount) \(cardsLabel(practiceCount)) · практика"
+            return "Пока всё · Прошли \(practiceCount) сегодня"
         }
         return "\(queueCount) \(cardsLabel(queueCount)) · сегодня"
     }
@@ -1588,8 +1585,8 @@ private struct ActivityCalendarDay: Hashable {
 private enum ActivityCalendarBuilder {
     static func months(from days: [StudyActivityDay]) -> [ActivityMonth] {
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: .now)
-        let todayKey = DeckDailyUsage.dayKey(for: today, calendar: calendar)
+        let today = StudyDay.start(for: .now, calendar: calendar)
+        let todayKey = StudyDay.key(calendar: calendar)
         let byKey = Dictionary(uniqueKeysWithValues: days.map { ($0.dayKey, $0.reviewedCount) })
         let startDate = days.first.flatMap { dateFromDayKey($0.dayKey) } ?? today
         let monthStart = calendar.dateInterval(of: .month, for: startDate)?.start ?? startDate
@@ -1615,12 +1612,12 @@ private enum ActivityCalendarBuilder {
         let dayRange = calendar.range(of: .day, in: .month, for: monthStart) ?? 1..<1
         let firstWeekday = calendar.component(.weekday, from: monthStart)
         let leadingSlots = (firstWeekday - calendar.firstWeekday + 7) % 7
-        let monthKey = DeckDailyUsage.dayKey(for: monthStart, calendar: calendar)
+        let monthKey = DeckDailyUsage.calendarDayKey(for: monthStart, calendar: calendar)
         var cells = (0..<leadingSlots).map { ActivityCalendarCell(id: "\(monthKey)-blank-\($0)", day: nil) }
 
         for dayNumber in dayRange {
             guard let date = calendar.date(byAdding: .day, value: dayNumber - 1, to: monthStart) else { continue }
-            let key = DeckDailyUsage.dayKey(for: date, calendar: calendar)
+            let key = DeckDailyUsage.calendarDayKey(for: date, calendar: calendar)
             let day = ActivityCalendarDay(
                 dayKey: key,
                 reviewedCount: countsByKey[key, default: 0],
@@ -2002,8 +1999,8 @@ private func currentStreakDays(from activity: [StudyActivityDay]) -> Int {
     guard !activeDayKeys.isEmpty else { return 0 }
 
     let calendar = Calendar.current
-    let today = calendar.startOfDay(for: .now)
-    let todayKey = DeckDailyUsage.dayKey(for: today, calendar: calendar)
+    let today = StudyDay.start(for: .now, calendar: calendar)
+    let todayKey = StudyDay.key(calendar: calendar)
     let startDate: Date
     if activeDayKeys.contains(todayKey) {
         startDate = today

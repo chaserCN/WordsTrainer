@@ -72,7 +72,8 @@ enum TodayStudySessionBuilder {
             deckCards: choicePool,
             dailyUsage: nil,
             engine: engine,
-            matchingRecordScope: matchingRecordScope(for: mode, dayKey: dayKey)
+            matchingRecordScope: matchingRecordScope(for: mode, dayKey: dayKey),
+            reviewSource: .todayQueue
         )
     }
 
@@ -110,6 +111,7 @@ enum TodayStudySessionBuilder {
             dailyUsage: nil,
             engine: engine,
             matchingRecordScope: matchingRecordScope(for: mode, dayKey: dayKey),
+            reviewSource: .todayPractice,
             savesProgress: false
         )
     }
@@ -131,6 +133,7 @@ enum TodayStudySessionBuilder {
             dailyUsage: nil,
             engine: engine,
             matchingRecordScope: matchingRecordScope(for: mode, deckID: snapshot.deck.id),
+            reviewSource: .todayPractice,
             savesProgress: false
         )
     }

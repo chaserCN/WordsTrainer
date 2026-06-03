@@ -14,6 +14,7 @@ struct ServerBootstrap: Decodable, Sendable {
     let hasDailyUsageSnapshot: Bool
     let statsSummary: ServerStatsSummaryPayload
     let hasStatsSummarySnapshot: Bool
+    let serverRevision: String?
 
     init(
         user: ServerUser?,
@@ -27,7 +28,8 @@ struct ServerBootstrap: Decodable, Sendable {
         dailyUsage: [ServerDailyUsagePayload] = [],
         hasDailyUsageSnapshot: Bool = true,
         statsSummary: ServerStatsSummaryPayload = .empty,
-        hasStatsSummarySnapshot: Bool = true
+        hasStatsSummarySnapshot: Bool = true,
+        serverRevision: String? = nil
     ) {
         self.user = user
         self.users = users
@@ -41,6 +43,7 @@ struct ServerBootstrap: Decodable, Sendable {
         self.hasDailyUsageSnapshot = hasDailyUsageSnapshot
         self.statsSummary = statsSummary
         self.hasStatsSummarySnapshot = hasStatsSummarySnapshot
+        self.serverRevision = serverRevision
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -54,6 +57,7 @@ struct ServerBootstrap: Decodable, Sendable {
         case matchingRecords
         case dailyUsage
         case statsSummary
+        case serverRevision
     }
 
     init(from decoder: Decoder) throws {
@@ -70,7 +74,15 @@ struct ServerBootstrap: Decodable, Sendable {
         hasDailyUsageSnapshot = container.contains(.dailyUsage)
         statsSummary = try container.decodeIfPresent(ServerStatsSummaryPayload.self, forKey: .statsSummary) ?? .empty
         hasStatsSummarySnapshot = container.contains(.statsSummary)
+        serverRevision = try container.decodeIfPresent(String.self, forKey: .serverRevision)
     }
+}
+
+struct ServerSyncChanges: Decodable, Sendable {
+    let progress: [ServerProgressPayload]
+    let reviews: [ServerReviewEventPayload]
+    let matchingRecords: [ServerMatchingRecordPayload]
+    let serverRevision: String?
 }
 
 struct ServerUser: Decodable, Sendable {
@@ -264,6 +276,7 @@ struct ServerReviewEventPayload: Codable, Sendable {
     let cardId: UUID
     let mode: String
     let outcome: String
+    let source: String?
     let reviewedAt: String
     let durationMs: Int?
     let wasNew: Bool
@@ -575,7 +588,12 @@ struct ServerSyncClient: Sendable {
         baseURLString != nil && householdSyncToken != nil
     }
 
-    func bootstrap(selectedUserID: UUID?, cachedDeckVersionIDs: [UUID] = []) async throws -> ServerBootstrap {
+    func bootstrap(
+        selectedUserID: UUID?,
+        cachedDeckVersionIDs: [UUID] = [],
+        sinceRevision: String,
+        deviceID: UUID?
+    ) async throws -> ServerBootstrap {
         var headers: [String: String] = [
             "X-FlashGame-Time-Zone": TimeZone.current.identifier
         ]
@@ -585,9 +603,10 @@ struct ServerSyncClient: Sendable {
                 .joined(separator: ",")
         }
         let data = try await data(
-            for: "bootstrap",
+            for: "bootstrap?sinceRevision=\(sinceRevision)",
             method: "GET",
             selectedUserID: selectedUserID,
+            deviceID: deviceID,
             headers: headers
         )
 
@@ -602,7 +621,8 @@ struct ServerSyncClient: Sendable {
 
     func uploadEvents(
         _ payload: ServerSyncEventsPayload,
-        selectedUserID: UUID?
+        selectedUserID: UUID?,
+        deviceID: UUID?
     ) async throws -> ServerSyncEventsResponse {
         guard !payload.isEmpty else {
             return ServerSyncEventsResponse(
@@ -620,12 +640,29 @@ struct ServerSyncClient: Sendable {
             for: "sync/events",
             method: "POST",
             selectedUserID: selectedUserID,
-            body: data
+            body: data,
+            deviceID: deviceID
         )
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         do {
             return try decoder.decode(ServerSyncEventsResponse.self, from: responseData)
+        } catch {
+            throw ServerSyncError.invalidResponse
+        }
+    }
+
+    func changes(sinceRevision: String, selectedUserID: UUID?, deviceID: UUID?) async throws -> ServerSyncChanges {
+        let data = try await data(
+            for: "sync/changes?sinceRevision=\(sinceRevision)",
+            method: "GET",
+            selectedUserID: selectedUserID,
+            deviceID: deviceID
+        )
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        do {
+            return try decoder.decode(ServerSyncChanges.self, from: data)
         } catch {
             throw ServerSyncError.invalidResponse
         }
@@ -640,6 +677,7 @@ struct ServerSyncClient: Sendable {
         method: String,
         selectedUserID: UUID?,
         body: Data? = nil,
+        deviceID: UUID? = nil,
         headers: [String: String] = [:]
     ) async throws -> Data {
         guard let baseURLString, let householdSyncToken else {
@@ -652,11 +690,17 @@ struct ServerSyncClient: Sendable {
             throw ServerSyncError.invalidBaseURL(baseURLString)
         }
 
-        let endpoint = path
+        let pathParts = path.split(separator: "?", maxSplits: 1).map(String.init)
+        var endpoint = pathParts[0]
             .split(separator: "/")
             .reduce(baseURL.appendingPathComponent("v1")) { partial, component in
                 partial.appendingPathComponent(String(component))
             }
+        if pathParts.count > 1,
+           var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) {
+            components.percentEncodedQuery = pathParts[1]
+            endpoint = components.url ?? endpoint
+        }
         var request = URLRequest(url: endpoint)
         request.httpMethod = method
         request.timeoutInterval = 15
@@ -667,6 +711,9 @@ struct ServerSyncClient: Sendable {
         }
         if let selectedUserID {
             request.setValue(selectedUserID.uuidString.lowercased(), forHTTPHeaderField: "X-FlashGame-User-Id")
+        }
+        if let deviceID {
+            request.setValue(deviceID.uuidString.lowercased(), forHTTPHeaderField: "X-FlashGame-Device-Id")
         }
         for (field, value) in headers {
             request.setValue(value, forHTTPHeaderField: field)

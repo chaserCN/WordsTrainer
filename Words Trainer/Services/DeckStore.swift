@@ -69,7 +69,7 @@ final class DeckStore {
         let start = Calendar.current.date(
             byAdding: .day,
             value: -max(0, days - 1),
-            to: Calendar.current.startOfDay(for: .now)
+            to: StudyDay.start(for: .now)
         ) ?? .now
         return try database.studyActivity(since: start)
     }
@@ -118,7 +118,7 @@ final class DeckStore {
 
     func scheduledReviewDays(days: Int) throws -> [ScheduledReviewDay] {
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: .now)
+        let today = StudyDay.start(for: .now, calendar: calendar)
         let activeDecks = try allDecks().filter(\.isActive)
         var countsByDay: [String: Int] = [:]
 
@@ -133,7 +133,7 @@ final class DeckStore {
             for (cardID, cardProgress) in progress where activeCardIDs.contains(cardID) {
                 let state = cardProgress.fsrsCard.state
                 guard state != .new else { continue }
-                let dueDay = calendar.startOfDay(for: cardProgress.fsrsCard.due)
+                let dueDay = StudyDay.start(for: cardProgress.fsrsCard.due, calendar: calendar)
                 let normalizedDay = dueDay < today ? today : dueDay
                 guard let dayOffset = calendar.dateComponents([.day], from: today, to: normalizedDay).day,
                       dayOffset >= 0,
@@ -254,7 +254,8 @@ final class DeckStore {
             queue: queue,
             deckCards: studyCards,
             dailyUsage: usage,
-            engine: engine
+            engine: engine,
+            reviewSource: .todayQueue
         )
     }
 
@@ -294,7 +295,8 @@ final class DeckStore {
             queue: queue,
             deckCards: studyCards,
             dailyUsage: usage,
-            engine: engine
+            engine: engine,
+            reviewSource: .deckSession
         )
     }
 
@@ -321,7 +323,8 @@ final class DeckStore {
             deckCards: studyCards,
             dailyUsage: usage,
             engine: engine,
-            matchingRecordScope: mode.isMatching ? .none : .deck(deck.id)
+            matchingRecordScope: mode.isMatching ? .none : .deck(deck.id),
+            reviewSource: .weakCards
         )
     }
 
@@ -439,7 +442,7 @@ final class DeckStore {
             deck: deck,
             progressByCardID: database.progressMap(deckID: deck.id),
             dailyUsage: database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey()),
-            reviewedCardIDs: database.reviewedCardIDs(deckID: deck.id)
+            reviewedCardIDs: database.reviewedCardIDs(deckID: deck.id, source: .todayQueue)
         )
     }
 

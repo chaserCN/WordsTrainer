@@ -1,11 +1,19 @@
 import Foundation
 
+enum StudyReviewSource: String, Codable, Sendable, Hashable {
+    case todayQueue = "today_queue"
+    case deckSession = "deck_session"
+    case weakCards = "weak_cards"
+    case todayPractice = "today_practice"
+}
+
 struct StudyReviewEvent: Sendable, Hashable {
     let id: UUID
     let cardID: UUID
     let deckID: UUID
     let mode: StudyMode
     let outcome: ReviewOutcome
+    let source: StudyReviewSource
     let reviewedAt: Date
     let durationMS: Int?
     let wasNew: Bool
@@ -18,6 +26,7 @@ struct StudyReviewEvent: Sendable, Hashable {
         deckID: UUID,
         mode: StudyMode,
         outcome: ReviewOutcome,
+        source: StudyReviewSource = .deckSession,
         reviewedAt: Date,
         durationMS: Int? = nil,
         wasNew: Bool,
@@ -29,6 +38,7 @@ struct StudyReviewEvent: Sendable, Hashable {
         self.deckID = deckID
         self.mode = mode
         self.outcome = outcome
+        self.source = source
         self.reviewedAt = reviewedAt
         self.durationMS = durationMS
         self.wasNew = wasNew

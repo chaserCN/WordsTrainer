@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct StudySessionView: View {
+    @Environment(\.dismiss) private var dismiss
+
     @Bindable var session: StudySession
     let store: DeckStore
     let deckTitle: String
@@ -121,14 +123,23 @@ struct StudySessionView: View {
                 isNewRecord ? newRecordTitle : "Готово",
                 systemImage: isNewRecord ? "trophy.fill" : "checkmark.circle"
             )
+            .foregroundStyle(finishedTint)
         } description: {
             if isNewRecord, let finishedDuration {
                 Text("Лучшее время: \(StudyDurationFormat.string(finishedDuration))")
+                    .foregroundStyle(finishedTint)
             } else {
                 Text("Сессия по колоде «\(deckTitle)» завершена.")
+                    .foregroundStyle(finishedTint)
             }
+        } actions: {
+            Button("Закрыть") {
+                dismiss()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(finishedActionTint)
         }
-        .foregroundStyle(finishedTint)
     }
 
     private var newRecordTitle: String {
@@ -147,6 +158,10 @@ struct StudySessionView: View {
             return beatRecord ? MatchPalette.accent : MatchPalette.foreground
         }
         return .white
+    }
+
+    private var finishedActionTint: Color {
+        usesLightStudyTheme ? LovableSurface.primary : .white
     }
 
     /// Кнопки навбара — единообразно тёмные на светлой теме (как договаривались).

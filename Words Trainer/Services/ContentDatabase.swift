@@ -10,6 +10,8 @@ private enum ContentDatabaseDefaults {
 
 private enum SyncMetadataKey {
     static let statsSummarySnapshot = "stats_summary_snapshot"
+    static let serverRevision = "server_revision"
+    static let deviceID = "device_id"
 }
 
 private enum WeakCardFilter {
@@ -147,12 +149,49 @@ final class ContentDatabase {
             } else {
                 try setSyncMetadata(SyncMetadataKey.statsSummarySnapshot, value: "0", selectedUserID: selectedUserID)
             }
+            if let serverRevision = bootstrap.serverRevision {
+                try setServerRevision(serverRevision)
+            }
             try commitTransaction()
             try cleanupUnusedContentCache()
         } catch {
             try? rollbackTransaction()
             throw error
         }
+    }
+
+    func importServerChanges(_ changes: ServerSyncChanges, selectedUserID: UUID) throws {
+        try beginTransaction()
+        do {
+            try upsertServerProgress(changes.progress)
+            try upsertServerReviews(changes.reviews, selectedUserID: selectedUserID)
+            try upsertServerMatchingRecords(changes.matchingRecords, selectedUserID: selectedUserID)
+            if let serverRevision = changes.serverRevision {
+                try setServerRevision(serverRevision)
+            }
+            try commitTransaction()
+        } catch {
+            try? rollbackTransaction()
+            throw error
+        }
+    }
+
+    func serverRevision() throws -> String {
+        try syncMetadataValue(SyncMetadataKey.serverRevision) ?? "0"
+    }
+
+    func setServerRevision(_ revision: String) throws {
+        try setSyncMetadata(SyncMetadataKey.serverRevision, value: revision, selectedUserID: userID)
+    }
+
+    func deviceID() throws -> UUID {
+        if let value = try syncMetadataValue(SyncMetadataKey.deviceID),
+           let id = UUID(databaseString: value) {
+            return id
+        }
+        let id = UUID()
+        try setSyncMetadata(SyncMetadataKey.deviceID, value: id.databaseString, selectedUserID: userID)
+        return id
     }
 
     @discardableResult
@@ -378,9 +417,9 @@ final class ContentDatabase {
     func saveStudyReview(_ event: StudyReviewEvent) throws {
         let sql = """
         INSERT INTO study_reviews (
-            id, user_id, card_id, deck_id, mode, outcome, reviewed_at,
+            id, user_id, card_id, deck_id, mode, outcome, source, reviewed_at,
             duration_ms, was_new, previous_state, new_state, synced_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -393,23 +432,24 @@ final class ContentDatabase {
         try bind(statement, index: 4, uuid: event.deckID)
         try bind(statement, index: 5, text: event.mode.rawValue)
         try bind(statement, index: 6, text: event.outcome.databaseValue)
-        guard sqlite3_bind_double(statement, 7, event.reviewedAt.timeIntervalSince1970) == SQLITE_OK else {
+        try bind(statement, index: 7, text: event.source.rawValue)
+        guard sqlite3_bind_double(statement, 8, event.reviewedAt.timeIntervalSince1970) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
         if let durationMS = event.durationMS {
-            guard sqlite3_bind_int(statement, 8, Int32(durationMS)) == SQLITE_OK else {
+            guard sqlite3_bind_int(statement, 9, Int32(durationMS)) == SQLITE_OK else {
                 throw ContentDatabaseError.queryFailed
             }
         } else {
-            guard sqlite3_bind_null(statement, 8) == SQLITE_OK else {
+            guard sqlite3_bind_null(statement, 9) == SQLITE_OK else {
                 throw ContentDatabaseError.queryFailed
             }
         }
-        guard sqlite3_bind_int(statement, 9, event.wasNew ? 1 : 0) == SQLITE_OK else {
+        guard sqlite3_bind_int(statement, 10, event.wasNew ? 1 : 0) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
-        try bind(statement, index: 10, text: event.previousState)
-        try bind(statement, index: 11, text: event.newState)
+        try bind(statement, index: 11, text: event.previousState)
+        try bind(statement, index: 12, text: event.newState)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw ContentDatabaseError.queryFailed
         }
@@ -422,18 +462,23 @@ final class ContentDatabase {
     func reviewedCardIDs(
         day: Date = .now,
         deckID: UUID? = nil,
+        source: StudyReviewSource? = nil,
         calendar: Calendar = .current
     ) throws -> [UUID] {
-        let start = calendar.startOfDay(for: day)
-        let end = calendar.date(byAdding: .day, value: 1, to: start)
-            ?? start.addingTimeInterval(24 * 60 * 60)
+        let start = StudyDay.start(for: day, calendar: calendar)
+        let end = StudyDay.end(for: day, calendar: calendar)
         var sql = """
         SELECT card_id, MAX(reviewed_at) AS last_reviewed_at
         FROM study_reviews
         WHERE user_id = ? AND reviewed_at >= ? AND reviewed_at < ?
         """
+        var nextIndex: Int32 = 4
         if deckID != nil {
             sql += " AND deck_id = ?"
+            nextIndex += 1
+        }
+        if source != nil {
+            sql += " AND source = ?"
         }
         sql += """
 
@@ -454,6 +499,9 @@ final class ContentDatabase {
         if let deckID {
             try bind(statement, index: 4, uuid: deckID)
         }
+        if let source {
+            try bind(statement, index: nextIndex, text: source.rawValue)
+        }
 
         var cardIDs: [UUID] = []
         while sqlite3_step(statement) == SQLITE_ROW {
@@ -470,7 +518,7 @@ final class ContentDatabase {
 
         let sql = """
         SELECT
-            strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime') AS day_key,
+            strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime', '-4 hours') AS day_key,
             COUNT(*),
             SUM(CASE WHEN outcome IN ('remembered', 'correct') THEN 1 ELSE 0 END)
         FROM study_reviews
@@ -838,15 +886,10 @@ final class ContentDatabase {
     private func pendingReviewEvents(limit: Int) throws -> (payload: [ServerReviewEventPayload], ids: [UUID]) {
         let sql = """
         SELECT study_reviews.id, study_reviews.deck_id, study_reviews.card_id, study_reviews.mode,
-               study_reviews.outcome, study_reviews.reviewed_at, study_reviews.duration_ms,
+               study_reviews.outcome, study_reviews.source, study_reviews.reviewed_at, study_reviews.duration_ms,
                study_reviews.was_new, study_reviews.previous_state, study_reviews.new_state
         FROM study_reviews
-        JOIN cards ON cards.id = study_reviews.card_id AND cards.deck_id = study_reviews.deck_id
-        JOIN user_deck_assignments ON user_deck_assignments.deck_id = study_reviews.deck_id
         WHERE study_reviews.user_id = ?
-          AND user_deck_assignments.user_id = study_reviews.user_id
-          AND user_deck_assignments.status = 'active'
-          AND cards.status = 'active'
           AND study_reviews.synced_at IS NULL
         ORDER BY study_reviews.reviewed_at
         LIMIT ?
@@ -867,11 +910,12 @@ final class ContentDatabase {
                   let cardID = uuidColumn(statement, index: 2),
                   let mode = textColumn(statement, index: 3),
                   let outcome = textColumn(statement, index: 4) else { continue }
+            let source = textColumn(statement, index: 5) ?? StudyReviewSource.deckSession.rawValue
             let durationMS: Int?
-            if sqlite3_column_type(statement, 6) == SQLITE_NULL {
+            if sqlite3_column_type(statement, 7) == SQLITE_NULL {
                 durationMS = nil
             } else {
-                durationMS = Int(sqlite3_column_int(statement, 6))
+                durationMS = Int(sqlite3_column_int(statement, 7))
             }
             ids.append(id)
             payload.append(
@@ -882,11 +926,12 @@ final class ContentDatabase {
                     cardId: cardID,
                     mode: mode,
                     outcome: outcome,
-                    reviewedAt: isoString(Date(timeIntervalSince1970: sqlite3_column_double(statement, 5))),
+                    source: source,
+                    reviewedAt: isoString(Date(timeIntervalSince1970: sqlite3_column_double(statement, 6))),
                     durationMs: durationMS,
-                    wasNew: sqlite3_column_int(statement, 7) != 0,
-                    previousState: textColumn(statement, index: 8),
-                    newState: textColumn(statement, index: 9)
+                    wasNew: sqlite3_column_int(statement, 8) != 0,
+                    previousState: textColumn(statement, index: 9),
+                    newState: textColumn(statement, index: 10)
                 )
             )
         }
@@ -1527,15 +1572,16 @@ final class ContentDatabase {
             }
             let sql = """
             INSERT INTO study_reviews (
-                id, user_id, card_id, deck_id, mode, outcome, reviewed_at,
+                id, user_id, card_id, deck_id, mode, outcome, source, reviewed_at,
                 duration_ms, was_new, previous_state, new_state, synced_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 user_id = excluded.user_id,
                 card_id = excluded.card_id,
                 deck_id = excluded.deck_id,
                 mode = excluded.mode,
                 outcome = excluded.outcome,
+                source = excluded.source,
                 reviewed_at = excluded.reviewed_at,
                 duration_ms = excluded.duration_ms,
                 was_new = excluded.was_new,
@@ -1554,16 +1600,17 @@ final class ContentDatabase {
             try bind(statement, index: 4, uuid: review.deckId)
             try bind(statement, index: 5, text: review.mode)
             try bind(statement, index: 6, text: review.outcome)
-            guard sqlite3_bind_double(statement, 7, reviewedAt.timeIntervalSince1970) == SQLITE_OK else {
+            try bind(statement, index: 7, text: review.source ?? StudyReviewSource.deckSession.rawValue)
+            guard sqlite3_bind_double(statement, 8, reviewedAt.timeIntervalSince1970) == SQLITE_OK else {
                 throw ContentDatabaseError.queryFailed
             }
-            try bind(statement, index: 8, int: review.durationMs)
-            guard sqlite3_bind_int(statement, 9, review.wasNew ? 1 : 0) == SQLITE_OK else {
+            try bind(statement, index: 9, int: review.durationMs)
+            guard sqlite3_bind_int(statement, 10, review.wasNew ? 1 : 0) == SQLITE_OK else {
                 throw ContentDatabaseError.queryFailed
             }
-            try bind(statement, index: 10, text: review.previousState)
-            try bind(statement, index: 11, text: review.newState)
-            guard sqlite3_bind_double(statement, 12, syncedAt) == SQLITE_OK,
+            try bind(statement, index: 11, text: review.previousState)
+            try bind(statement, index: 12, text: review.newState)
+            guard sqlite3_bind_double(statement, 13, syncedAt) == SQLITE_OK,
                   sqlite3_step(statement) == SQLITE_DONE else {
                 throw ContentDatabaseError.queryFailed
             }
@@ -1636,7 +1683,7 @@ final class ContentDatabase {
         SELECT
             user_id,
             deck_id,
-            strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime') AS day_key,
+            strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime', '-4 hours') AS day_key,
             SUM(CASE WHEN was_new = 1 AND outcome IN ('remembered', 'correct') THEN 1 ELSE 0 END) AS new_cards_studied
         FROM study_reviews
         WHERE user_id = ?
@@ -1685,7 +1732,7 @@ final class ContentDatabase {
         SELECT
             user_id,
             deck_id,
-            strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime') AS day_key,
+            strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime', '-4 hours') AS day_key,
             SUM(CASE WHEN was_new = 1 AND outcome IN ('remembered', 'correct') THEN 1 ELSE 0 END) AS new_cards_studied
         FROM study_reviews
         WHERE user_id = ? AND synced_at IS NULL
@@ -1780,7 +1827,7 @@ final class ContentDatabase {
         INSERT INTO study_activity_summary (user_id, day_key, reviewed_count, passed_count)
         SELECT
             user_id,
-            strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime') AS day_key,
+            strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime', '-4 hours') AS day_key,
             COUNT(*) AS reviewed_count,
             SUM(CASE WHEN outcome IN ('remembered', 'correct') THEN 1 ELSE 0 END) AS passed_count
         FROM study_reviews
@@ -2100,6 +2147,7 @@ final class ContentDatabase {
             deck_id TEXT NOT NULL,
             mode TEXT NOT NULL,
             outcome TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'deck_session',
             reviewed_at REAL NOT NULL,
             duration_ms INTEGER,
             was_new INTEGER NOT NULL,
@@ -2125,6 +2173,7 @@ final class ContentDatabase {
         try addColumnIfMissing(table: "card_progress", column: "synced_at", definition: "REAL")
         try addColumnIfMissing(table: "deck_matching_records", column: "synced_at", definition: "REAL")
         try addColumnIfMissing(table: "study_reviews", column: "synced_at", definition: "REAL")
+        try addColumnIfMissing(table: "study_reviews", column: "source", definition: "TEXT NOT NULL DEFAULT 'deck_session'")
         try migrateUserScopedTablesIfNeeded()
         try seedDefaultAssignmentsIfNeeded()
     }
