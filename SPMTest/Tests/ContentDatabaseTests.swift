@@ -225,6 +225,70 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("weak cards exclude cards that are stable review state")
+    func weakCardsExcludeCardsThatAreStableReviewState() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(
+                bootstrap(
+                    statsSummary: statsSummaryJSON(
+                        weakCards: [
+                            weakCardJSON(
+                                failedCount: 2,
+                                reviewedCount: 5,
+                                lastFailedAt: "2026-06-02T12:00:00.000Z"
+                            ),
+                        ]
+                    )
+                ),
+                selectedUserID: userID
+            )
+            let updatedAt = try #require(Self.isoDate("2026-06-03T12:00:00.000Z"))
+            try database.saveProgress(
+                deckID: deckID,
+                progress: CardProgress(
+                    cardID: cardID,
+                    fsrsCard: Card(due: updatedAt, state: .review),
+                    updatedAt: updatedAt
+                )
+            )
+
+            #expect(try database.weakCards(limit: 10).isEmpty)
+            #expect(try database.weakCards(limit: 10, deckID: deckID).isEmpty)
+        }
+    }
+
+    @Test("weak cards keep failed cards that are still learning")
+    func weakCardsKeepFailedCardsThatAreStillLearning() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(
+                bootstrap(
+                    statsSummary: statsSummaryJSON(
+                        weakCards: [
+                            weakCardJSON(
+                                failedCount: 2,
+                                reviewedCount: 5,
+                                lastFailedAt: "2026-06-02T12:00:00.000Z"
+                            ),
+                        ]
+                    )
+                ),
+                selectedUserID: userID
+            )
+            let updatedAt = try #require(Self.isoDate("2026-06-03T12:00:00.000Z"))
+            try database.saveProgress(
+                deckID: deckID,
+                progress: CardProgress(
+                    cardID: cardID,
+                    fsrsCard: Card(due: updatedAt, state: .learning),
+                    updatedAt: updatedAt
+                )
+            )
+
+            #expect(try database.weakCards(limit: 10).map(\.cardID) == [cardID])
+            #expect(try database.weakCards(limit: 10, deckID: deckID).map(\.cardID) == [cardID])
+        }
+    }
+
     @Test("server stats summary snapshot keeps unsynced local reviews counted")
     func serverStatsSummarySnapshotKeepsUnsyncedLocalReviewsCounted() throws {
         try withIsolatedDatabase { database in

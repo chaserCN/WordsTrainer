@@ -526,11 +526,14 @@ final class ContentDatabase {
         )
     }
 
-    func weakCards(limit: Int = 30) throws -> [WeakCardStat] {
+    func weakCards(limit: Int = 30, deckID: UUID? = nil) throws -> [WeakCardStat] {
+        guard limit > 0 else { return [] }
+
         if try hasStatsSummarySnapshot() {
-            return try weakCardsFromSummary(limit: limit)
+            return try weakCardsFromSummary(limit: limit, deckID: deckID)
         }
 
+        let deckFilter = deckID == nil ? "" : "AND cards.deck_id = ?"
         let sql = """
         SELECT
             cards.id,
@@ -539,21 +542,25 @@ final class ContentDatabase {
             cards.translation,
             SUM(CASE WHEN study_reviews.outcome IN ('forgot', 'incorrect') THEN 1 ELSE 0 END) AS failed_count,
             COUNT(study_reviews.id) AS reviewed_count,
-            MAX(CASE WHEN study_reviews.outcome IN ('forgot', 'incorrect') THEN study_reviews.reviewed_at ELSE NULL END) AS last_failed_at
+            MAX(CASE WHEN study_reviews.outcome IN ('forgot', 'incorrect') THEN study_reviews.reviewed_at ELSE NULL END) AS last_failed_at,
+            card_progress.fsrs_data
         FROM study_reviews
         JOIN cards ON cards.id = study_reviews.card_id
         JOIN decks ON decks.id = study_reviews.deck_id
         JOIN user_deck_assignments ON user_deck_assignments.user_id = study_reviews.user_id
             AND user_deck_assignments.deck_id = study_reviews.deck_id
             AND user_deck_assignments.status = 'active'
+        LEFT JOIN card_progress ON card_progress.user_id = study_reviews.user_id
+            AND card_progress.card_id = cards.id
+            AND card_progress.deck_id = cards.deck_id
         LEFT JOIN user_deck_preferences ON user_deck_preferences.user_id = study_reviews.user_id
             AND user_deck_preferences.deck_id = study_reviews.deck_id
         WHERE study_reviews.user_id = ? AND cards.status = 'active' AND decks.status = 'active'
           AND COALESCE(user_deck_preferences.is_enabled, 1) = 1
+          \(deckFilter)
         GROUP BY cards.id, cards.deck_id, cards.display_word, cards.translation
         HAVING failed_count > 0
         ORDER BY failed_count DESC, CAST(failed_count AS REAL) / reviewed_count DESC, last_failed_at DESC
-        LIMIT ?
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -561,12 +568,13 @@ final class ContentDatabase {
         }
         defer { sqlite3_finalize(statement) }
         try bind(statement, index: 1, uuid: userID)
-        guard sqlite3_bind_int(statement, 2, Int32(limit)) == SQLITE_OK else {
-            throw ContentDatabaseError.queryFailed
+        if let deckID {
+            try bind(statement, index: 2, uuid: deckID)
         }
 
         var cards: [WeakCardStat] = []
         while sqlite3_step(statement) == SQLITE_ROW {
+            guard try isCurrentWeakCard(statement, fsrsDataIndex: 7) else { continue }
             guard let cardID = uuidColumn(statement, index: 0),
                   let deckID = uuidColumn(statement, index: 1),
                   let word = textColumn(statement, index: 2),
@@ -588,6 +596,7 @@ final class ContentDatabase {
                     lastFailedAt: lastFailedAt
                 )
             )
+            if cards.count >= limit { break }
         }
         return cards
     }
@@ -644,7 +653,8 @@ final class ContentDatabase {
         )
     }
 
-    private func weakCardsFromSummary(limit: Int) throws -> [WeakCardStat] {
+    private func weakCardsFromSummary(limit: Int, deckID: UUID?) throws -> [WeakCardStat] {
+        let deckFilter = deckID == nil ? "" : "AND cards.deck_id = ?"
         let sql = """
         SELECT
             cards.id,
@@ -653,13 +663,17 @@ final class ContentDatabase {
             cards.translation,
             study_weak_card_stats.failed_count,
             study_weak_card_stats.reviewed_count,
-            study_weak_card_stats.last_failed_at
+            study_weak_card_stats.last_failed_at,
+            card_progress.fsrs_data
         FROM study_weak_card_stats
         JOIN cards ON cards.id = study_weak_card_stats.card_id
         JOIN decks ON decks.id = study_weak_card_stats.deck_id
         JOIN user_deck_assignments ON user_deck_assignments.user_id = study_weak_card_stats.user_id
             AND user_deck_assignments.deck_id = study_weak_card_stats.deck_id
             AND user_deck_assignments.status = 'active'
+        LEFT JOIN card_progress ON card_progress.user_id = study_weak_card_stats.user_id
+            AND card_progress.card_id = cards.id
+            AND card_progress.deck_id = cards.deck_id
         LEFT JOIN user_deck_preferences ON user_deck_preferences.user_id = study_weak_card_stats.user_id
             AND user_deck_preferences.deck_id = study_weak_card_stats.deck_id
         WHERE study_weak_card_stats.user_id = ?
@@ -667,10 +681,10 @@ final class ContentDatabase {
           AND cards.status = 'active'
           AND decks.status = 'active'
           AND COALESCE(user_deck_preferences.is_enabled, 1) = 1
+          \(deckFilter)
         ORDER BY study_weak_card_stats.failed_count DESC,
                  CAST(study_weak_card_stats.failed_count AS REAL) / study_weak_card_stats.reviewed_count DESC,
                  study_weak_card_stats.last_failed_at DESC
-        LIMIT ?
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -678,12 +692,13 @@ final class ContentDatabase {
         }
         defer { sqlite3_finalize(statement) }
         try bind(statement, index: 1, uuid: userID)
-        guard sqlite3_bind_int(statement, 2, Int32(limit)) == SQLITE_OK else {
-            throw ContentDatabaseError.queryFailed
+        if let deckID {
+            try bind(statement, index: 2, uuid: deckID)
         }
 
         var cards: [WeakCardStat] = []
         while sqlite3_step(statement) == SQLITE_ROW {
+            guard try isCurrentWeakCard(statement, fsrsDataIndex: 7) else { continue }
             guard let cardID = uuidColumn(statement, index: 0),
                   let deckID = uuidColumn(statement, index: 1),
                   let word = textColumn(statement, index: 2),
@@ -705,6 +720,7 @@ final class ContentDatabase {
                     lastFailedAt: lastFailedAt
                 )
             )
+            if cards.count >= limit { break }
         }
         return cards
     }
@@ -2602,6 +2618,17 @@ final class ContentDatabase {
         for (offset, id) in ids.enumerated() {
             try bind(statement, index: Int32(offset + 1), uuid: id)
         }
+    }
+
+    private func isCurrentWeakCard(_ statement: OpaquePointer?, fsrsDataIndex: Int32) throws -> Bool {
+        guard sqlite3_column_type(statement, fsrsDataIndex) != SQLITE_NULL,
+              let blob = sqlite3_column_blob(statement, fsrsDataIndex) else {
+            return true
+        }
+        let length = Int(sqlite3_column_bytes(statement, fsrsDataIndex))
+        let data = Data(bytes: blob, count: length)
+        let fsrsCard = try JSONDecoder().decode(Card.self, from: data)
+        return fsrsCard.state != .review
     }
 
     private func exec(

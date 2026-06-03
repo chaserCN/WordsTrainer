@@ -364,61 +364,74 @@ struct DeckDetailView: View {
     @State private var session: StudySession?
     @State private var showStudy = false
     @State private var statusError: String?
+    @State private var exerciseScope: DeckExerciseScope = .all
+    @State private var weakCardIDs: Set<UUID> = []
     private var studyCards: [WordCardContent] { deck.isActive ? deck.activeCards : [] }
+    private var scopedStudyCards: [WordCardContent] {
+        switch exerciseScope {
+        case .all:
+            return studyCards
+        case .weak:
+            return studyCards.filter { weakCardIDs.contains($0.id) }
+        }
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                LovableDeckCard(deck: deck, showsChevron: false, footnote: "Учим все карты в колоде")
+                LovableDeckCard(deck: deck, showsChevron: false, footnote: deckFootnote)
 
-                    StudySection(title: "Упражнения") {
-                        StudyActionButton(
-                            title: "Карточки",
-                            subtitle: "Слово, перевод и заметки — переворот по тапу",
-                            systemImage: "rectangle.on.rectangle.angled",
-                            accent: .orange,
-                            isEnabled: !studyCards.isEmpty
-                        ) {
-                            start(.flashcards)
-                        }
-
-                        StudyActionButton(
-                            title: "Предложения",
-                            subtitle: "Выбери слово для примера с пропуском",
-                            systemImage: "text.quote",
-                            accent: .blue,
-                            isEnabled: !studyCards.isEmpty
-                        ) {
-                            start(.clozeMultipleChoice)
-                        }
-
-                        StudyActionButton(
-                            title: "Колонки",
-                            subtitle: "Соедини слово и перевод",
-                            systemImage: "rectangle.split.2x1.fill",
-                            accent: .green,
-                            isEnabled: !studyCards.isEmpty
-                        ) {
-                            start(.matching)
-                        }
+                StudySection(
+                    title: "Упражнения",
+                    trailing: AnyView(DeckExerciseScopePicker(selection: $exerciseScope))
+                ) {
+                    StudyActionButton(
+                        title: "Карточки",
+                        subtitle: "Слово, перевод и заметки — переворот по тапу",
+                        systemImage: "rectangle.on.rectangle.angled",
+                        accent: .orange,
+                        isEnabled: !scopedStudyCards.isEmpty
+                    ) {
+                        start(.flashcards)
                     }
 
-                    StudySection(title: "Сбросить") {
-                        StudyActionButton(
-                            title: "Оставить / Сбросить",
-                            subtitle: "Покажи слово и реши: оставить прогресс или начать заново",
-                            systemImage: "eye.fill",
-                            accent: .purple,
-                            isEnabled: !studyCards.isEmpty
-                        ) {
-                            start(.recall)
-                        }
+                    StudyActionButton(
+                        title: "Предложения",
+                        subtitle: "Выбери слово для примера с пропуском",
+                        systemImage: "text.quote",
+                        accent: .blue,
+                        isEnabled: !scopedStudyCards.isEmpty
+                    ) {
+                        start(.clozeMultipleChoice)
+                    }
+
+                    StudyActionButton(
+                        title: "Колонки",
+                        subtitle: "Соедини слово и перевод",
+                        systemImage: "rectangle.split.2x1.fill",
+                        accent: .green,
+                        isEnabled: !scopedStudyCards.isEmpty
+                    ) {
+                        start(.matching)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
-                .padding(.bottom, 32)
+
+                StudySection(title: "Сбросить") {
+                    StudyActionButton(
+                        title: "Оставить / Сбросить",
+                        subtitle: "Покажи слово и реши: оставить прогресс или начать заново",
+                        systemImage: "eye.fill",
+                        accent: .purple,
+                        isEnabled: !studyCards.isEmpty
+                    ) {
+                        start(.recall)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 32)
         }
         .background { LovableBackground(variant: .decks) }
         .navigationTitle(deck.title)
@@ -451,10 +464,12 @@ struct DeckDetailView: View {
         }
         .task(id: statsTaskID) {
             stats = (try? store.stats(for: deck)) ?? .zero
+            reloadWeakCards()
         }
         .onChange(of: showStudy) { _, isShowing in
             guard !isShowing else { return }
             stats = (try? store.stats(for: deck)) ?? .zero
+            reloadWeakCards()
         }
         .alert("Не удалось обновить колоду", isPresented: statusErrorBinding) {
             Button("ОК", role: .cancel) {
@@ -467,8 +482,30 @@ struct DeckDetailView: View {
 
     private func start(_ mode: StudyMode) {
         guard deck.isActive else { return }
-        session = try? store.startAllCardsSession(deck: deck, mode: mode)
+        switch exerciseScope {
+        case .all:
+            session = try? store.startAllCardsSession(deck: deck, mode: mode)
+        case .weak:
+            session = try? store.startWeakCardsSession(deck: deck, mode: mode)
+        }
         showStudy = session != nil
+    }
+
+    private var deckFootnote: String {
+        switch exerciseScope {
+        case .all:
+            return "Учим все карты в колоде"
+        case .weak:
+            return "\(weakCardIDs.count) \(cardsGenitive(weakCardIDs.count)) в сложных"
+        }
+    }
+
+    private func reloadWeakCards() {
+        let weakCards = (try? store.weakCards(deckID: deck.id, limit: deck.activeCards.count)) ?? []
+        weakCardIDs = Set(weakCards.map(\.cardID))
+        if exerciseScope == .weak, weakCardIDs.isEmpty {
+            exerciseScope = .all
+        }
     }
 
     private var statsTaskID: String {
@@ -507,27 +544,72 @@ private struct DeckStatusBadge: View {
     }
 }
 
+private enum DeckExerciseScope: String, CaseIterable, Identifiable {
+    case all
+    case weak
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all:
+            return "Все"
+        case .weak:
+            return "Сложные"
+        }
+    }
+}
+
+private struct DeckExerciseScopePicker: View {
+    @Binding var selection: DeckExerciseScope
+
+    var body: some View {
+        Picker("Карточки", selection: $selection) {
+            ForEach(DeckExerciseScope.allCases) { scope in
+                Text(scope.title).tag(scope)
+            }
+        }
+        .pickerStyle(.segmented)
+        .frame(width: 168)
+        .accessibilityLabel("Фильтр упражнений")
+    }
+}
+
 private struct StudySection<Content: View>: View {
     let title: String
     var remaining: String?
+    var trailing: AnyView?
     let content: Content
 
-    init(title: String, remaining: String? = nil, @ViewBuilder content: () -> Content) {
+    init(
+        title: String,
+        remaining: String? = nil,
+        trailing: AnyView? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
         self.remaining = remaining
+        self.trailing = trailing
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(LovableSurface.foreground)
-                if let remaining {
-                    Text(remaining)
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(LovableSurface.muted)
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(LovableSurface.foreground)
+                    if let remaining {
+                        Text(remaining)
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(LovableSurface.muted)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let trailing {
+                    trailing
                 }
             }
             .padding(.top, 8)

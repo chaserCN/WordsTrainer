@@ -82,6 +82,10 @@ final class DeckStore {
         try database.weakCards(limit: limit)
     }
 
+    func weakCards(deckID: UUID, limit: Int = 30) throws -> [WeakCardStat] {
+        try database.weakCards(limit: limit, deckID: deckID)
+    }
+
     /// Игра «Колонки» из самых забываемых слов всех активных колод.
     /// Чистая практика: ничего не сохраняем (`savesProgress: false`).
     func weakCardsMatchingSession(
@@ -270,6 +274,33 @@ final class DeckStore {
             deckCards: studyCards,
             dailyUsage: usage,
             engine: engine
+        )
+    }
+
+    func startWeakCardsSession(deck: DeckContent, mode: StudyMode) throws -> StudySession? {
+        let weakStats = try weakCards(deckID: deck.id, limit: deck.activeCards.count)
+        let weakCardIDs = Set(weakStats.map(\.cardID))
+        let studyCards = deck.isActive ? deck.activeCards.filter { weakCardIDs.contains($0.id) } : []
+        guard !studyCards.isEmpty else { return nil }
+
+        let progress = try database.progressMap(deckID: deck.id)
+        let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
+        let items = studyCards.map { card in
+            StudyQueueItem(
+                card: card,
+                progress: progress[card.id] ?? CardProgress.newCard(cardID: card.id)
+            )
+        }
+        let queue = (mode == .recall || mode == .clozeMultipleChoice) ? items.shuffled() : items
+
+        return StudySession(
+            deckID: deck.id,
+            mode: mode,
+            queue: queue,
+            deckCards: studyCards,
+            dailyUsage: usage,
+            engine: engine,
+            matchingRecordScope: mode == .matching ? .none : .deck(deck.id)
         )
     }
 
