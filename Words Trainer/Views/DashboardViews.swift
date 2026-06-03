@@ -1686,13 +1686,7 @@ private struct DeckAvatarView: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [oklch(0.8, 0.12, 280), oklch(0.75, 0.15, 310), oklch(0.7, 0.2, 340)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(DeckAvatarPalette(seed: deck.title).gradient)
 
             if let url = deck.avatarImageURL {
                 AsyncImage(url: url) { phase in
@@ -1714,7 +1708,7 @@ private struct DeckAvatarView: View {
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
-        .shadow(color: oklch(0.5, 0.2, 320, 0.45), radius: 9, x: 0, y: 8)
+        .shadow(color: DeckAvatarPalette(seed: deck.title).shadowColor, radius: 9, x: 0, y: 8)
     }
 }
 

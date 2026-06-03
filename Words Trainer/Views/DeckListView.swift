@@ -223,13 +223,7 @@ struct LovableDeckCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [oklch(0.8, 0.12, 280), oklch(0.75, 0.15, 310), oklch(0.7, 0.2, 340)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .fill(DeckAvatarPalette(seed: deck.title).gradient)
                     .frame(width: 56, height: 56)
                     .overlay {
                         DeckAvatarContent(
@@ -239,7 +233,7 @@ struct LovableDeckCard: View {
                             cornerRadius: 16
                         )
                     }
-                    .shadow(color: oklch(0.5, 0.2, 320, 0.45), radius: 9, x: 0, y: 8)
+                    .shadow(color: DeckAvatarPalette(seed: deck.title).shadowColor, radius: 9, x: 0, y: 8)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(deck.title)
@@ -289,6 +283,46 @@ private func cardsGenitive(_ count: Int) -> String {
     if mod10 == 1 { return "карточка" }
     if mod10 >= 2 && mod10 <= 4 { return "карточки" }
     return "карточек"
+}
+
+struct DeckAvatarPalette {
+    let seed: String
+
+    var gradient: LinearGradient {
+        LinearGradient(
+            colors: [
+                oklch(0.82, 0.15, hue),
+                oklch(0.74, 0.18, hue + 28),
+                oklch(0.70, 0.20, hue + 55)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    var shadowColor: Color {
+        oklch(0.50, 0.18, hue + 35, 0.42)
+    }
+
+    private var hue: Double {
+        Double(Self.stableHash(seed.normalizedAvatarSeed) % 360)
+    }
+
+    private static func stableHash(_ value: String) -> UInt64 {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return hash
+    }
+}
+
+private extension String {
+    var normalizedAvatarSeed: String {
+        trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
 }
 
 struct DeckCardView: View {
