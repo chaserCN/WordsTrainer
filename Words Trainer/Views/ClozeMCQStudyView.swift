@@ -37,11 +37,12 @@ struct ClozeMCQStudyView: View {
                             isSelected: selected == option,
                             isCorrect: answered && optionsMatch(option, card.effectiveClozeAnswer),
                             isWrong: answered && selected == option && !optionsMatch(option, card.effectiveClozeAnswer),
-                            isDimmed: answered && selected != option && !optionsMatch(option, card.effectiveClozeAnswer)
+                            isDimmed: answered && selected != option && !optionsMatch(option, card.effectiveClozeAnswer),
+                            isReplayOnly: answered && optionsMatch(option, card.effectiveClozeAnswer)
                         ) {
                             select(option)
                         }
-                        .disabled(answered)
+                        .disabled(answered && !optionsMatch(option, card.effectiveClozeAnswer))
                     }
                 }
 
@@ -124,7 +125,12 @@ struct ClozeMCQStudyView: View {
     }
 
     private func select(_ option: String) {
-        guard !answered else { return }
+        if answered {
+            if optionsMatch(option, card.effectiveClozeAnswer) {
+                WordAudioPlayer.shared.playClozeAnswer(from: card)
+            }
+            return
+        }
         selected = option
         let isCorrect = optionsMatch(option, card.effectiveClozeAnswer)
         withAnimation(.easeInOut(duration: 0.28)) {
@@ -225,6 +231,7 @@ private struct ClozeChoiceButton: View {
     let isCorrect: Bool
     let isWrong: Bool
     let isDimmed: Bool
+    let isReplayOnly: Bool
     let action: () -> Void
 
     var body: some View {
@@ -256,7 +263,7 @@ private struct ClozeChoiceButton: View {
             .shadow(color: primaryShadow.color, radius: primaryShadow.radius, x: 0, y: primaryShadow.y)
         }
         .buttonStyle(.plain)
-        .opacity(isDimmed ? 0.62 : 1)
+        .opacity(isDimmed || isReplayOnly ? 0.62 : 1)
         .modifier(ShakeEffect(animatableData: isWrong ? 1 : 0))
         .animation(.linear(duration: 0.4), value: isWrong)
     }
@@ -290,6 +297,7 @@ private struct ClozeChoiceButton: View {
     }
 
     private var primaryShadow: (color: Color, radius: CGFloat, y: CGFloat) {
+        if isReplayOnly { return (.clear, 0, 0) }
         if isSelected { return (MatchPalette.primary.opacity(0.28), 8, 5) }
         if isCorrect { return (MatchPalette.success.opacity(0.32), 10, 4) }
         if isWrong { return (MatchPalette.destructive.opacity(0.28), 8, 5) }
