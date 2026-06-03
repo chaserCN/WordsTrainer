@@ -375,21 +375,19 @@ struct StatisticsView: View {
     @State private var todayCount: StudyReviewCount = .zero
     @State private var weekCount: StudyReviewCount = .zero
     @State private var monthCount: StudyReviewCount = .zero
-    @State private var activity: [StudyActivityDay] = []
+    @State private var studyDaysCount = 0
+    @State private var activityMonths: [ActivityMonth] = []
+    @State private var activityMaxCount = 1
     @State private var scheduledDays: [ScheduledReviewDay] = []
     @State private var weakCardsPool: [WeakCardStat] = []
     @State private var weakGameSession: StudySession?
     @State private var showWeakGame = false
     @State private var loadError: String?
 
-    private var studyDaysCount: Int {
-        activity.suffix(30).filter { $0.reviewedCount > 0 }.count
-    }
-
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                LazyVStack(alignment: .leading, spacing: 24) {
                     StatisticsHeader()
 
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
@@ -399,7 +397,7 @@ struct StatisticsView: View {
                         DashboardMetric(title: "Дни занятий", value: "\(studyDaysCount)", subtitle: "за 30 дней")
                     }
 
-                    ActivityHeatmap(days: activity)
+                    ActivityHeatmap(months: activityMonths, maxCount: activityMaxCount)
                     ForecastSection(days: scheduledDays)
                     WeakCardsSection(
                         cards: Array(weakCardsPool.prefix(WeakCardsPractice.displayLimit)),
@@ -451,7 +449,9 @@ struct StatisticsView: View {
                 todayCount = .zero
                 weekCount = .zero
                 monthCount = .zero
-                activity = []
+                studyDaysCount = 0
+                activityMonths = []
+                activityMaxCount = 1
                 scheduledDays = []
                 weakCardsPool = []
                 loadError = nil
@@ -469,10 +469,13 @@ struct StatisticsView: View {
             let todayStart = calendar.startOfDay(for: .now)
             let weekStart = calendar.date(byAdding: .day, value: -6, to: todayStart) ?? todayStart
             let monthStart = calendar.date(byAdding: .day, value: -29, to: todayStart) ?? todayStart
+            let activityDays = try deckStore.studyActivity(days: 120)
             todayCount = try deckStore.studyReviewCount(since: todayStart)
             weekCount = try deckStore.studyReviewCount(since: weekStart)
             monthCount = try deckStore.studyReviewCount(since: monthStart)
-            activity = try deckStore.studyActivity(days: 120)
+            studyDaysCount = Self.studyDaysCount(from: activityDays)
+            activityMonths = ActivityCalendarBuilder.months(from: activityDays)
+            activityMaxCount = max(activityDays.map(\.reviewedCount).max() ?? 0, 1)
             scheduledDays = try deckStore.scheduledReviewDays(days: 7)
             weakCardsPool = try deckStore.weakCards(limit: WeakCardsPractice.fetchLimit)
             loadError = nil
@@ -486,6 +489,10 @@ struct StatisticsView: View {
         guard let session = try? store.weakCardsMatchingSession(from: weakCardsPool) else { return }
         weakGameSession = session
         showWeakGame = true
+    }
+
+    private static func studyDaysCount(from activity: [StudyActivityDay]) -> Int {
+        activity.suffix(30).filter { $0.reviewedCount > 0 }.count
     }
 }
 
@@ -1314,12 +1321,8 @@ private struct DashboardMetric: View {
 }
 
 private struct ActivityHeatmap: View {
-    let days: [StudyActivityDay]
-
-    private var maxCount: Int { max(days.map(\.reviewedCount).max() ?? 0, 1) }
-    private var months: [ActivityMonth] {
-        ActivityCalendarBuilder.months(from: days)
-    }
+    let months: [ActivityMonth]
+    let maxCount: Int
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1338,6 +1341,7 @@ private struct ActivityHeatmap: View {
                     HStack(alignment: .top, spacing: 18) {
                         ForEach(months) { month in
                             ActivityMonthView(month: month, maxCount: maxCount)
+                                .equatable()
                         }
                         Color.clear
                             .frame(width: 1, height: 1)
@@ -1350,7 +1354,7 @@ private struct ActivityHeatmap: View {
                 .onAppear {
                     proxy.scrollTo("activity-latest", anchor: .trailing)
                 }
-                .onChange(of: days) {
+                .onChange(of: months) {
                     proxy.scrollTo("activity-latest", anchor: .trailing)
                 }
             }
@@ -1361,7 +1365,7 @@ private struct ActivityHeatmap: View {
 
 }
 
-private struct ActivityMonthView: View {
+private struct ActivityMonthView: View, Equatable {
     let month: ActivityMonth
     let maxCount: Int
 
@@ -1405,6 +1409,7 @@ private struct ActivityMonthView: View {
             }
         }
         .frame(width: 162, alignment: .leading)
+        .drawingGroup()
     }
 
     private func color(for count: Int) -> Color {
