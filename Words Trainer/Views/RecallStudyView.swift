@@ -6,23 +6,26 @@ struct RecallStudyView: View {
     let remainingCount: Int
     let onAnswer: (ReviewOutcome) -> Void
 
+    private static let verticalGap: CGFloat = 16
+    private static let actionGap: CGFloat = 20
+
     var body: some View {
         VStack(spacing: 0) {
             StudyProgressHeader(totalCount: totalCount, remainingCount: remainingCount)
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
 
-            Spacer()
+            Spacer(minLength: Self.verticalGap)
 
-            wordCard
-                .padding(.horizontal, 16)
-                .studyCardChangeTransition(cardID: card.id)
+            VStack(spacing: Self.actionGap) {
+                wordCard
+                    .studyCardChangeTransition(cardID: card.id)
 
-            Spacer()
+                ReviewOutcomeControls(onAnswer: onAnswer)
+            }
+            .padding(.horizontal, 16)
 
-            ReviewOutcomeControls(onAnswer: onAnswer)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 10)
+            Spacer(minLength: Self.verticalGap)
         }
     }
 
@@ -39,8 +42,9 @@ struct RecallStudyView: View {
                     .font(.system(size: 48, weight: .semibold))
                     .foregroundStyle(oklch(0.99, 0.01, 240))
                     .multilineTextAlignment(.center)
-                    .minimumScaleFactor(0.6)
-                    .lineLimit(2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.35)
+                    .allowsTightening(true)
 
                 if !card.translation.isEmpty {
                     Text(card.translation)
