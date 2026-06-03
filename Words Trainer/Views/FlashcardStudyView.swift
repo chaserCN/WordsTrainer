@@ -368,7 +368,7 @@ struct FlashcardStudyView: View {
                     .padding(.top, layout == .expanded ? 12 : 4)
 
                 if isShowingExampleExpanded {
-                    exampleDetails
+                    exampleDetailsFlipArea
                         .padding(.horizontal, 18)
                         .padding(.top, 12)
                         .padding(.bottom, 20)
@@ -378,6 +378,18 @@ struct FlashcardStudyView: View {
                 }
             }
         }
+    }
+
+    private var exampleDetailsFlipArea: some View {
+        Button {
+            flipCard()
+        } label: {
+            exampleDetails
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Перевернуть карточку")
     }
 
     private var bottomFlipArea: some View {
