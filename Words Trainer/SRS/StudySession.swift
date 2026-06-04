@@ -91,7 +91,8 @@ final class StudySession {
     func advanceAfterReview(
         outcome: ReviewOutcome,
         onSave: (_ progress: CardProgress, _ wasNew: Bool) throws -> Void,
-        onReview: ((_ event: StudyReviewEvent) throws -> Void)? = nil
+        onReview: ((_ event: StudyReviewEvent) throws -> Void)? = nil,
+        onPracticeReview: ((_ event: PracticeReviewEvent) throws -> Void)? = nil
     ) throws {
         guard let item = current else { return }
         let reviewedAt = Date()
@@ -105,17 +106,31 @@ final class StudySession {
         if savesProgress {
             let eventDeckID = item.deckID ?? deckID
             try onSave(updated, wasNew && outcome.passed)
-            try onReview?(
-                StudyReviewEvent(
+            if mode.recordsStudyReview {
+                try onReview?(
+                    StudyReviewEvent(
+                        cardID: item.card.id,
+                        deckID: eventDeckID,
+                        mode: mode,
+                        outcome: outcome,
+                        source: reviewSource,
+                        reviewedAt: reviewedAt,
+                        wasNew: wasNew,
+                        previousState: String(describing: item.progress.fsrsCard.state),
+                        newState: String(describing: updated.fsrsCard.state)
+                    )
+                )
+            }
+        } else if mode.recordsStudyReview {
+            let eventDeckID = item.deckID ?? deckID
+            try onPracticeReview?(
+                PracticeReviewEvent(
                     cardID: item.card.id,
                     deckID: eventDeckID,
                     mode: mode,
                     outcome: outcome,
                     source: reviewSource,
-                    reviewedAt: reviewedAt,
-                    wasNew: wasNew,
-                    previousState: String(describing: item.progress.fsrsCard.state),
-                    newState: String(describing: updated.fsrsCard.state)
+                    practicedAt: reviewedAt
                 )
             )
         }

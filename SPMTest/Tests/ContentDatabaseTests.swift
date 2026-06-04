@@ -519,6 +519,19 @@ struct ContentDatabaseTests {
                 deckID: deckID,
                 progress: CardProgress.newCard(cardID: cardID, now: dueAt)
             )
+            let practiceReviewID = UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-cccccccccccc")!
+            try database.savePracticeReview(
+                PracticeReviewEvent(
+                    id: practiceReviewID,
+                    cardID: cardID,
+                    deckID: deckID,
+                    mode: .clozeMultipleChoice,
+                    outcome: .correct,
+                    source: .todayPractice,
+                    practicedAt: reviewedAt,
+                    durationMS: 900
+                )
+            )
             try database.saveMatchingRecord(
                 DeckMatchingRecord(
                     deckID: deckID,
@@ -527,14 +540,34 @@ struct ContentDatabaseTests {
                     achievedAt: reviewedAt
                 )
             )
+            let matchingAttemptID = UUID(uuidString: "99999999-9999-4999-8999-999999999999")!
+            try database.saveMatchingAttempt(
+                MatchingAttemptEvent(
+                    id: matchingAttemptID,
+                    deckID: deckID,
+                    mode: .matching,
+                    source: .deckSession,
+                    completedAt: reviewedAt,
+                    duration: 14.25,
+                    pairCount: 4
+                )
+            )
 
             let batch = try database.pendingServerSyncBatch()
             #expect(batch.reviewIDs == [reviewID])
+            #expect(batch.practiceReviewIDs == [practiceReviewID])
             #expect(batch.progressCardIDs == [cardID])
             #expect(batch.matchingDeckIDs == [deckID])
+            #expect(batch.matchingAttemptIDs == [matchingAttemptID])
             #expect(batch.payload.reviews.map(\.clientEventId) == [reviewID])
+            #expect(batch.payload.practiceReviews.map(\.clientEventId) == [practiceReviewID])
+            #expect(batch.payload.practiceReviews[0].mode == "clozeMultipleChoice")
+            #expect(batch.payload.practiceReviews[0].source == "today_practice")
             #expect(batch.payload.progress.map(\.cardId) == [cardID])
             #expect(batch.payload.matchingRecords.map(\.deckId) == [deckID])
+            #expect(batch.payload.matchingAttempts.map(\.clientEventId) == [matchingAttemptID])
+            #expect(batch.payload.matchingAttempts[0].mode == "matching")
+            #expect(batch.payload.matchingAttempts[0].durationMs == 14250)
             #expect(batch.payload.deckPreferences.isEmpty)
             #expect(batch.payload.reviews[0].mode == "flashcards")
             #expect(batch.payload.reviews[0].outcome == "remembered")

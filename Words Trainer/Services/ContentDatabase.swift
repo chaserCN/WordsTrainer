@@ -27,9 +27,17 @@ struct PendingProgressSnapshot {
     let updatedAt: Date
 }
 
+struct PendingPracticeReviewSnapshot {
+    let id: UUID
+}
+
 struct PendingMatchingRecordSnapshot {
     let deckID: UUID
     let achievedAt: Date
+}
+
+struct PendingMatchingAttemptSnapshot {
+    let id: UUID
 }
 
 struct PendingDeckPreferenceSnapshot {
@@ -40,18 +48,24 @@ struct PendingDeckPreferenceSnapshot {
 struct PendingServerSyncBatch {
     let payload: ServerSyncEventsPayload
     let reviewIDs: [UUID]
+    let practiceReviewIDs: [UUID]
     let progressCardIDs: [UUID]
     let matchingDeckIDs: [UUID]
+    let matchingAttemptIDs: [UUID]
     let deckPreferenceDeckIDs: [UUID]
+    let practiceReviewSnapshots: [PendingPracticeReviewSnapshot]
     let progressSnapshots: [PendingProgressSnapshot]
     let matchingSnapshots: [PendingMatchingRecordSnapshot]
+    let matchingAttemptSnapshots: [PendingMatchingAttemptSnapshot]
     let deckPreferenceSnapshots: [PendingDeckPreferenceSnapshot]
 
     var isEmpty: Bool {
         payload.isEmpty
             && reviewIDs.isEmpty
+            && practiceReviewIDs.isEmpty
             && progressCardIDs.isEmpty
             && matchingDeckIDs.isEmpty
+            && matchingAttemptIDs.isEmpty
             && deckPreferenceDeckIDs.isEmpty
     }
 }
@@ -443,6 +457,34 @@ final class ContentDatabase {
         }
     }
 
+    func savePracticeReview(_ event: PracticeReviewEvent) throws {
+        let sql = """
+        INSERT INTO practice_reviews (
+            id, user_id, card_id, deck_id, mode, outcome, source, practiced_at, duration_ms, synced_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+        ON CONFLICT(id) DO NOTHING
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: event.id)
+        try bind(statement, index: 2, uuid: userID)
+        try bind(statement, index: 3, uuid: event.cardID)
+        try bind(statement, index: 4, uuid: event.deckID)
+        try bind(statement, index: 5, text: event.mode.rawValue)
+        try bind(statement, index: 6, text: event.outcome.databaseValue)
+        try bind(statement, index: 7, text: event.source.rawValue)
+        guard sqlite3_bind_double(statement, 8, event.practicedAt.timeIntervalSince1970) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        try bind(statement, index: 9, int: event.durationMS)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
+        }
+    }
+
     func reviewedCardIDs(
         day: Date = .now,
         deckID: UUID? = nil,
@@ -829,24 +871,57 @@ final class ContentDatabase {
         }
     }
 
+    func saveMatchingAttempt(_ event: MatchingAttemptEvent) throws {
+        let sql = """
+        INSERT INTO matching_attempts (
+            id, user_id, deck_id, mode, source, completed_at, duration_ms, pair_count, synced_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+        ON CONFLICT(id) DO NOTHING
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: event.id)
+        try bind(statement, index: 2, uuid: userID)
+        try bind(statement, index: 3, uuid: event.deckID)
+        try bind(statement, index: 4, text: event.mode.rawValue)
+        try bind(statement, index: 5, text: event.source.rawValue)
+        guard sqlite3_bind_double(statement, 6, event.completedAt.timeIntervalSince1970) == SQLITE_OK,
+              sqlite3_bind_int(statement, 7, Int32(max(0, Int((event.duration * 1000).rounded())))) == SQLITE_OK,
+              sqlite3_bind_int(statement, 8, Int32(event.pairCount)) == SQLITE_OK,
+              sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
+        }
+    }
+
     func pendingServerSyncBatch(limit: Int = 100) throws -> PendingServerSyncBatch {
         let reviews = try pendingReviewEvents(limit: limit)
+        let practiceReviews = try pendingPracticeReviews(limit: limit)
         let progress = try pendingProgressItems(limit: limit)
         let matchingRecords = try pendingMatchingRecords(limit: limit)
+        let matchingAttempts = try pendingMatchingAttempts(limit: limit)
         let deckPreferences = try pendingDeckPreferences(limit: limit)
         return PendingServerSyncBatch(
             payload: ServerSyncEventsPayload(
                 reviews: reviews.payload,
+                practiceReviews: practiceReviews.payload,
                 progress: progress.payload,
                 matchingRecords: matchingRecords.payload,
+                matchingAttempts: matchingAttempts.payload,
                 deckPreferences: deckPreferences.payload
             ),
             reviewIDs: reviews.ids,
+            practiceReviewIDs: practiceReviews.snapshots.map(\.id),
             progressCardIDs: progress.snapshots.map(\.cardID),
             matchingDeckIDs: matchingRecords.snapshots.map(\.deckID),
+            matchingAttemptIDs: matchingAttempts.snapshots.map(\.id),
             deckPreferenceDeckIDs: deckPreferences.snapshots.map(\.deckID),
+            practiceReviewSnapshots: practiceReviews.snapshots,
             progressSnapshots: progress.snapshots,
             matchingSnapshots: matchingRecords.snapshots,
+            matchingAttemptSnapshots: matchingAttempts.snapshots,
             deckPreferenceSnapshots: deckPreferences.snapshots
         )
     }
@@ -856,11 +931,17 @@ final class ContentDatabase {
         for reviewID in batch.reviewIDs {
             try markReviewSynced(reviewID: reviewID, syncedAt: timestamp)
         }
+        for snapshot in batch.practiceReviewSnapshots {
+            try markPracticeReviewSynced(snapshot: snapshot, syncedAt: timestamp)
+        }
         for snapshot in batch.progressSnapshots {
             try markProgressSynced(snapshot: snapshot, syncedAt: timestamp)
         }
         for snapshot in batch.matchingSnapshots {
             try markMatchingRecordSynced(snapshot: snapshot, syncedAt: timestamp)
+        }
+        for snapshot in batch.matchingAttemptSnapshots {
+            try markMatchingAttemptSynced(snapshot: snapshot, syncedAt: timestamp)
         }
         for snapshot in batch.deckPreferenceSnapshots {
             try markDeckPreferenceSynced(snapshot: snapshot, syncedAt: timestamp)
@@ -920,6 +1001,66 @@ final class ContentDatabase {
             )
         }
         return (payload, ids)
+    }
+
+    private func pendingPracticeReviews(limit: Int) throws -> (
+        payload: [ServerPracticeReviewPayload],
+        snapshots: [PendingPracticeReviewSnapshot]
+    ) {
+        let sql = """
+        SELECT practice_reviews.id, practice_reviews.deck_id, practice_reviews.card_id,
+               practice_reviews.mode, practice_reviews.outcome, practice_reviews.source,
+               practice_reviews.practiced_at, practice_reviews.duration_ms
+        FROM practice_reviews
+        JOIN cards ON cards.id = practice_reviews.card_id AND cards.deck_id = practice_reviews.deck_id
+        JOIN user_deck_assignments ON user_deck_assignments.deck_id = practice_reviews.deck_id
+        WHERE practice_reviews.user_id = ?
+          AND user_deck_assignments.user_id = practice_reviews.user_id
+          AND user_deck_assignments.status = 'active'
+          AND cards.status = 'active'
+          AND practice_reviews.synced_at IS NULL
+        ORDER BY practice_reviews.practiced_at
+        LIMIT ?
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, int: limit)
+
+        var payload: [ServerPracticeReviewPayload] = []
+        var snapshots: [PendingPracticeReviewSnapshot] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let id = uuidColumn(statement, index: 0),
+                  let deckID = uuidColumn(statement, index: 1),
+                  let cardID = uuidColumn(statement, index: 2),
+                  let mode = textColumn(statement, index: 3),
+                  let outcome = textColumn(statement, index: 4),
+                  let source = textColumn(statement, index: 5) else { continue }
+            let durationMS: Int?
+            if sqlite3_column_type(statement, 7) == SQLITE_NULL {
+                durationMS = nil
+            } else {
+                durationMS = Int(sqlite3_column_int(statement, 7))
+            }
+            snapshots.append(PendingPracticeReviewSnapshot(id: id))
+            payload.append(
+                ServerPracticeReviewPayload(
+                    clientEventId: id,
+                    deckId: deckID,
+                    deckVersionId: nil,
+                    cardId: cardID,
+                    mode: mode,
+                    outcome: outcome,
+                    source: source,
+                    practicedAt: isoString(Date(timeIntervalSince1970: sqlite3_column_double(statement, 6))),
+                    durationMs: durationMS
+                )
+            )
+        }
+        return (payload, snapshots)
     }
 
     private func pendingProgressItems(limit: Int) throws -> (payload: [ServerProgressPayload], snapshots: [PendingProgressSnapshot]) {
@@ -1013,6 +1154,56 @@ final class ContentDatabase {
         return (payload, snapshots)
     }
 
+    private func pendingMatchingAttempts(limit: Int) throws -> (
+        payload: [ServerMatchingAttemptPayload],
+        snapshots: [PendingMatchingAttemptSnapshot]
+    ) {
+        let sql = """
+        SELECT matching_attempts.id, matching_attempts.deck_id, matching_attempts.mode,
+               matching_attempts.source, matching_attempts.completed_at,
+               matching_attempts.duration_ms, matching_attempts.pair_count
+        FROM matching_attempts
+        LEFT JOIN user_deck_assignments ON user_deck_assignments.user_id = matching_attempts.user_id
+            AND user_deck_assignments.deck_id = matching_attempts.deck_id
+        WHERE matching_attempts.user_id = ?
+          AND matching_attempts.synced_at IS NULL
+          AND (
+              matching_attempts.deck_id IS NULL
+              OR user_deck_assignments.status = 'active'
+          )
+        ORDER BY matching_attempts.completed_at
+        LIMIT ?
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, int: limit)
+
+        var payload: [ServerMatchingAttemptPayload] = []
+        var snapshots: [PendingMatchingAttemptSnapshot] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let id = uuidColumn(statement, index: 0),
+                  let mode = textColumn(statement, index: 2),
+                  let source = textColumn(statement, index: 3) else { continue }
+            snapshots.append(PendingMatchingAttemptSnapshot(id: id))
+            payload.append(
+                ServerMatchingAttemptPayload(
+                    clientEventId: id,
+                    deckId: uuidColumn(statement, index: 1),
+                    mode: mode,
+                    source: source,
+                    completedAt: isoString(Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))),
+                    durationMs: Int(sqlite3_column_int(statement, 5)),
+                    pairCount: Int(sqlite3_column_int(statement, 6))
+                )
+            )
+        }
+        return (payload, snapshots)
+    }
+
     private func pendingDeckPreferences(limit: Int) throws -> (payload: [ServerDeckPreferencePayload], snapshots: [PendingDeckPreferenceSnapshot]) {
         let sql = """
         SELECT user_deck_preferences.deck_id,
@@ -1059,6 +1250,14 @@ final class ContentDatabase {
         )
     }
 
+    private func markPracticeReviewSynced(snapshot: PendingPracticeReviewSnapshot, syncedAt: Double) throws {
+        try markSynced(
+            sql: "UPDATE practice_reviews SET synced_at = ? WHERE user_id = ? AND id = ?",
+            id: snapshot.id,
+            syncedAt: syncedAt
+        )
+    }
+
     private func markProgressSynced(snapshot: PendingProgressSnapshot, syncedAt: Double) throws {
         try markSynced(
             sql: "UPDATE card_progress SET synced_at = ? WHERE user_id = ? AND card_id = ? AND updated_at = ?",
@@ -1074,6 +1273,14 @@ final class ContentDatabase {
             id: snapshot.deckID,
             syncedAt: syncedAt,
             unchangedAt: snapshot.achievedAt.timeIntervalSince1970
+        )
+    }
+
+    private func markMatchingAttemptSynced(snapshot: PendingMatchingAttemptSnapshot, syncedAt: Double) throws {
+        try markSynced(
+            sql: "UPDATE matching_attempts SET synced_at = ? WHERE user_id = ? AND id = ?",
+            id: snapshot.id,
+            syncedAt: syncedAt
         )
     }
 
@@ -2124,6 +2331,22 @@ final class ContentDatabase {
             PRIMARY KEY (user_id, deck_id),
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
+        CREATE TABLE IF NOT EXISTS matching_attempts (
+            id TEXT PRIMARY KEY NOT NULL,
+            user_id TEXT NOT NULL,
+            deck_id TEXT,
+            mode TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'deck_session',
+            completed_at REAL NOT NULL,
+            duration_ms INTEGER NOT NULL,
+            pair_count INTEGER NOT NULL,
+            synced_at REAL,
+            FOREIGN KEY (deck_id) REFERENCES decks(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_matching_attempts_user_completed
+            ON matching_attempts(user_id, completed_at);
+        CREATE INDEX IF NOT EXISTS idx_matching_attempts_deck_completed
+            ON matching_attempts(deck_id, completed_at);
         CREATE TABLE IF NOT EXISTS study_reviews (
             id TEXT PRIMARY KEY NOT NULL,
             user_id TEXT NOT NULL,
@@ -2144,6 +2367,23 @@ final class ContentDatabase {
         CREATE INDEX IF NOT EXISTS idx_study_reviews_card_id ON study_reviews(card_id);
         CREATE INDEX IF NOT EXISTS idx_study_reviews_reviewed_at ON study_reviews(reviewed_at);
         CREATE INDEX IF NOT EXISTS idx_study_reviews_deck_reviewed ON study_reviews(deck_id, reviewed_at);
+        CREATE TABLE IF NOT EXISTS practice_reviews (
+            id TEXT PRIMARY KEY NOT NULL,
+            user_id TEXT NOT NULL,
+            card_id TEXT NOT NULL,
+            deck_id TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'today_practice',
+            practiced_at REAL NOT NULL,
+            duration_ms INTEGER,
+            synced_at REAL,
+            FOREIGN KEY (card_id) REFERENCES cards(id),
+            FOREIGN KEY (deck_id) REFERENCES decks(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_practice_reviews_card_id ON practice_reviews(card_id);
+        CREATE INDEX IF NOT EXISTS idx_practice_reviews_practiced_at ON practice_reviews(practiced_at);
+        CREATE INDEX IF NOT EXISTS idx_practice_reviews_deck_practiced ON practice_reviews(deck_id, practiced_at);
         """
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw ContentDatabaseError.migrationFailed
@@ -2323,10 +2563,17 @@ final class ContentDatabase {
             "UPDATE sync_metadata SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
             "UPDATE deck_matching_records SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
             "UPDATE deck_matching_records SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
+            "UPDATE matching_attempts SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
+            "UPDATE matching_attempts SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
+            "UPDATE matching_attempts SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
             "UPDATE study_reviews SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
             "UPDATE study_reviews SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
             "UPDATE study_reviews SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
             "UPDATE study_reviews SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
+            "UPDATE practice_reviews SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
+            "UPDATE practice_reviews SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
+            "UPDATE practice_reviews SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
+            "UPDATE practice_reviews SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
         ]
         for sql in statements {
             guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {

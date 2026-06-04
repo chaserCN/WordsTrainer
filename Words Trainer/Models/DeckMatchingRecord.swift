@@ -14,6 +14,34 @@ struct MatchingRecordSummary: Sendable, Equatable {
     let achievedAt: Date
 }
 
+struct MatchingAttemptEvent: Sendable, Equatable {
+    let id: UUID
+    let deckID: UUID?
+    let mode: StudyMode
+    let source: StudyReviewSource
+    let completedAt: Date
+    let duration: TimeInterval
+    let pairCount: Int
+
+    init(
+        id: UUID = UUID(),
+        deckID: UUID?,
+        mode: StudyMode,
+        source: StudyReviewSource,
+        completedAt: Date = .now,
+        duration: TimeInterval,
+        pairCount: Int
+    ) {
+        self.id = id
+        self.deckID = deckID
+        self.mode = mode
+        self.source = source
+        self.completedAt = completedAt
+        self.duration = duration
+        self.pairCount = pairCount
+    }
+}
+
 enum MatchingRecordScope: Sendable, Hashable {
     case none
     case deck(UUID)

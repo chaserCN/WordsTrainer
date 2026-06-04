@@ -38,6 +38,15 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable {
         default: true
         }
     }
+
+    var recordsStudyReview: Bool {
+        switch self {
+        case .flashcards, .clozeMultipleChoice, .clozeTyping:
+            true
+        case .recall, .matching, .matchingAudio:
+            false
+        }
+    }
 }
 
 enum ReviewOutcome: Sendable, Hashable {

@@ -47,6 +47,37 @@ struct StudyReviewEvent: Sendable, Hashable {
     }
 }
 
+struct PracticeReviewEvent: Sendable, Hashable {
+    let id: UUID
+    let cardID: UUID
+    let deckID: UUID
+    let mode: StudyMode
+    let outcome: ReviewOutcome
+    let source: StudyReviewSource
+    let practicedAt: Date
+    let durationMS: Int?
+
+    init(
+        id: UUID = UUID(),
+        cardID: UUID,
+        deckID: UUID,
+        mode: StudyMode,
+        outcome: ReviewOutcome,
+        source: StudyReviewSource,
+        practicedAt: Date,
+        durationMS: Int? = nil
+    ) {
+        self.id = id
+        self.cardID = cardID
+        self.deckID = deckID
+        self.mode = mode
+        self.outcome = outcome
+        self.source = source
+        self.practicedAt = practicedAt
+        self.durationMS = durationMS
+    }
+}
+
 struct StudyActivityDay: Identifiable, Hashable {
     let dayKey: String
     let reviewedCount: Int

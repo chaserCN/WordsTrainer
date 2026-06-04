@@ -124,6 +124,32 @@ struct RecallSessionTests {
         #expect(saved?.fsrsCard.state != .new)
     }
 
+    @Test("recall updates progress without creating a study review")
+    @MainActor
+    func recallDoesNotCreateStudyReview() throws {
+        let engine = StudySessionEngine()
+        let cardID = UUID()
+        let card = TestFixtures.card(id: cardID, word: "cat", translation: "кот")
+        let session = StudySession(
+            deckID: UUID(),
+            mode: .recall,
+            queue: [TestFixtures.queueItem(card: card)],
+            dailyUsage: nil,
+            engine: engine
+        )
+
+        var didSaveProgress = false
+        var didSaveReview = false
+        try session.advanceAfterReview(outcome: .remembered) { _, _ in
+            didSaveProgress = true
+        } onReview: { _ in
+            didSaveReview = true
+        }
+
+        #expect(didSaveProgress)
+        #expect(!didSaveReview)
+    }
+
     @Test("practice review advances without saving progress or review event")
     @MainActor
     func practiceReviewDoesNotSaveProgressOrReviewEvent() throws {
@@ -150,6 +176,36 @@ struct RecallSessionTests {
         #expect(session.isFinished)
         #expect(!didSaveProgress)
         #expect(!didSaveReview)
+    }
+
+    @Test("practice review creates a separate practice event")
+    @MainActor
+    func practiceReviewCreatesPracticeEvent() throws {
+        let engine = StudySessionEngine()
+        let deckID = UUID()
+        let cardID = UUID()
+        let card = TestFixtures.card(id: cardID, word: "cat", translation: "кот")
+        let session = StudySession(
+            deckID: deckID,
+            mode: .flashcards,
+            queue: [TestFixtures.queueItem(card: card)],
+            dailyUsage: nil,
+            engine: engine,
+            reviewSource: .todayPractice,
+            savesProgress: false
+        )
+
+        var practiceEvent: PracticeReviewEvent?
+        try session.advanceAfterReview(outcome: .remembered) { _, _ in } onReview: { _ in
+            Issue.record("Practice should not create a study review")
+        } onPracticeReview: { event in
+            practiceEvent = event
+        }
+
+        #expect(practiceEvent?.cardID == cardID)
+        #expect(practiceEvent?.deckID == deckID)
+        #expect(practiceEvent?.source == .todayPractice)
+        #expect(practiceEvent?.outcome == .remembered)
     }
 
     @Test("review event uses queue item deck id when session mixes decks")

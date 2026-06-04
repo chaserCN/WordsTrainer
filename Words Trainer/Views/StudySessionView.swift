@@ -17,6 +17,7 @@ struct StudySessionView: View {
     /// Время прохождения раунда — для сообщения о рекорде.
     @State private var finishedDuration: TimeInterval?
     @State private var isFlashcardSubmitEnabled = true
+    @State private var didSaveMatchingAttempt = false
 
     private static let flashcardSubmitCooldown: TimeInterval = 1
 
@@ -105,14 +106,26 @@ struct StudySessionView: View {
             }
         }
         .onChange(of: session.isFinished) { _, isFinished in
-            guard isFinished, session.mode == .matching else { return }
+            guard isFinished, session.mode.isMatching, !didSaveMatchingAttempt else { return }
+            didSaveMatchingAttempt = true
             let duration = session.matchingElapsed
             finishedDuration = duration
-            beatRecord = (try? store.saveMatchingRecordIfBest(
-                scope: session.matchingRecordScope,
-                duration: duration,
-                pairCount: session.matchingTotalPairCount
-            )) ?? false
+            try? store.saveMatchingAttempt(
+                MatchingAttemptEvent(
+                    deckID: matchingAttemptDeckID,
+                    mode: session.mode,
+                    source: session.reviewSource,
+                    duration: duration,
+                    pairCount: session.matchingTotalPairCount
+                )
+            )
+            if session.mode == .matching {
+                beatRecord = (try? store.saveMatchingRecordIfBest(
+                    scope: session.matchingRecordScope,
+                    duration: duration,
+                    pairCount: session.matchingTotalPairCount
+                )) ?? false
+            }
         }
     }
 
@@ -167,6 +180,19 @@ struct StudySessionView: View {
     /// Кнопки навбара — единообразно тёмные на светлой теме (как договаривались).
     private var navbarButtonTint: Color {
         usesLightStudyTheme ? LovableSurface.foreground : .white
+    }
+
+    private var matchingAttemptDeckID: UUID? {
+        switch session.matchingRecordScope {
+        case .deck(let deckID):
+            return deckID
+        case .today, .none:
+            guard session.deckID != TodayStudySessionBuilder.deckID,
+                  session.deckID != WeakCardsPractice.deckID else {
+                return nil
+            }
+            return session.deckID
+        }
     }
 
     private var usesLightStudyTheme: Bool {

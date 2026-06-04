@@ -348,6 +348,14 @@ final class DeckStore {
         try database.saveStudyReview(event)
     }
 
+    func savePracticeReview(_ event: PracticeReviewEvent) throws {
+        try database.savePracticeReview(event)
+    }
+
+    func saveMatchingAttempt(_ event: MatchingAttemptEvent) throws {
+        try database.saveMatchingAttempt(event)
+    }
+
     func matchingRecord(deckID: UUID) throws -> DeckMatchingRecord? {
         try database.matchingRecord(deckID: deckID)
     }
@@ -465,6 +473,8 @@ extension StudySession {
             try store.saveProgress(deckID: progressDeckID, progress: progress, wasNew: wasNew)
         } onReview: { event in
             try store.saveStudyReview(event)
+        } onPracticeReview: { event in
+            try store.savePracticeReview(event)
         }
         guard shouldNotify else { return }
         store.notifyLocalDataDidChange(deckID: progressDeckID)
