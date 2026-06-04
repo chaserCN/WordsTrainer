@@ -4,6 +4,8 @@ import FSRS
 @Observable
 @MainActor
 final class StudySession {
+    private static let matchingStartDelay: TimeInterval = 1
+
     let deckID: UUID
     let mode: StudyMode
     let matchingRecordScope: MatchingRecordScope
@@ -41,7 +43,7 @@ final class StudySession {
 
     var matchingElapsed: TimeInterval {
         guard let matchingStartedAt else { return 0 }
-        return Date().timeIntervalSince(matchingStartedAt)
+        return max(0, Date().timeIntervalSince(matchingStartedAt))
     }
 
     init(
@@ -67,7 +69,7 @@ final class StudySession {
         if mode.isMatching {
             let pairs = queue.flatMap { MatchingPair.pairs(from: $0) }
             matchingTotalPairCount = pairs.count
-            matchingStartedAt = Date()
+            matchingStartedAt = Date().addingTimeInterval(Self.matchingStartDelay)
             self.queue = []
             var rng = SystemRandomNumberGenerator()
             matchingScheduler = MatchingPairScheduler(pairs: pairs, rng: &rng)

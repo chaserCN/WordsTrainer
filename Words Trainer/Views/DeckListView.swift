@@ -422,6 +422,7 @@ struct DeckDetailView: View {
     @State private var statusError: String?
     @State private var exerciseScope: DeckExerciseScope = .all
     @State private var weakCardIDs: Set<UUID> = []
+    @State private var matchingRecord: DeckMatchingRecord?
     private var studyCards: [WordCardContent] { deck.isActive ? deck.activeCards : [] }
     private var scopedStudyCards: [WordCardContent] {
         switch exerciseScope {
@@ -473,7 +474,7 @@ struct DeckDetailView: View {
 
                     StudyActionButton(
                         title: "Колонки",
-                        subtitle: "Соедини слово и перевод",
+                        subtitle: matchingSubtitle,
                         systemImage: "rectangle.split.2x1.fill",
                         accent: .green,
                         isEnabled: !scopedStudyCards.isEmpty
@@ -539,13 +540,11 @@ struct DeckDetailView: View {
             }
         }
         .task(id: statsTaskID) {
-            stats = (try? store.stats(for: deck)) ?? .zero
-            reloadWeakCards()
+            reloadDeckState()
         }
         .onChange(of: showStudy) { _, isShowing in
             guard !isShowing else { return }
-            stats = (try? store.stats(for: deck)) ?? .zero
-            reloadWeakCards()
+            reloadDeckState()
         }
         .alert("Не удалось обновить колоду", isPresented: statusErrorBinding) {
             Button("ОК", role: .cancel) {
@@ -576,6 +575,27 @@ struct DeckDetailView: View {
         }
     }
 
+    private var matchingSubtitle: String {
+        guard exerciseScope == .all,
+              let matchingRecord,
+              matchingRecord.pairCount == fullDeckMatchingPairCount else {
+            return "Соедини слово и перевод"
+        }
+        return "Рекорд: \(StudyDurationFormat.string(matchingRecord.bestDuration))"
+    }
+
+    private var fullDeckMatchingPairCount: Int {
+        studyCards.reduce(0) { count, card in
+            count + MatchingPair.pairs(from: StudyQueueItem(card: card, progress: CardProgress.newCard(cardID: card.id))).count
+        }
+    }
+
+    private func reloadDeckState() {
+        stats = (try? store.stats(for: deck)) ?? .zero
+        matchingRecord = try? store.matchingRecord(deckID: deck.id)
+        reloadWeakCards()
+    }
+
     private func reloadWeakCards() {
         let weakCards = (try? store.weakCards(deckID: deck.id, limit: deck.activeCards.count)) ?? []
         weakCardIDs = Set(weakCards.map(\.cardID))
@@ -602,7 +622,7 @@ struct DeckDetailView: View {
         do {
             try store.setDeckStatus(newStatus, for: deck.id)
             deck.status = newStatus
-            stats = (try? store.stats(for: deck)) ?? .zero
+            reloadDeckState()
         } catch {
             statusError = error.localizedDescription
         }

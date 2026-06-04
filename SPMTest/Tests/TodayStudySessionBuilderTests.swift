@@ -27,7 +27,7 @@ struct TodayStudySessionBuilderTests {
         )
 
         #expect(session.deckID == TodayStudySessionBuilder.deckID)
-        #expect(session.matchingRecordScope == .today(dayKey: "2026-06-02"))
+        #expect(session.matchingRecordScope == .none)
         #expect(Set(session.queue.compactMap(\.deckID)) == [firstDeck.id, secondDeck.id])
         #expect(Set(session.queue.map(\.card.id)) == [firstCard.id, secondCard.id])
         #expect(Set(session.deckChoicePool.map(\.id)) == [firstCard.id, secondCard.id])
@@ -68,15 +68,15 @@ struct TodayStudySessionBuilderTests {
 
         #expect(session.savesProgress == false)
         #expect(session.reviewSource == .todayPractice)
-        #expect(session.matchingRecordScope == .today(dayKey: "2026-06-02"))
+        #expect(session.matchingRecordScope == .none)
         #expect(session.queue.map(\.card.id) == [reviewedCard.id])
         #expect(session.queue.compactMap(\.deckID) == [activeDeck.id])
         #expect(TodayStudySessionBuilder.todayPracticeCardCount(snapshots: snapshots) == 1)
     }
 
-    @Test("deck practice session keeps deck record scope")
+    @Test("deck practice session does not keep a matching record scope")
     @MainActor
-    func deckPracticeKeepsDeckRecordScope() throws {
+    func deckPracticeDoesNotKeepMatchingRecordScope() throws {
         let reviewedCard = TestFixtures.card(word: "cat", translation: "кот")
         let sourceDeck = deck(title: "Deck", cards: [reviewedCard])
         let snapshot = TodayStudyDeckSnapshot(
@@ -95,7 +95,7 @@ struct TodayStudySessionBuilderTests {
         )
 
         #expect(session.deckID == sourceDeck.id)
-        #expect(session.matchingRecordScope == .deck(sourceDeck.id))
+        #expect(session.matchingRecordScope == .none)
         #expect(session.queue.compactMap(\.deckID) == [sourceDeck.id])
     }
 

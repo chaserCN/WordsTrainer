@@ -28,19 +28,11 @@ final class DeckStore {
 
     private let userID: UUID
     private let database: ContentDatabase
-    private let todayMatchingRecordStore: TodayMatchingRecordStore
     private let engine = StudySessionEngine()
 
     init(database: ContentDatabase) {
         self.userID = database.currentUserID
         self.database = database
-        self.todayMatchingRecordStore = TodayMatchingRecordStore()
-    }
-
-    init(database: ContentDatabase, todayMatchingRecordStore: TodayMatchingRecordStore) {
-        self.userID = database.currentUserID
-        self.database = database
-        self.todayMatchingRecordStore = todayMatchingRecordStore
     }
 
     convenience init() throws {
@@ -255,6 +247,7 @@ final class DeckStore {
             deckCards: studyCards,
             dailyUsage: usage,
             engine: engine,
+            matchingRecordScope: mode.isMatching ? MatchingRecordScope.none : nil,
             reviewSource: .todayQueue
         )
     }
@@ -366,8 +359,6 @@ final class DeckStore {
             return nil
         case .deck(let deckID):
             return try database.matchingRecord(deckID: deckID)?.summary
-        case .today(let dayKey):
-            return todayMatchingRecordStore.record(userID: userID, dayKey: dayKey)
         }
     }
 
@@ -418,13 +409,6 @@ final class DeckStore {
         case .deck(let deckID):
             return try saveMatchingRecordIfBest(
                 deckID: deckID,
-                duration: duration,
-                pairCount: pairCount
-            )
-        case .today(let dayKey):
-            return todayMatchingRecordStore.saveIfBest(
-                userID: userID,
-                dayKey: dayKey,
                 duration: duration,
                 pairCount: pairCount
             )

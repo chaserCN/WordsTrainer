@@ -227,7 +227,7 @@ struct RecallSessionTests {
             queue: [item],
             dailyUsage: nil,
             engine: engine,
-            matchingRecordScope: .today(dayKey: "2026-06-02"),
+            matchingRecordScope: MatchingRecordScope.none,
             reviewSource: .todayQueue
         )
 

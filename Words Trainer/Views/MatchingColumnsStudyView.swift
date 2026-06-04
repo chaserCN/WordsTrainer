@@ -530,7 +530,7 @@ private struct MatchingStatusBar: View {
     }
 
     var body: some View {
-        TimelineView(.periodic(from: startedAt, by: 1.0)) { context in
+        TimelineView(.periodic(from: .now, by: 1.0)) { context in
             let elapsed = context.date.timeIntervalSince(startedAt)
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -543,13 +543,13 @@ private struct MatchingStatusBar: View {
                             .foregroundStyle(MatchPalette.muted)
                     }
                     Spacer()
-                    Text(StudyDurationFormat.string(elapsed))
+                    Text(StudyDurationFormat.string(max(0, elapsed)))
                         .font(.title2.bold().monospacedDigit())
                         .foregroundStyle(MatchPalette.foreground)
                 }
 
                 if let recordDuration {
-                    paceBar(record: recordDuration, elapsed: elapsed)
+                    paceBar(record: recordDuration, elapsed: max(0, elapsed))
                 }
             }
         }

@@ -159,11 +159,11 @@ enum TodayStudySessionBuilder {
         return items
     }
 
-    private static func matchingRecordScope(for mode: StudyMode, dayKey: String) -> MatchingRecordScope {
-        mode.isAudioMatching ? .none : .today(dayKey: dayKey)
+    private static func matchingRecordScope(for _: StudyMode, dayKey _: String) -> MatchingRecordScope {
+        .none
     }
 
-    private static func matchingRecordScope(for mode: StudyMode, deckID: UUID) -> MatchingRecordScope {
-        mode.isAudioMatching ? .none : .deck(deckID)
+    private static func matchingRecordScope(for _: StudyMode, deckID _: UUID) -> MatchingRecordScope {
+        .none
     }
 }

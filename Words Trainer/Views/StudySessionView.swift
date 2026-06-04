@@ -157,8 +157,6 @@ struct StudySessionView: View {
 
     private var newRecordTitle: String {
         switch session.matchingRecordScope {
-        case .today:
-            return "Новый рекорд за сегодня"
         case .deck:
             return "Новый рекорд для колоды"
         case .none:
@@ -186,7 +184,7 @@ struct StudySessionView: View {
         switch session.matchingRecordScope {
         case .deck(let deckID):
             return deckID
-        case .today, .none:
+        case .none:
             guard session.deckID != TodayStudySessionBuilder.deckID,
                   session.deckID != WeakCardsPractice.deckID else {
                 return nil
