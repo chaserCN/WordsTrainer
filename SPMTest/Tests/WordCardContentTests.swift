@@ -233,6 +233,49 @@ struct WordCardContentTests {
         #expect(withDeckFallback.first == "cast")
     }
 
+    @Test("clozeChoices exclude previous answer when enough alternatives exist")
+    func clozeChoicesExcludePreviousAnswerWhenPossible() {
+        let target = TestFixtures.card(
+            word: "cast",
+            translation: "гипс",
+            clozePrompt: "He wore a plaster ___ on his arm.",
+            clozeAnswer: "cast"
+        )
+        let pool = [
+            target,
+            TestFixtures.card(word: "load", translation: "груз", clozePrompt: "A heavy ___ of bricks.", clozeAnswer: "load"),
+            TestFixtures.card(word: "hip", translation: "бедро", clozePrompt: "Hands on her ___", clozeAnswer: "hips"),
+            TestFixtures.card(word: "heel", translation: "пятка", clozePrompt: "Back of her ___", clozeAnswer: "heel"),
+            TestFixtures.card(word: "settle", translation: "осесть", clozePrompt: "They ___ there.", clozeAnswer: "settle"),
+        ]
+
+        let choices = target.clozeChoices(answerPool: pool, excluding: ["load"])
+
+        #expect(choices.count == 4)
+        #expect(choices.first == "cast")
+        #expect(!choices.contains("load"))
+    }
+
+    @Test("clozeChoices keep excluded answer when alternatives are insufficient")
+    func clozeChoicesKeepExcludedAnswerWhenNeeded() {
+        let target = TestFixtures.card(
+            word: "cast",
+            translation: "гипс",
+            clozePrompt: "He wore a plaster ___ on his arm.",
+            clozeAnswer: "cast"
+        )
+        let previous = TestFixtures.card(
+            word: "load",
+            translation: "груз",
+            clozePrompt: "A heavy ___ of bricks.",
+            clozeAnswer: "load"
+        )
+
+        let choices = target.clozeChoices(answerPool: [target, previous], excluding: ["load"])
+
+        #expect(choices == ["cast", "load"])
+    }
+
     @Test("clozeChoices prefer matching verb form")
     func clozeChoicesPreferMatchingVerbForm() {
         let card = WordCardContent(

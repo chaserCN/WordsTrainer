@@ -128,35 +128,52 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         Self.uniqueChoices(correctAnswer: effectiveClozeAnswer, distractors: distractors)
     }
 
-    func clozeChoices(answerPool: [WordCardContent], targetCount: Int = 4) -> [String] {
-        clozeChoices(sessionPool: answerPool, deckPool: [], targetCount: targetCount)
+    func clozeChoices(
+        answerPool: [WordCardContent],
+        targetCount: Int = 4,
+        excluding excludedChoices: [String] = []
+    ) -> [String] {
+        clozeChoices(
+            sessionPool: answerPool,
+            deckPool: [],
+            targetCount: targetCount,
+            excluding: excludedChoices
+        )
     }
 
     /// Builds MCQ options from today's session first, then the full deck if needed.
     func clozeChoices(
         sessionPool: [WordCardContent],
         deckPool: [WordCardContent],
-        targetCount: Int = 4
+        targetCount: Int = 4,
+        excluding excludedChoices: [String] = []
     ) -> [String] {
+        let requiredCount = max(1, targetCount)
         let sessionOthers = sessionPool.filter { $0.id != id }
         var distractors = distractors
         distractors += dynamicDistractorTexts(from: sessionOthers, salt: "session")
         var choices = Self.uniqueChoices(
             correctAnswer: effectiveClozeAnswer,
-            distractors: distractors
+            distractors: distractors,
+            excluding: excludedChoices
         )
 
-        if choices.count < targetCount {
+        if choices.count < requiredCount {
             let sessionIDs = Set(sessionPool.map(\.id))
             let deckOthers = deckPool.filter { $0.id != id && !sessionIDs.contains($0.id) }
             distractors += dynamicDistractorTexts(from: deckOthers, salt: "deck")
             choices = Self.uniqueChoices(
                 correctAnswer: effectiveClozeAnswer,
-                distractors: distractors
+                distractors: distractors,
+                excluding: excludedChoices
             )
         }
 
-        return Array(choices.prefix(max(1, targetCount)))
+        if !excludedChoices.isEmpty, choices.count < requiredCount {
+            choices = Self.uniqueChoices(correctAnswer: effectiveClozeAnswer, distractors: distractors)
+        }
+
+        return Array(choices.prefix(requiredCount))
     }
 
     private func dynamicDistractorTexts(from otherCards: [WordCardContent], salt: String) -> [String] {
@@ -278,13 +295,26 @@ struct WordCardContent: Codable, Identifiable, Hashable {
         return trimmedNonEmpty(answer)
     }
 
-    static func uniqueChoices(correctAnswer: String, distractors: [String]) -> [String] {
+    static func uniqueChoices(
+        correctAnswer: String,
+        distractors: [String],
+        excluding excludedChoices: [String] = []
+    ) -> [String] {
         var seen = Set<String>()
+        let correctKey = choiceKey(correctAnswer)
+        let excludedKeys = Set(excludedChoices.map(choiceKey)).subtracting([correctKey])
         return ([correctAnswer] + distractors).compactMap { choice in
             guard let trimmed = trimmedNonEmpty(choice) else { return nil }
-            let key = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            let key = choiceKey(trimmed)
+            guard !excludedKeys.contains(key) else { return nil }
             return seen.insert(key).inserted ? trimmed : nil
         }
+    }
+
+    private static func choiceKey(_ choice: String) -> String {
+        choice
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
     }
 
     private func choiceText(exactlyMatching formKey: String?) -> String? {

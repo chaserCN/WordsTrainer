@@ -11,10 +11,11 @@ struct ClozeMCQStudyView: View {
     @State private var displayedCardID: UUID?
     @State private var selected: String?
     @State private var answered = false
-    @State private var choices: [String] = []
+    @State private var choices: [ClozeChoice] = []
     @State private var shakeCount: CGFloat = 0
     @State private var previewPair: MatchingPair?
     @State private var suppressedOptionTap: String?
+    @State private var previousCorrectOption: String?
 
     private var passed: Bool {
         guard let selected else { return false }
@@ -32,7 +33,8 @@ struct ClozeMCQStudyView: View {
                 sentenceCard
 
                 VStack(spacing: 10) {
-                    ForEach(choices, id: \.self) { option in
+                    ForEach(choices) { choice in
+                        let option = choice.text
                         ClozeChoiceButton(
                             option: option,
                             showResult: answered,
@@ -55,7 +57,6 @@ struct ClozeMCQStudyView: View {
                                     }
                                 }
                         )
-                        .disabled(answered && !optionsMatch(option, card.effectiveClozeAnswer))
                     }
                 }
 
@@ -73,7 +74,7 @@ struct ClozeMCQStudyView: View {
                         }
 
                         Button("Дальше") {
-                            onAnswer(passed ? .correct : .incorrect)
+                            advance()
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(MatchPalette.primary)
@@ -181,12 +182,21 @@ struct ClozeMCQStudyView: View {
         displayedCardID = card.id
         selected = nil
         answered = false
-        choices = card.clozeChoices(
-            sessionPool: sessionChoicePool,
-            deckPool: deckChoicePool
-        ).shuffled()
+        choices = card
+            .clozeChoices(
+                sessionPool: sessionChoicePool,
+                deckPool: deckChoicePool,
+                excluding: previousCorrectOption.map { [$0] } ?? []
+            )
+            .shuffled()
+            .map { ClozeChoice(text: $0) }
         previewPair = nil
         suppressedOptionTap = nil
+    }
+
+    private func advance() {
+        previousCorrectOption = card.effectiveClozeAnswer
+        onAnswer(passed ? .correct : .incorrect)
     }
 
     private func optionsMatch(_ lhs: String, _ rhs: String) -> Bool {
@@ -220,6 +230,11 @@ struct ClozeMCQStudyView: View {
 
         return nil
     }
+}
+
+private struct ClozeChoice: Identifiable {
+    let id = UUID()
+    let text: String
 }
 
 private let clozeCardShape = RoundedRectangle(cornerRadius: 18, style: .continuous)
