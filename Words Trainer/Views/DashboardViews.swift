@@ -156,6 +156,7 @@ struct TodayView: View {
             stats: stats,
             practiceCount: todayPracticeCount,
             isEnabled: stats.studyTotal > 0 || todayPracticeCount > 0,
+            isPrimary: stats.studyTotal > 0,
             action: { showTodayModes = true }
         )
     }
@@ -1066,6 +1067,7 @@ private struct StudyTodayCard: View {
     let stats: DeckStats
     var practiceCount: Int = 0
     let isEnabled: Bool
+    let isPrimary: Bool
     let action: () -> Void
 
     var body: some View {
@@ -1076,22 +1078,22 @@ private struct StudyTodayCard: View {
                         .font(.system(size: 24, weight: .bold))
                     Text(subtitle)
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.72))
+                        .foregroundStyle(.white.opacity(isPrimary ? 0.72 : 0.6))
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.white.opacity(isEnabled ? 0.4 : 0.18))
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(.white.opacity(isPrimary ? 1 : 0.72))
             .padding(.leading, 24)
             .padding(.trailing, 16)
             .padding(.vertical, 24)
             .background(
                 LinearGradient(
                     colors: [
-                        LovableSurface.primary.opacity(isEnabled ? 1 : 0.42),
-                        LovableSurface.primaryDeep.opacity(isEnabled ? 1 : 0.34),
+                        LovableSurface.primary.opacity(isPrimary ? 1 : 0.42),
+                        LovableSurface.primaryDeep.opacity(isPrimary ? 1 : 0.34),
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
@@ -1101,12 +1103,15 @@ private struct StudyTodayCard: View {
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
-        .shadow(color: oklch(0.4, 0.22, 260, isEnabled ? 0.35 : 0), radius: 18, x: 0, y: 14)
+        .shadow(color: oklch(0.4, 0.22, 260, isPrimary ? 0.35 : 0), radius: 18, x: 0, y: 14)
     }
 
     private var subtitle: String {
         if stats.studyTotal > 0 {
             return "\(stats.studyTotal) карточек в очереди"
+        }
+        if practiceCount > 0 {
+            return "На сегодня всё · можно повторить \(practiceCount)"
         }
         return "Пока всё"
     }
@@ -1364,6 +1369,10 @@ private struct QueueSummaryCard: View {
     var deck: DeckContent? = nil
     var showsChevron: Bool = false
 
+    private var isPrimary: Bool {
+        queueCount > 0
+    }
+
     private var todayDayNumber: String {
         "\(Calendar.current.component(.day, from: .now))"
     }
@@ -1411,11 +1420,11 @@ private struct QueueSummaryCard: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(deck?.title ?? "Дневная очередь")
                         .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.white.opacity(isPrimary ? 1 : 0.72))
                         .lineLimit(1)
                     Text(summaryText)
                         .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(.white.opacity(isPrimary ? 0.55 : 0.45))
                 }
 
                 Spacer(minLength: 0)
@@ -1441,16 +1450,17 @@ private struct QueueSummaryCard: View {
             if showsChevron {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(.white.opacity(isPrimary ? 0.4 : 0.24))
                     .padding(.trailing, 16)
             }
         }
         .lovablePanel(cornerRadius: 24)
+        .opacity(isPrimary ? 1 : 0.62)
     }
 
     private var summaryText: String {
         if queueCount == 0, practiceCount > 0 {
-            return "Пока всё · Прошли \(practiceCount) сегодня"
+            return "Очередь закончена · \(practiceCount) для практики"
         }
         return "\(queueCount) \(cardsLabel(queueCount)) · сегодня"
     }

@@ -99,6 +99,10 @@ final class StudySession {
         guard let item = current else { return }
         let reviewedAt = Date()
         let wasNew = item.progress.fsrsCard.state == .new
+        if mode == .recall, outcome == .remembered {
+            queue.removeFirst()
+            return
+        }
         let updated: CardProgress
         if mode == .recall, outcome == .forgot {
             updated = CardProgress.newCard(cardID: item.progress.cardID, now: reviewedAt)

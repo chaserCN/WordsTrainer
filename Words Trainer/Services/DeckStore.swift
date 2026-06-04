@@ -104,6 +104,8 @@ final class DeckStore {
             deckCards: cards,
             dailyUsage: nil,
             engine: engine,
+            matchingRecordScope: .none,
+            reviewSource: .weakCards,
             savesProgress: false
         )
     }
@@ -451,7 +453,7 @@ extension StudySession {
         outcome: ReviewOutcome,
         store: DeckStore
     ) throws {
-        let shouldNotify = savesProgress
+        let shouldNotify = savesProgress && !(mode == .recall && outcome == .remembered)
         let progressDeckID = current?.deckID ?? deckID
         try advanceAfterReview(outcome: outcome) { progress, wasNew in
             try store.saveProgress(deckID: progressDeckID, progress: progress, wasNew: wasNew)

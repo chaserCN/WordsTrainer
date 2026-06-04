@@ -100,9 +100,9 @@ struct RecallSessionTests {
         #expect(after.newAvailable == 1)
     }
 
-    @Test("recall remembered keeps FSRS progress")
+    @Test("recall remembered leaves progress unchanged")
     @MainActor
-    func recallRememberedUpdatesProgress() throws {
+    func recallRememberedDoesNotUpdateProgress() throws {
         let engine = StudySessionEngine()
         let cardID = UUID()
         let progress = CardProgress.newCard(cardID: cardID)
@@ -120,13 +120,13 @@ struct RecallSessionTests {
             saved = progress
         }
 
-        #expect(saved?.fsrsCard.reps == 1)
-        #expect(saved?.fsrsCard.state != .new)
+        #expect(saved == nil)
+        #expect(session.isFinished)
     }
 
-    @Test("recall updates progress without creating a study review")
+    @Test("recall reset updates progress without creating a study review")
     @MainActor
-    func recallDoesNotCreateStudyReview() throws {
+    func recallResetDoesNotCreateStudyReview() throws {
         let engine = StudySessionEngine()
         let cardID = UUID()
         let card = TestFixtures.card(id: cardID, word: "cat", translation: "кот")
@@ -140,7 +140,7 @@ struct RecallSessionTests {
 
         var didSaveProgress = false
         var didSaveReview = false
-        try session.advanceAfterReview(outcome: .remembered) { _, _ in
+        try session.advanceAfterReview(outcome: .forgot) { _, _ in
             didSaveProgress = true
         } onReview: { _ in
             didSaveReview = true
