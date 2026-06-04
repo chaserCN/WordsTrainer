@@ -594,7 +594,7 @@ private struct MatchingStatusBar: View {
     }
 }
 
-private struct MatchingFlashcardPreviewOverlay: View {
+struct MatchingFlashcardPreviewOverlay: View {
     let pair: MatchingPair
     let onClose: () -> Void
 

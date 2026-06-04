@@ -13,6 +13,8 @@ struct ClozeMCQStudyView: View {
     @State private var answered = false
     @State private var choices: [String] = []
     @State private var shakeCount: CGFloat = 0
+    @State private var previewPair: MatchingPair?
+    @State private var suppressedOptionTap: String?
 
     private var passed: Bool {
         guard let selected else { return false }
@@ -42,6 +44,17 @@ struct ClozeMCQStudyView: View {
                         ) {
                             select(option)
                         }
+                        .simultaneousGesture(
+                            LongPressGesture(minimumDuration: 0.45)
+                                .onEnded { _ in
+                                    guard answered else { return }
+                                    guard let pair = previewPair(for: option) else { return }
+                                    suppressedOptionTap = option
+                                    withAnimation(.easeOut(duration: 0.18)) {
+                                        previewPair = pair
+                                    }
+                                }
+                        )
                         .disabled(answered && !optionsMatch(option, card.effectiveClozeAnswer))
                     }
                 }
@@ -83,6 +96,18 @@ struct ClozeMCQStudyView: View {
         .onChange(of: card.id) { _, _ in
             resetRound()
         }
+        .overlay {
+            if let previewPair {
+                MatchingFlashcardPreviewOverlay(pair: previewPair) {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        self.previewPair = nil
+                    }
+                    suppressedOptionTap = nil
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: previewPair?.id)
     }
 
     private var sentenceCard: some View {
@@ -125,6 +150,10 @@ struct ClozeMCQStudyView: View {
     }
 
     private func select(_ option: String) {
+        if suppressedOptionTap == option {
+            suppressedOptionTap = nil
+            return
+        }
         if answered {
             if optionsMatch(option, card.effectiveClozeAnswer) {
                 WordAudioPlayer.shared.playClozeAnswer(from: card)
@@ -156,10 +185,40 @@ struct ClozeMCQStudyView: View {
             sessionPool: sessionChoicePool,
             deckPool: deckChoicePool
         ).shuffled()
+        previewPair = nil
+        suppressedOptionTap = nil
     }
 
     private func optionsMatch(_ lhs: String, _ rhs: String) -> Bool {
         lhs.compare(rhs, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+    }
+
+    private func previewPair(for option: String) -> MatchingPair? {
+        if optionsMatch(option, card.effectiveClozeAnswer) {
+            return MatchingPair(cardID: card.id, card: card, senseIndex: 0, translation: card.translation)
+        }
+
+        guard let previewCard = previewCard(for: option) else { return nil }
+        return MatchingPair(
+            cardID: previewCard.id,
+            card: previewCard,
+            senseIndex: 0,
+            translation: previewCard.translation
+        )
+    }
+
+    private func previewCard(for option: String) -> WordCardContent? {
+        let pools = [sessionChoicePool, deckChoicePool]
+        var seen: Set<UUID> = [card.id]
+
+        for candidate in pools.flatMap({ $0 }) where seen.insert(candidate.id).inserted {
+            if optionsMatch(option, candidate.effectiveClozeAnswer)
+                || candidate.forms.contains(where: { optionsMatch(option, $0.text) }) {
+                return candidate
+            }
+        }
+
+        return nil
     }
 }
 
