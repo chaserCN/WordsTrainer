@@ -313,7 +313,13 @@ struct TodayView: View {
             clearToast()
             return
         }
-        presentToast(status: TodaySyncStatus(result: result, message: message), autoDismiss: true)
+        let duration: Duration = switch result {
+        case .loaded:
+            .seconds(3.0)
+        default:
+            .seconds(5.0)
+        }
+        presentToast(status: TodaySyncStatus(result: result, message: message), autoDismissAfter: duration)
     }
 
     private func presentToast(forBootstrapState state: AppUserBootstrapState) {
@@ -327,7 +333,7 @@ struct TodayView: View {
                     systemImage: "link.badge.plus",
                     tint: oklch(0.64, 0.19, 35)
                 ),
-                autoDismiss: true
+                autoDismissAfter: .seconds(5.0)
             )
         case .failed(let message):
             presentToast(
@@ -337,22 +343,22 @@ struct TodayView: View {
                     systemImage: "wifi.exclamationmark",
                     tint: oklch(0.64, 0.19, 35)
                 ),
-                autoDismiss: true
+                autoDismissAfter: .seconds(5.0)
             )
         default:
             break
         }
     }
 
-    private func presentToast(status: TodaySyncStatus, autoDismiss: Bool) {
+    private func presentToast(status: TodaySyncStatus, autoDismissAfter duration: Duration?) {
         toastDismissTask?.cancel()
         let nextToast = TodayToast(status: status)
         withAnimation(.snappy(duration: 0.22)) {
             toast = nextToast
         }
-        guard autoDismiss else { return }
+        guard let duration else { return }
         toastDismissTask = Task { [id = nextToast.id] in
-            try? await Task.sleep(for: .seconds(5.0))
+            try? await Task.sleep(for: duration)
             await MainActor.run {
                 guard toast?.id == id else { return }
                 withAnimation(.snappy(duration: 0.22)) {
