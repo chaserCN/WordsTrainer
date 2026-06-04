@@ -388,9 +388,9 @@ struct StatisticsView: View {
     @State private var weekMatchingAttemptCount = 0
     @State private var monthUniqueCardCount = 0
     @State private var monthMatchingAttemptCount = 0
+    @State private var monthStudyTimeBreakdown: StudyTimeBreakdown = .zero
     @State private var studyDaysCount = 0
     @State private var activityMonths: [ActivityMonth] = []
-    @State private var activityMaxCount = 1
     @State private var scheduledDays: [ScheduledReviewDay] = []
     @State private var weakCardsPool: [WeakCardStat] = []
     @State private var weakGameSession: StudySession?
@@ -413,7 +413,8 @@ struct StatisticsView: View {
                         studyDaysCount: studyDaysCount
                     )
 
-                    ActivityHeatmap(months: activityMonths, maxCount: activityMaxCount)
+                    StudyTimeBreakdownPanel(breakdown: monthStudyTimeBreakdown)
+                    ActivityHeatmap(months: activityMonths)
                     ForecastSection(days: scheduledDays)
                     WeakCardsSection(
                         cards: Array(weakCardsPool.prefix(WeakCardsPractice.displayLimit)),
@@ -468,9 +469,9 @@ struct StatisticsView: View {
                 weekMatchingAttemptCount = 0
                 monthUniqueCardCount = 0
                 monthMatchingAttemptCount = 0
+                monthStudyTimeBreakdown = .zero
                 studyDaysCount = 0
                 activityMonths = []
-                activityMaxCount = 1
                 scheduledDays = []
                 weakCardsPool = []
                 loadError = nil
@@ -495,9 +496,10 @@ struct StatisticsView: View {
             weekMatchingAttemptCount = try deckStore.matchingAttemptCount(since: weekStart)
             monthUniqueCardCount = try deckStore.uniqueStudyCardCount(since: monthStart)
             monthMatchingAttemptCount = try deckStore.matchingAttemptCount(since: monthStart)
+            monthStudyTimeBreakdown = try deckStore.studyTimeBreakdown(since: monthStart)
             studyDaysCount = Self.studyDaysCount(from: activityDays)
-            activityMonths = ActivityCalendarBuilder.months(from: activityDays)
-            activityMaxCount = max(activityDays.map(\.reviewedCount).max() ?? 0, 1)
+            let maxActivityCount = max(activityDays.map(\.reviewedCount).max() ?? 0, 1)
+            activityMonths = ActivityCalendarBuilder.months(from: activityDays, maxCount: maxActivityCount)
             scheduledDays = try deckStore.scheduledReviewDays(days: 7)
             weakCardsPool = try deckStore.weakCards(limit: WeakCardsPractice.fetchLimit)
             loadError = nil
@@ -696,6 +698,118 @@ private struct StatisticsMetricsGrid: View {
                 )
                 DashboardMetric(title: "Дни занятий", value: "\(studyDaysCount)", subtitle: "за 30 дней")
             }
+        }
+    }
+}
+
+private struct StudyTimeBreakdownPanel: View {
+    let breakdown: StudyTimeBreakdown
+
+    private var rows: [StudyTimeBreakdownRow] {
+        [
+            StudyTimeBreakdownRow(
+                title: "Карточки",
+                milliseconds: breakdown.flashcardsMilliseconds,
+                tint: oklch(0.71, 0.16, 145)
+            ),
+            StudyTimeBreakdownRow(
+                title: "Предложения",
+                milliseconds: breakdown.sentenceMilliseconds,
+                tint: oklch(0.72, 0.16, 35)
+            ),
+            StudyTimeBreakdownRow(
+                title: "Колонки",
+                milliseconds: breakdown.matchingMilliseconds,
+                tint: oklch(0.72, 0.17, 250)
+            ),
+            StudyTimeBreakdownRow(
+                title: "Колонки аудио",
+                milliseconds: breakdown.matchingAudioMilliseconds,
+                tint: oklch(0.76, 0.14, 315)
+            ),
+        ]
+    }
+
+    private var maxMilliseconds: Int {
+        max(rows.map(\.milliseconds).max() ?? 0, 1)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Время занятий")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(oklch(0.99, 0.01, 240))
+
+                Spacer(minLength: 10)
+
+                Text(studyDurationLabel(milliseconds: breakdown.totalMilliseconds))
+                    .font(.system(size: 17, weight: .bold))
+                    .monospacedDigit()
+                    .foregroundStyle(oklch(0.99, 0.01, 240))
+            }
+
+            VStack(spacing: 12) {
+                ForEach(rows) { row in
+                    StudyTimeRow(row: row, maxMilliseconds: maxMilliseconds)
+                }
+            }
+        }
+        .padding(18)
+        .statisticsPanel(cornerRadius: 24)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Время занятий за 30 дней")
+        .accessibilityValue(studyDurationLabel(milliseconds: breakdown.totalMilliseconds))
+    }
+}
+
+private struct StudyTimeBreakdownRow: Identifiable {
+    let title: String
+    let milliseconds: Int
+    let tint: Color
+
+    var id: String { title }
+}
+
+private struct StudyTimeRow: View {
+    let row: StudyTimeBreakdownRow
+    let maxMilliseconds: Int
+
+    private var fraction: CGFloat {
+        guard maxMilliseconds > 0 else { return 0 }
+        return CGFloat(row.milliseconds) / CGFloat(maxMilliseconds)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(row.title)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(oklch(0.82, 0.03, 250, 0.78))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                Spacer(minLength: 8)
+
+                Text(studyDurationLabel(milliseconds: row.milliseconds))
+                    .font(.system(size: 14, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(oklch(0.99, 0.01, 240))
+            }
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(.white.opacity(0.08))
+
+                    if row.milliseconds > 0 {
+                        Capsule()
+                            .fill(row.tint.opacity(0.9))
+                            .frame(width: max(4, proxy.size.width * fraction))
+                    }
+                }
+            }
+            .frame(height: 7)
         }
     }
 }
@@ -1607,7 +1721,6 @@ private struct DashboardMetricValue: View {
 
 private struct ActivityHeatmap: View {
     let months: [ActivityMonth]
-    let maxCount: Int
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1624,7 +1737,7 @@ private struct ActivityHeatmap: View {
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 18) {
                     ForEach(months) { month in
-                        ActivityMonthView(month: month, maxCount: maxCount)
+                        ActivityMonthView(month: month)
                             .equatable()
                     }
                 }
@@ -1642,13 +1755,6 @@ private struct ActivityHeatmap: View {
 
 private struct ActivityMonthView: View, Equatable {
     let month: ActivityMonth
-    let maxCount: Int
-
-    private var cellRows: [[ActivityCalendarCell]] {
-        stride(from: 0, to: month.cells.count, by: 7).map { start in
-            Array(month.cells[start..<min(start + 7, month.cells.count)])
-        }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -1666,12 +1772,12 @@ private struct ActivityMonthView: View, Equatable {
                     }
                 }
 
-                ForEach(Array(cellRows.enumerated()), id: \.offset) { _, row in
+                ForEach(month.weeks) { week in
                     GridRow {
-                        ForEach(row) { cell in
+                        ForEach(week.cells) { cell in
                             if let day = cell.day {
                                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                    .fill(day.isToday ? ActivityHeatmapPalette.today : color(for: day.reviewedCount))
+                                    .fill(day.fillColor)
                                     .frame(width: 15, height: 15)
                                     .frame(width: 18, height: 18)
                                     .overlay {
@@ -1682,7 +1788,7 @@ private struct ActivityMonthView: View, Equatable {
                                                 .shadow(color: ActivityHeatmapPalette.todayGlow, radius: 5)
                                         }
                                     }
-                                    .accessibilityLabel("\(day.dayKey): \(day.reviewedCount) карточек")
+                                    .accessibilityLabel(day.accessibilityLabel)
                             } else {
                                 Color.clear
                                     .frame(width: 18, height: 18)
@@ -1694,17 +1800,6 @@ private struct ActivityMonthView: View, Equatable {
             }
         }
         .frame(width: 162, alignment: .leading)
-    }
-
-    private func color(for count: Int) -> Color {
-        guard count > 0 else { return ActivityHeatmapPalette.empty }
-        let ratio = Double(count) / Double(maxCount)
-        switch ratio {
-        case ..<0.25: return ActivityHeatmapPalette.low
-        case ..<0.5: return ActivityHeatmapPalette.medium
-        case ..<0.75: return ActivityHeatmapPalette.high
-        default: return ActivityHeatmapPalette.peak
-        }
     }
 }
 
@@ -1718,10 +1813,33 @@ private enum ActivityHeatmapPalette {
     static let todayGlow = oklch(0.7, 0.18, 235, 0.6)
 }
 
+private enum ActivityHeatmapLevel: Hashable {
+    case empty
+    case low
+    case medium
+    case high
+    case peak
+
+    var color: Color {
+        switch self {
+        case .empty: ActivityHeatmapPalette.empty
+        case .low: ActivityHeatmapPalette.low
+        case .medium: ActivityHeatmapPalette.medium
+        case .high: ActivityHeatmapPalette.high
+        case .peak: ActivityHeatmapPalette.peak
+        }
+    }
+}
+
 private struct ActivityMonth: Identifiable, Hashable {
     let id: String
     let title: String
     let weekdays: [String]
+    let weeks: [ActivityCalendarWeek]
+}
+
+private struct ActivityCalendarWeek: Identifiable, Hashable {
+    let id: String
     let cells: [ActivityCalendarCell]
 }
 
@@ -1734,10 +1852,16 @@ private struct ActivityCalendarDay: Hashable {
     let dayKey: String
     let reviewedCount: Int
     let isToday: Bool
+    let level: ActivityHeatmapLevel
+    let accessibilityLabel: String
+
+    var fillColor: Color {
+        isToday ? ActivityHeatmapPalette.today : level.color
+    }
 }
 
 private enum ActivityCalendarBuilder {
-    static func months(from days: [StudyActivityDay]) -> [ActivityMonth] {
+    static func months(from days: [StudyActivityDay], maxCount: Int) -> [ActivityMonth] {
         let calendar = Calendar.current
         let today = StudyDay.start(for: .now, calendar: calendar)
         let todayKey = StudyDay.key(calendar: calendar)
@@ -1749,7 +1873,7 @@ private enum ActivityCalendarBuilder {
         var date = monthStart
 
         while date <= currentMonthStart {
-            months.append(month(for: date, todayKey: todayKey, countsByKey: byKey, calendar: calendar))
+            months.append(month(for: date, todayKey: todayKey, countsByKey: byKey, maxCount: maxCount, calendar: calendar))
             guard let next = calendar.date(byAdding: .month, value: 1, to: date) else { break }
             date = next
         }
@@ -1761,6 +1885,7 @@ private enum ActivityCalendarBuilder {
         for monthStart: Date,
         todayKey: String,
         countsByKey: [String: Int],
+        maxCount: Int,
         calendar: Calendar
     ) -> ActivityMonth {
         let dayRange = calendar.range(of: .day, in: .month, for: monthStart) ?? 1..<1
@@ -1772,10 +1897,13 @@ private enum ActivityCalendarBuilder {
         for dayNumber in dayRange {
             guard let date = calendar.date(byAdding: .day, value: dayNumber - 1, to: monthStart) else { continue }
             let key = DeckDailyUsage.calendarDayKey(for: date, calendar: calendar)
+            let reviewedCount = countsByKey[key, default: 0]
             let day = ActivityCalendarDay(
                 dayKey: key,
-                reviewedCount: countsByKey[key, default: 0],
-                isToday: key == todayKey
+                reviewedCount: reviewedCount,
+                isToday: key == todayKey,
+                level: level(for: reviewedCount, maxCount: maxCount),
+                accessibilityLabel: "\(key): \(reviewedCount) карточек"
             )
             cells.append(ActivityCalendarCell(id: key, day: day))
         }
@@ -1790,33 +1918,62 @@ private enum ActivityCalendarBuilder {
             id: monthKey,
             title: title(for: monthStart),
             weekdays: weekdaySymbols(calendar: calendar),
-            cells: cells
+            weeks: weeks(from: cells, monthKey: monthKey)
         )
     }
 
     private static let ruLocale = Locale(identifier: "ru_RU")
-
-    private static func weekdaySymbols(calendar: Calendar) -> [String] {
+    private static let weekdaySymbolsByFirstWeekday: [Int: [String]] = {
         let formatter = DateFormatter()
         formatter.locale = ruLocale
         let symbols = formatter.veryShortStandaloneWeekdaySymbols ?? ["В", "П", "В", "С", "Ч", "П", "С"]
-        let start = calendar.firstWeekday - 1
-        return Array(symbols[start...] + symbols[..<start])
-    }
-
-    private static func title(for date: Date) -> String {
+        return Dictionary(uniqueKeysWithValues: (1...7).map { firstWeekday in
+            let start = firstWeekday - 1
+            return (firstWeekday, Array(symbols[start...] + symbols[..<start]))
+        })
+    }()
+    private static let monthTitleFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = ruLocale
         formatter.setLocalizedDateFormatFromTemplate("LLLL yyyy")
-        return formatter.string(from: date)
-    }
-
-    private static func dateFromDayKey(_ dayKey: String) -> Date? {
+        return formatter
+    }()
+    private static let dayKeyFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: dayKey)
+        return formatter
+    }()
+
+    private static func weekdaySymbols(calendar: Calendar) -> [String] {
+        weekdaySymbolsByFirstWeekday[calendar.firstWeekday] ?? weekdaySymbolsByFirstWeekday[1] ?? []
+    }
+
+    private static func title(for date: Date) -> String {
+        monthTitleFormatter.string(from: date)
+    }
+
+    private static func dateFromDayKey(_ dayKey: String) -> Date? {
+        dayKeyFormatter.date(from: dayKey)
+    }
+
+    private static func weeks(from cells: [ActivityCalendarCell], monthKey: String) -> [ActivityCalendarWeek] {
+        stride(from: 0, to: cells.count, by: 7).map { start in
+            let end = min(start + 7, cells.count)
+            return ActivityCalendarWeek(id: "\(monthKey)-week-\(start / 7)", cells: Array(cells[start..<end]))
+        }
+    }
+
+    private static func level(for count: Int, maxCount: Int) -> ActivityHeatmapLevel {
+        guard count > 0 else { return .empty }
+        let ratio = Double(count) / Double(max(maxCount, 1))
+        switch ratio {
+        case ..<0.25: return .low
+        case ..<0.5: return .medium
+        case ..<0.75: return .high
+        default: return .peak
+        }
     }
 }
 
@@ -2203,4 +2360,24 @@ private func gamesLabel(_ count: Int) -> String {
         return "игры"
     }
     return "игр"
+}
+
+private func studyDurationLabel(milliseconds: Int) -> String {
+    let totalSeconds = max(0, milliseconds) / 1000
+    if totalSeconds == 0 {
+        return "0 мин"
+    }
+    if totalSeconds < 60 {
+        return "<1 мин"
+    }
+    let totalMinutes = totalSeconds / 60
+    if totalMinutes < 60 {
+        return "\(totalMinutes) мин"
+    }
+    let hours = totalMinutes / 60
+    let minutes = totalMinutes % 60
+    if minutes == 0 {
+        return "\(hours) ч"
+    }
+    return "\(hours) ч \(minutes) мин"
 }

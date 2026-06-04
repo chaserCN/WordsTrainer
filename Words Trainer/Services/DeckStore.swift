@@ -78,6 +78,10 @@ final class DeckStore {
         try database.matchingAttemptCount(since: startDate)
     }
 
+    func studyTimeBreakdown(since startDate: Date) throws -> StudyTimeBreakdown {
+        try database.studyTimeBreakdown(since: startDate)
+    }
+
     func weakCards(limit: Int = 30) throws -> [WeakCardStat] {
         try database.weakCards(limit: limit)
     }

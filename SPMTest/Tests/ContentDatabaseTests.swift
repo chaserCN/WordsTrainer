@@ -306,6 +306,125 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("study time breakdown combines review and matching durations")
+    func studyTimeBreakdownCombinesReviewAndMatchingDurations() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(
+                bootstrap(
+                    matchingAttempts: [
+                        matchingAttemptJSON(
+                            id: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!,
+                            mode: "matching_audio",
+                            completedAt: "2026-06-02T12:30:00.000Z"
+                        ),
+                    ]
+                ),
+                selectedUserID: userID
+            )
+            let since = try #require(Self.isoDate("2026-06-02T00:00:00.000Z"))
+            let reviewedAt = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
+            let earlier = try #require(Self.isoDate("2026-06-01T12:00:00.000Z"))
+
+            try database.saveStudyReview(
+                StudyReviewEvent(
+                    id: UUID(uuidString: "55555555-5555-4555-8555-555555555555")!,
+                    cardID: cardID,
+                    deckID: deckID,
+                    mode: .flashcards,
+                    outcome: .remembered,
+                    reviewedAt: reviewedAt,
+                    durationMS: 120_000,
+                    wasNew: true,
+                    previousState: "new",
+                    newState: "review"
+                )
+            )
+            try database.savePracticeReview(
+                PracticeReviewEvent(
+                    id: UUID(uuidString: "66666666-6666-4666-8666-666666666666")!,
+                    cardID: cardID,
+                    deckID: deckID,
+                    mode: .clozeTyping,
+                    outcome: .correct,
+                    source: .todayPractice,
+                    practicedAt: reviewedAt,
+                    durationMS: 45_000
+                )
+            )
+            try database.saveStudyReview(
+                StudyReviewEvent(
+                    id: UUID(uuidString: "77777777-7777-4777-8777-777777777777")!,
+                    cardID: cardID,
+                    deckID: deckID,
+                    mode: .flashcards,
+                    outcome: .remembered,
+                    reviewedAt: earlier,
+                    durationMS: 90_000,
+                    wasNew: false,
+                    previousState: "review",
+                    newState: "review"
+                )
+            )
+            try database.saveMatchingAttempt(
+                MatchingAttemptEvent(
+                    id: UUID(uuidString: "88888888-8888-4888-8888-888888888888")!,
+                    deckID: deckID,
+                    mode: .matching,
+                    source: .deckSession,
+                    completedAt: reviewedAt,
+                    duration: 14.25,
+                    pairCount: 4
+                )
+            )
+            try database.saveMatchingAttempt(
+                MatchingAttemptEvent(
+                    id: UUID(uuidString: "99999999-9999-4999-8999-999999999999")!,
+                    deckID: deckID,
+                    mode: .matchingAudio,
+                    source: .deckSession,
+                    completedAt: reviewedAt,
+                    duration: 20,
+                    pairCount: 4
+                )
+            )
+
+            let breakdown = try database.studyTimeBreakdown(since: since)
+            #expect(breakdown.flashcardsMilliseconds == 120_000)
+            #expect(breakdown.sentenceMilliseconds == 45_000)
+            #expect(breakdown.matchingMilliseconds == 14_250)
+            #expect(breakdown.matchingAudioMilliseconds == 32_000)
+            #expect(breakdown.totalMilliseconds == 211_250)
+        }
+    }
+
+    @Test("server practice reviews import into local time statistics")
+    func serverPracticeReviewsImportIntoLocalTimeStatistics() throws {
+        try withIsolatedDatabase { database in
+            let practiceReviewID = UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!
+            try database.importServerBootstrap(
+                bootstrap(
+                    practiceReviews: [
+                        practiceReviewJSON(
+                            id: practiceReviewID,
+                            mode: "cloze_typing",
+                            practicedAt: "2026-06-02T12:00:00.000Z",
+                            durationMS: 45_000
+                        ),
+                    ]
+                ),
+                selectedUserID: userID
+            )
+
+            let since = try #require(Self.isoDate("2026-06-02T00:00:00.000Z"))
+            let breakdown = try database.studyTimeBreakdown(since: since)
+            #expect(breakdown.flashcardsMilliseconds == 0)
+            #expect(breakdown.sentenceMilliseconds == 45_000)
+            #expect(breakdown.matchingMilliseconds == 0)
+            #expect(breakdown.matchingAudioMilliseconds == 0)
+            #expect(try database.pendingServerSyncBatch().practiceReviewIDs.isEmpty)
+        }
+    }
+
     @Test("weak cards exclude review cards with low failure rate")
     func weakCardsExcludeReviewCardsWithLowFailureRate() throws {
         try withIsolatedDatabase { database in
@@ -942,6 +1061,7 @@ struct ContentDatabaseTests {
     private func bootstrap(
         progress: [String] = [],
         reviews: [String] = [],
+        practiceReviews: [String] = [],
         matchingAttempts: [String] = [],
         dailyUsage: [String]? = nil,
         includeAssignment: Bool = true,
@@ -1057,6 +1177,7 @@ struct ContentDatabaseTests {
           "media": [\(media.joined(separator: ","))],
           "progress": [\(progress.joined(separator: ","))],
           "reviews": [\(reviews.joined(separator: ","))],
+          "practice_reviews": [\(practiceReviews.joined(separator: ","))],
           "matching_attempts": [\(matchingAttempts.joined(separator: ","))],
           \(dailyUsage.map { #""daily_usage": ["# + $0.joined(separator: ",") + #"],"# } ?? "")
           "matching_records": []
@@ -1096,6 +1217,27 @@ struct ContentDatabaseTests {
             let reviewedAt = String(format: "%@T12:%02d:00.000Z", day, index)
             return reviewJSON(id: id, outcome: outcome, reviewedAt: reviewedAt, wasNew: false)
         }
+    }
+
+    private func practiceReviewJSON(
+        id: UUID,
+        mode: String,
+        practicedAt: String,
+        durationMS: Int
+    ) -> String {
+        """
+        {
+          "client_event_id": "\(id.databaseString)",
+          "deck_id": "\(deckID.databaseString)",
+          "deck_version_id": "\(versionID.databaseString)",
+          "card_id": "\(cardID.databaseString)",
+          "mode": "\(mode)",
+          "outcome": "correct",
+          "source": "today_practice",
+          "practiced_at": "\(practicedAt)",
+          "duration_ms": \(durationMS)
+        }
+        """
     }
 
     private func matchingAttemptJSON(

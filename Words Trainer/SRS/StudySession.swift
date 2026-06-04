@@ -22,6 +22,7 @@ final class StudySession {
     let deckChoicePool: [WordCardContent]
     private var matchingScheduler: MatchingPairScheduler?
     private var dailyUsage: DeckDailyUsage?
+    private var currentStartedAt: Date?
     private let engine: StudySessionEngine
 
     var current: StudyQueueItem? { queue.first }
@@ -77,6 +78,7 @@ final class StudySession {
             matchingTotalPairCount = 0
             matchingStartedAt = nil
             self.queue = queue
+            currentStartedAt = queue.isEmpty ? nil : Date()
         }
     }
 
@@ -98,9 +100,11 @@ final class StudySession {
     ) throws {
         guard let item = current else { return }
         let reviewedAt = Date()
+        let durationMS = reviewDurationMS(endedAt: reviewedAt)
         let wasNew = item.progress.fsrsCard.state == .new
         if mode == .recall, outcome == .remembered {
             queue.removeFirst()
+            startNextCurrentIfNeeded()
             return
         }
         let updated: CardProgress
@@ -121,6 +125,7 @@ final class StudySession {
                         outcome: outcome,
                         source: reviewSource,
                         reviewedAt: reviewedAt,
+                        durationMS: durationMS,
                         wasNew: wasNew,
                         previousState: String(describing: item.progress.fsrsCard.state),
                         newState: String(describing: updated.fsrsCard.state)
@@ -136,10 +141,21 @@ final class StudySession {
                     mode: mode,
                     outcome: outcome,
                     source: reviewSource,
-                    practicedAt: reviewedAt
+                    practicedAt: reviewedAt,
+                    durationMS: durationMS
                 )
             )
         }
         queue.removeFirst()
+        startNextCurrentIfNeeded()
+    }
+
+    private func reviewDurationMS(endedAt: Date) -> Int? {
+        guard let currentStartedAt else { return nil }
+        return max(0, Int((endedAt.timeIntervalSince(currentStartedAt) * 1000).rounded()))
+    }
+
+    private func startNextCurrentIfNeeded() {
+        currentStartedAt = queue.isEmpty ? nil : Date()
     }
 }

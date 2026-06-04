@@ -148,6 +148,7 @@ final class ContentDatabase {
             try upsertServerProgress(bootstrap.progress)
             try deleteSyncedProgressMissingFromServerSnapshot(bootstrap.progress)
             try upsertServerReviews(bootstrap.reviews, selectedUserID: selectedUserID)
+            try upsertServerPracticeReviews(bootstrap.practiceReviews, selectedUserID: selectedUserID)
             try upsertServerMatchingRecords(bootstrap.matchingRecords, selectedUserID: selectedUserID)
             try upsertServerMatchingAttempts(bootstrap.matchingAttempts, selectedUserID: selectedUserID)
             if bootstrap.hasDailyUsageSnapshot {
@@ -627,6 +628,61 @@ final class ContentDatabase {
         try bind(statement, index: 5, text: "matching_audio")
         guard sqlite3_step(statement) == SQLITE_ROW else { return 0 }
         return Int(sqlite3_column_int(statement, 0))
+    }
+
+    func studyTimeBreakdown(since startDate: Date) throws -> StudyTimeBreakdown {
+        let sql = """
+        WITH timed_events AS (
+            SELECT mode, COALESCE(duration_ms, 0) AS duration_ms
+            FROM study_reviews
+            WHERE user_id = ? AND reviewed_at >= ?
+            UNION ALL
+            SELECT mode, COALESCE(duration_ms, 0) AS duration_ms
+            FROM practice_reviews
+            WHERE user_id = ? AND practiced_at >= ?
+            UNION ALL
+            SELECT mode, COALESCE(duration_ms, 0) AS duration_ms
+            FROM matching_attempts
+            WHERE user_id = ? AND completed_at >= ?
+        )
+        SELECT
+            COALESCE(SUM(CASE WHEN mode = ? THEN duration_ms ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN mode IN (?, ?) THEN duration_ms ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN mode = ? THEN duration_ms ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN mode IN (?, ?) THEN duration_ms ELSE 0 END), 0)
+        FROM timed_events
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        guard sqlite3_bind_double(statement, 2, startDate.timeIntervalSince1970) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        try bind(statement, index: 3, uuid: userID)
+        guard sqlite3_bind_double(statement, 4, startDate.timeIntervalSince1970) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        try bind(statement, index: 5, uuid: userID)
+        guard sqlite3_bind_double(statement, 6, startDate.timeIntervalSince1970) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        try bind(statement, index: 7, text: StudyMode.flashcards.rawValue)
+        try bind(statement, index: 8, text: StudyMode.clozeMultipleChoice.rawValue)
+        try bind(statement, index: 9, text: StudyMode.clozeTyping.rawValue)
+        try bind(statement, index: 10, text: StudyMode.matching.rawValue)
+        try bind(statement, index: 11, text: StudyMode.matchingAudio.rawValue)
+        try bind(statement, index: 12, text: "matching_audio")
+
+        guard sqlite3_step(statement) == SQLITE_ROW else { return .zero }
+        return StudyTimeBreakdown(
+            flashcardsMilliseconds: Int(sqlite3_column_int64(statement, 0)),
+            sentenceMilliseconds: Int(sqlite3_column_int64(statement, 1)),
+            matchingMilliseconds: Int(sqlite3_column_int64(statement, 2)),
+            matchingAudioMilliseconds: Int(sqlite3_column_int64(statement, 3))
+        )
     }
 
     func weakCards(limit: Int = 30, deckID: UUID? = nil) throws -> [WeakCardStat] {
@@ -1691,6 +1747,53 @@ final class ContentDatabase {
             try bind(statement, index: 11, text: review.previousState)
             try bind(statement, index: 12, text: review.newState)
             guard sqlite3_bind_double(statement, 13, syncedAt) == SQLITE_OK,
+                  sqlite3_step(statement) == SQLITE_DONE else {
+                throw ContentDatabaseError.queryFailed
+            }
+        }
+    }
+
+    private func upsertServerPracticeReviews(
+        _ reviews: [ServerPracticeReviewPayload],
+        selectedUserID: UUID
+    ) throws {
+        let syncedAt = Date().timeIntervalSince1970
+        for review in reviews {
+            guard let practicedAt = parseServerDate(review.practicedAt) else {
+                throw ContentDatabaseError.queryFailed
+            }
+            let sql = """
+            INSERT INTO practice_reviews (
+                id, user_id, card_id, deck_id, mode, outcome, source, practiced_at, duration_ms, synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                user_id = excluded.user_id,
+                card_id = excluded.card_id,
+                deck_id = excluded.deck_id,
+                mode = excluded.mode,
+                outcome = excluded.outcome,
+                source = excluded.source,
+                practiced_at = excluded.practiced_at,
+                duration_ms = excluded.duration_ms,
+                synced_at = excluded.synced_at
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            defer { sqlite3_finalize(statement) }
+            try bind(statement, index: 1, uuid: review.clientEventId)
+            try bind(statement, index: 2, uuid: selectedUserID)
+            try bind(statement, index: 3, uuid: review.cardId)
+            try bind(statement, index: 4, uuid: review.deckId)
+            try bind(statement, index: 5, text: localStudyModeRawValue(review.mode))
+            try bind(statement, index: 6, text: review.outcome)
+            try bind(statement, index: 7, text: review.source)
+            guard sqlite3_bind_double(statement, 8, practicedAt.timeIntervalSince1970) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            try bind(statement, index: 9, int: review.durationMs)
+            guard sqlite3_bind_double(statement, 10, syncedAt) == SQLITE_OK,
                   sqlite3_step(statement) == SQLITE_DONE else {
                 throw ContentDatabaseError.queryFailed
             }

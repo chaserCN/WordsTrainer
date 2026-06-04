@@ -102,6 +102,24 @@ struct StudyReviewCount: Hashable {
     }
 }
 
+struct StudyTimeBreakdown: Hashable {
+    var flashcardsMilliseconds: Int
+    var sentenceMilliseconds: Int
+    var matchingMilliseconds: Int
+    var matchingAudioMilliseconds: Int
+
+    static let zero = StudyTimeBreakdown(
+        flashcardsMilliseconds: 0,
+        sentenceMilliseconds: 0,
+        matchingMilliseconds: 0,
+        matchingAudioMilliseconds: 0
+    )
+
+    var totalMilliseconds: Int {
+        flashcardsMilliseconds + sentenceMilliseconds + matchingMilliseconds + matchingAudioMilliseconds
+    }
+}
+
 struct WeakCardStat: Identifiable, Hashable {
     let cardID: UUID
     let deckID: UUID

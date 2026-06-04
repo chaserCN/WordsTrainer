@@ -9,6 +9,7 @@ struct ServerBootstrap: Decodable, Sendable {
     let media: [ServerMediaObject]
     let progress: [ServerProgressPayload]
     let reviews: [ServerReviewEventPayload]
+    let practiceReviews: [ServerPracticeReviewPayload]
     let matchingRecords: [ServerMatchingRecordPayload]
     let matchingAttempts: [ServerMatchingAttemptPayload]
     let dailyUsage: [ServerDailyUsagePayload]
@@ -23,6 +24,7 @@ struct ServerBootstrap: Decodable, Sendable {
         media: [ServerMediaObject],
         progress: [ServerProgressPayload],
         reviews: [ServerReviewEventPayload],
+        practiceReviews: [ServerPracticeReviewPayload] = [],
         matchingRecords: [ServerMatchingRecordPayload],
         matchingAttempts: [ServerMatchingAttemptPayload] = [],
         dailyUsage: [ServerDailyUsagePayload] = [],
@@ -36,6 +38,7 @@ struct ServerBootstrap: Decodable, Sendable {
         self.media = media
         self.progress = progress
         self.reviews = reviews
+        self.practiceReviews = practiceReviews
         self.matchingRecords = matchingRecords
         self.matchingAttempts = matchingAttempts
         self.dailyUsage = dailyUsage
@@ -51,6 +54,7 @@ struct ServerBootstrap: Decodable, Sendable {
         case media
         case progress
         case reviews
+        case practiceReviews
         case matchingRecords
         case matchingAttempts
         case dailyUsage
@@ -66,6 +70,7 @@ struct ServerBootstrap: Decodable, Sendable {
         media = try container.decodeIfPresent([ServerMediaObject].self, forKey: .media) ?? []
         progress = try container.decodeIfPresent([ServerProgressPayload].self, forKey: .progress) ?? []
         reviews = try container.decodeIfPresent([ServerReviewEventPayload].self, forKey: .reviews) ?? []
+        practiceReviews = try container.decodeIfPresent([ServerPracticeReviewPayload].self, forKey: .practiceReviews) ?? []
         matchingRecords = try container.decodeIfPresent([ServerMatchingRecordPayload].self, forKey: .matchingRecords) ?? []
         matchingAttempts = try container.decodeIfPresent([ServerMatchingAttemptPayload].self, forKey: .matchingAttempts) ?? []
         dailyUsage = try container.decodeIfPresent([ServerDailyUsagePayload].self, forKey: .dailyUsage) ?? []
