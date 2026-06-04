@@ -32,13 +32,6 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable {
         self == .matchingAudio
     }
 
-    var updatesSRS: Bool {
-        switch self {
-        case .matching, .matchingAudio: false
-        default: true
-        }
-    }
-
     var recordsStudyReview: Bool {
         switch self {
         case .flashcards, .clozeMultipleChoice, .clozeTyping:
