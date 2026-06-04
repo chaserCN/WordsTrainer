@@ -159,6 +159,7 @@ final class AppUserStore {
                     bootstrapDeviceID = deviceID
                     bootstrapSinceRevision = try database.serverRevision()
                     cachedDeckVersionIDs = try database.cachedDeckVersionIDs()
+                    updateSyncProgress(.uploadingChanges, taskID: taskID)
                     try await uploadPendingEvents(
                         database: database,
                         selectedUserID: targetUserID,
@@ -175,6 +176,7 @@ final class AppUserStore {
                 }
             }
 
+            updateSyncProgress(.loadingData, taskID: taskID)
             let bootstrap = try await syncClient.bootstrap(
                 selectedUserID: targetUserID,
                 cachedDeckVersionIDs: cachedDeckVersionIDs,
@@ -198,11 +200,13 @@ final class AppUserStore {
             if let resolvedUserID {
                 let database = try ContentDatabase(userID: resolvedUserID)
                 let deviceID = try database.deviceID()
+                updateSyncProgress(.savingData, taskID: taskID)
                 try database.importServerBootstrap(bootstrap, selectedUserID: resolvedUserID)
-                let mediaFailureCount = try await cacheMedia(from: bootstrap, database: database)
+                let mediaFailureCount = try await cacheMedia(from: bootstrap, database: database, taskID: taskID)
                 try applyCachedUserAvatarURLs(from: bootstrap)
                 guard isCurrentRefreshTask(taskID) else { return .cancelled }
                 do {
+                    updateSyncProgress(.uploadingChanges, taskID: taskID)
                     try await uploadPendingEvents(database: database, selectedUserID: resolvedUserID, deviceID: deviceID)
                 } catch ServerSyncError.cancelled {
                     throw ServerSyncError.cancelled
@@ -292,6 +296,11 @@ final class AppUserStore {
         refreshTaskID == taskID
     }
 
+    private func updateSyncProgress(_ progress: AppUserSyncProgress, taskID: UUID) {
+        guard isCurrentRefreshTask(taskID) else { return }
+        syncStatus = syncStatus.updatingProgress(progress)
+    }
+
     private func finishSync(
         _ result: AppUserRefreshResult,
         userID: UUID?,
@@ -303,10 +312,11 @@ final class AppUserStore {
         return result
     }
 
-    private func cacheMedia(from bootstrap: ServerBootstrap, database: ContentDatabase) async throws -> Int {
+    private func cacheMedia(from bootstrap: ServerBootstrap, database: ContentDatabase, taskID: UUID) async throws -> Int {
+        updateSyncProgress(.preparingMedia, taskID: taskID)
         let versionDeckIDs = Dictionary(
             uniqueKeysWithValues: bootstrap.assignments.compactMap { assignment -> (UUID, UUID)? in
-                let versionID = assignment.deckVersionId ?? assignment.currentVersionId
+                let versionID = assignment.currentVersionId
                 guard let versionID else { return nil }
                 return (versionID, assignment.deckId)
             }
@@ -366,7 +376,15 @@ final class AppUserStore {
             }
         }
 
-        let downloadOutcomes = await downloadMediaObjects(downloadCandidates)
+        if downloadCandidates.isEmpty {
+            updateSyncProgress(.finishing, taskID: taskID)
+        } else {
+            updateSyncProgress(.downloadingMedia(completed: 0, total: downloadCandidates.count), taskID: taskID)
+        }
+        let downloadOutcomes = await downloadMediaObjects(downloadCandidates) { [weak self] completed, total in
+            self?.updateSyncProgress(.downloadingMedia(completed: completed, total: total), taskID: taskID)
+        }
+        updateSyncProgress(.finishing, taskID: taskID)
         for outcome in downloadOutcomes {
             switch outcome {
             case .success(let result):
@@ -418,7 +436,10 @@ final class AppUserStore {
         return MediaCacheCandidate(media: media, scope: scope, relativePath: relativePath)
     }
 
-    private func downloadMediaObjects(_ candidates: [MediaCacheCandidate]) async -> [MediaDownloadOutcome] {
+    private func downloadMediaObjects(
+        _ candidates: [MediaCacheCandidate],
+        progress: ((Int, Int) -> Void)? = nil
+    ) async -> [MediaDownloadOutcome] {
         guard !candidates.isEmpty else { return [] }
         let syncClient = syncClient
         let limit = min(Self.maxConcurrentMediaDownloads, candidates.count)
@@ -461,6 +482,7 @@ final class AppUserStore {
                     group.cancelAll()
                 }
                 outcomes.append(outcome)
+                progress?(outcomes.count, candidates.count)
                 if !isCancelling {
                     addNextDownload()
                 }

@@ -105,7 +105,7 @@ final class ContentDatabase {
     func importServerBootstrap(_ bootstrap: ServerBootstrap, selectedUserID: UUID) throws {
         let versionDeckIDs = Dictionary(
             uniqueKeysWithValues: bootstrap.assignments.compactMap { assignment -> (UUID, UUID)? in
-                let versionID = assignment.deckVersionId ?? assignment.currentVersionId
+                let versionID = assignment.currentVersionId
                 guard let versionID else { return nil }
                 return (versionID, assignment.deckId)
             }

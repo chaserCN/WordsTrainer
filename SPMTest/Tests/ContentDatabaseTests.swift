@@ -719,6 +719,22 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("import ignores legacy assignment deck version and uses current version")
+    func importIgnoresLegacyAssignmentDeckVersionAndUsesCurrentVersion() throws {
+        try withIsolatedDatabase { database in
+            let legacyVersionID = UUID(uuidString: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")!
+
+            try database.importServerBootstrap(
+                bootstrap(legacyAssignmentVersionID: legacyVersionID),
+                selectedUserID: userID
+            )
+
+            let deck = try #require(database.loadDecks().first)
+            #expect(deck.cards.map(\.id) == [cardID])
+            #expect(try database.cachedDeckVersionIDs() == [versionID])
+        }
+    }
+
     @Test("cached deck version bootstrap without content preserves local cards")
     func cachedDeckVersionBootstrapWithoutContentPreservesLocalCards() throws {
         try withIsolatedDatabase { database in
@@ -906,7 +922,8 @@ struct ContentDatabaseTests {
         audioExampleMediaID: UUID? = nil,
         media: [String] = [],
         userEnabled: Bool = true,
-        preferenceUpdatedAt: String? = nil
+        preferenceUpdatedAt: String? = nil,
+        legacyAssignmentVersionID: UUID? = nil
     ) throws -> ServerBootstrap {
         let cardImageMediaValue = cardImageMediaID.map { #"""# + $0.databaseString + #"""# } ?? "null"
         let audioWordMediaValue = audioWordMediaID.map { #"""# + $0.databaseString + #"""# } ?? "null"
@@ -964,13 +981,14 @@ struct ContentDatabaseTests {
                 "distractors": []
               }
               """
+        let assignmentDeckVersionValue = legacyAssignmentVersionID.map { #"""# + $0.databaseString + #"""# } ?? "null"
         let assignmentsJSON = includeAssignment
             ? """
               [
                 {
                   "user_id": "\(userID.databaseString)",
                   "deck_id": "\(deckID.databaseString)",
-                  "deck_version_id": null,
+                  "deck_version_id": \(assignmentDeckVersionValue),
                   "assignment_status": "\(assignmentStatus)",
                   "title": "Test Deck",
                   "avatar_system_name": "book",

@@ -399,12 +399,12 @@ struct StatisticsView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     StatisticsHeader()
 
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                        DashboardMetric(title: "Сегодня", value: "\(todayCount.total)", subtitle: cardsLabel(todayCount.total))
-                        DashboardMetric(title: "7 дней", value: "\(weekCount.total)", subtitle: cardsLabel(weekCount.total))
-                        DashboardMetric(title: "30 дней", value: "\(monthCount.total)", subtitle: cardsLabel(monthCount.total))
-                        DashboardMetric(title: "Дни занятий", value: "\(studyDaysCount)", subtitle: "за 30 дней")
-                    }
+                    StatisticsMetricsGrid(
+                        todayCount: todayCount.total,
+                        weekCount: weekCount.total,
+                        monthCount: monthCount.total,
+                        studyDaysCount: studyDaysCount
+                    )
 
                     ActivityHeatmap(months: activityMonths, maxCount: activityMaxCount)
                     ForecastSection(days: scheduledDays)
@@ -561,9 +561,7 @@ private struct TodayHeader: View {
             Button(action: sync) {
                 ZStack {
                     if isSyncing {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(LovableSurface.foreground)
+                        SyncProgressIndicator(progress: syncStatus.progress)
                     } else {
                         Image(systemName: "arrow.triangle.2.circlepath")
                             .font(.system(size: 18, weight: .semibold))
@@ -583,8 +581,56 @@ private struct TodayHeader: View {
             .disabled(isSyncing)
             .opacity(isSyncing ? 0.72 : 1)
             .accessibilityLabel(isSyncing ? "Синхронизация выполняется" : "Синхронизировать")
+            .accessibilityValue(syncStatus.progress?.title ?? "")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct SyncProgressIndicator: View {
+    let progress: AppUserSyncProgress?
+
+    private var fractionCompleted: Double? {
+        progress?.fractionCompleted
+    }
+
+    private var percentText: String {
+        guard let fractionCompleted else { return "" }
+        return "\(Int((fractionCompleted * 100).rounded()))"
+    }
+
+    var body: some View {
+        ZStack {
+            if let fractionCompleted {
+                Circle()
+                    .stroke(LovableSurface.foreground.opacity(0.22), lineWidth: 3)
+                    .frame(width: 25, height: 25)
+
+                Circle()
+                    .trim(from: 0, to: fractionCompleted)
+                    .stroke(
+                        LovableSurface.foreground,
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
+                    .frame(width: 25, height: 25)
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeOut(duration: 0.18), value: fractionCompleted)
+
+                Text(percentText)
+                    .font(.system(size: percentText.count >= 3 ? 7.5 : 9, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(LovableSurface.foreground)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+                    .allowsTightening(true)
+                    .frame(width: 23, height: 10)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(LovableSurface.foreground)
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -596,6 +642,27 @@ private struct StatisticsHeader: View {
                 .foregroundStyle(LovableSurface.foreground)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct StatisticsMetricsGrid: View {
+    let todayCount: Int
+    let weekCount: Int
+    let monthCount: Int
+    let studyDaysCount: Int
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                DashboardMetric(title: "Сегодня", value: "\(todayCount)", subtitle: cardsLabel(todayCount))
+                DashboardMetric(title: "7 дней", value: "\(weekCount)", subtitle: cardsLabel(weekCount))
+            }
+
+            HStack(spacing: 12) {
+                DashboardMetric(title: "30 дней", value: "\(monthCount)", subtitle: cardsLabel(monthCount))
+                DashboardMetric(title: "Дни занятий", value: "\(studyDaysCount)", subtitle: "за 30 дней")
+            }
+        }
     }
 }
 
@@ -700,7 +767,7 @@ private struct TodaySyncStatus: Equatable {
         case .syncing:
             self.init(
                 title: "Синхронизация",
-                message: "Проверяем сервер и загружаем данные выбранного пользователя.",
+                message: syncStatus.progress?.title ?? "Проверяем сервер и загружаем данные выбранного пользователя.",
                 systemImage: "arrow.clockwise",
                 tint: LovableSurface.primary
             )
@@ -1756,7 +1823,7 @@ private struct DeckAvatarView: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                .fill(DeckAvatarPalette(seed: deck.title).gradient)
+                .fill(DeckAvatarPalette(seed: deck.id.uuidString).gradient)
 
             if let url = deck.avatarImageURL {
                 AsyncImage(url: url) { phase in
@@ -1778,7 +1845,7 @@ private struct DeckAvatarView: View {
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
-        .shadow(color: DeckAvatarPalette(seed: deck.title).shadowColor, radius: 9, x: 0, y: 8)
+        .shadow(color: DeckAvatarPalette(seed: deck.id.uuidString).shadowColor, radius: 9, x: 0, y: 8)
     }
 }
 

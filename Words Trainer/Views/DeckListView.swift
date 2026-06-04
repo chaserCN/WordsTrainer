@@ -223,7 +223,7 @@ struct LovableDeckCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(DeckAvatarPalette(seed: deck.title).gradient)
+                    .fill(DeckAvatarPalette(seed: deck.id.uuidString).gradient)
                     .frame(width: 56, height: 56)
                     .overlay {
                         DeckAvatarContent(
@@ -233,7 +233,7 @@ struct LovableDeckCard: View {
                             cornerRadius: 16
                         )
                     }
-                    .shadow(color: DeckAvatarPalette(seed: deck.title).shadowColor, radius: 9, x: 0, y: 8)
+                    .shadow(color: DeckAvatarPalette(seed: deck.id.uuidString).shadowColor, radius: 9, x: 0, y: 8)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(deck.title)
@@ -291,9 +291,9 @@ struct DeckAvatarPalette {
     var gradient: LinearGradient {
         LinearGradient(
             colors: [
-                oklch(0.82, 0.15, hue),
-                oklch(0.74, 0.18, hue + 28),
-                oklch(0.70, 0.20, hue + 55)
+                oklch(0.89, 0.095, hue - 10),
+                oklch(0.82, 0.115, hue + 12),
+                oklch(0.76, 0.13, hue + 28)
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
@@ -301,11 +301,11 @@ struct DeckAvatarPalette {
     }
 
     var shadowColor: Color {
-        oklch(0.50, 0.18, hue + 35, 0.42)
+        oklch(0.50, 0.09, hue + 12, 0.30)
     }
 
     private var hue: Double {
-        Double(Self.stableHash(seed.normalizedAvatarSeed) % 360)
+        Self.pastelHue(for: Self.mixedHash(Self.stableHash(seed.normalizedAvatarSeed)))
     }
 
     private static func stableHash(_ value: String) -> UInt64 {
@@ -315,6 +315,25 @@ struct DeckAvatarPalette {
             hash &*= 1_099_511_628_211
         }
         return hash
+    }
+
+    private static func pastelHue(for hash: UInt64) -> Double {
+        let ranges: [(lower: Double, upper: Double)] = [
+            (326, 342), // rose
+            (270, 300), // violet
+            (205, 235), // blue
+            (154, 180), // mint
+        ]
+        let range = ranges[Int((hash >> 8) % UInt64(ranges.count))]
+        let width = UInt64(range.upper - range.lower)
+        return range.lower + Double((hash >> 16) % width)
+    }
+
+    private static func mixedHash(_ value: UInt64) -> UInt64 {
+        var hash = value
+        hash = (hash ^ (hash >> 30)) &* 0xbf58_476d_1ce4_e5b9
+        hash = (hash ^ (hash >> 27)) &* 0x94d0_49bb_1331_11eb
+        return hash ^ (hash >> 31)
     }
 }
 

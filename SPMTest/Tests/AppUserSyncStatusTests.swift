@@ -13,6 +13,20 @@ struct AppUserSyncStatusTests {
         #expect(status.isRelevant(to: selectedUserID))
         #expect(!status.isRelevant(to: otherUserID))
         #expect(!AppUserSyncStatus.idle.isRelevant(to: selectedUserID))
+        #expect(status.progress == .starting)
+    }
+
+    @Test("syncing status carries measurable progress")
+    func syncingStatusCarriesMeasurableProgress() {
+        let userID = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
+        let progress = AppUserSyncProgress.downloadingMedia(completed: 25, total: 100)
+        let status = AppUserSyncStatus.syncing(userID: userID, progress: progress)
+
+        #expect(status.progress?.title == "Скачиваем медиа 25 из 100")
+        #expect(status.progress?.fractionCompleted == 0.25)
+
+        let updated = status.updatingProgress(.downloadingMedia(completed: 120, total: 100))
+        #expect(updated.progress?.fractionCompleted == 1)
     }
 
     @Test(
@@ -43,5 +57,6 @@ struct AppUserSyncStatusTests {
         #expect(status.startedAt == startedAt)
         #expect(status.finishedAt == finishedAt)
         #expect(status.result == result)
+        #expect(status.progress == nil)
     }
 }

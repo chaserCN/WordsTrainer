@@ -49,19 +49,49 @@ enum AppUserSyncPhase: Equatable, Sendable {
     case cancelled
 }
 
+struct AppUserSyncProgress: Equatable, Sendable {
+    let title: String
+    let completedUnitCount: Int?
+    let totalUnitCount: Int?
+
+    var fractionCompleted: Double? {
+        guard let completedUnitCount,
+              let totalUnitCount,
+              totalUnitCount > 0 else { return nil }
+        return min(max(Double(completedUnitCount) / Double(totalUnitCount), 0), 1)
+    }
+
+    static let starting = AppUserSyncProgress(title: "Готовим синхронизацию", completedUnitCount: nil, totalUnitCount: nil)
+    static let uploadingChanges = AppUserSyncProgress(title: "Отправляем изменения", completedUnitCount: nil, totalUnitCount: nil)
+    static let loadingData = AppUserSyncProgress(title: "Загружаем данные", completedUnitCount: nil, totalUnitCount: nil)
+    static let savingData = AppUserSyncProgress(title: "Сохраняем данные", completedUnitCount: nil, totalUnitCount: nil)
+    static let preparingMedia = AppUserSyncProgress(title: "Проверяем медиа", completedUnitCount: nil, totalUnitCount: nil)
+    static let finishing = AppUserSyncProgress(title: "Завершаем синхронизацию", completedUnitCount: nil, totalUnitCount: nil)
+
+    static func downloadingMedia(completed: Int, total: Int) -> AppUserSyncProgress {
+        AppUserSyncProgress(
+            title: "Скачиваем медиа \(completed) из \(total)",
+            completedUnitCount: completed,
+            totalUnitCount: total
+        )
+    }
+}
+
 struct AppUserSyncStatus: Equatable, Sendable {
     let phase: AppUserSyncPhase
     let userID: UUID?
     let startedAt: Date?
     let finishedAt: Date?
     let result: AppUserRefreshResult?
+    let progress: AppUserSyncProgress?
 
     static let idle = AppUserSyncStatus(
         phase: .idle,
         userID: nil,
         startedAt: nil,
         finishedAt: nil,
-        result: nil
+        result: nil,
+        progress: nil
     )
 
     var isSyncing: Bool {
@@ -73,13 +103,30 @@ struct AppUserSyncStatus: Equatable, Sendable {
         return userID == selectedUserID
     }
 
-    static func syncing(userID: UUID?, startedAt: Date = .now) -> AppUserSyncStatus {
+    static func syncing(
+        userID: UUID?,
+        startedAt: Date = .now,
+        progress: AppUserSyncProgress = .starting
+    ) -> AppUserSyncStatus {
         AppUserSyncStatus(
             phase: .syncing,
             userID: userID,
             startedAt: startedAt,
             finishedAt: nil,
-            result: nil
+            result: nil,
+            progress: progress
+        )
+    }
+
+    func updatingProgress(_ progress: AppUserSyncProgress) -> AppUserSyncStatus {
+        guard isSyncing else { return self }
+        return AppUserSyncStatus(
+            phase: phase,
+            userID: userID,
+            startedAt: startedAt,
+            finishedAt: finishedAt,
+            result: result,
+            progress: progress
         )
     }
 
@@ -94,7 +141,8 @@ struct AppUserSyncStatus: Equatable, Sendable {
             userID: userID,
             startedAt: startedAt,
             finishedAt: finishedAt,
-            result: result
+            result: result,
+            progress: nil
         )
     }
 
