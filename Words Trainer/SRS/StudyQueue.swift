@@ -22,11 +22,29 @@ struct StudyQueueItem: Identifiable, Sendable {
 /// One word sense paired with one translation line in matching columns.
 struct MatchingPair: Identifiable, Sendable, Hashable {
     let cardID: UUID
+    let deckID: UUID?
     let card: WordCardContent
     let senseIndex: Int
     let translation: String
+    var progress: CardProgress
 
     var id: String { "\(cardID.uuidString)-\(senseIndex)" }
+
+    init(
+        cardID: UUID,
+        deckID: UUID? = nil,
+        card: WordCardContent,
+        senseIndex: Int,
+        translation: String,
+        progress: CardProgress? = nil
+    ) {
+        self.cardID = cardID
+        self.deckID = deckID
+        self.card = card
+        self.senseIndex = senseIndex
+        self.translation = translation
+        self.progress = progress ?? CardProgress.newCard(cardID: cardID)
+    }
 
     static func pairs(from item: StudyQueueItem) -> [MatchingPair] {
         let senses = WordCardContent.translationSenses(item.card.translation)
@@ -34,18 +52,22 @@ struct MatchingPair: Identifiable, Sendable, Hashable {
             return [
                 MatchingPair(
                     cardID: item.card.id,
+                    deckID: item.deckID,
                     card: item.card,
                     senseIndex: 0,
-                    translation: item.card.translation
+                    translation: item.card.translation,
+                    progress: item.progress
                 ),
             ]
         }
         return senses.enumerated().map { index, sense in
             MatchingPair(
                 cardID: item.card.id,
+                deckID: item.deckID,
                 card: item.card,
                 senseIndex: index,
-                translation: sense
+                translation: sense,
+                progress: item.progress
             )
         }
     }

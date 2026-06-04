@@ -386,6 +386,47 @@ struct StudySessionMatchingTests {
         #expect(session.remainingCount == 0)
     }
 
+    @Test("incorrect matching selection updates FSRS progress")
+    @MainActor
+    func incorrectSelectionUpdatesProgress() throws {
+        let card = TestFixtures.card(word: "cast", translation: "бросать; кидать")
+        let session = TestFixtures.matchingSession(cards: [card])
+        let pair = try #require(session.matchingVisibleItems.first)
+        let before = pair.progress.fsrsCard
+
+        let result = try #require(try session.recordIncorrectMatchingPair(id: pair.id))
+
+        #expect(result.deckID == session.deckID)
+        #expect(result.progress.cardID == card.id)
+        #expect(result.progress.fsrsCard.reps > before.reps)
+        #expect(result.progress.fsrsCard.lastReview != nil)
+        #expect(result.progress.fsrsCard.state != before.state)
+        #expect(session.matchingVisibleItems.first?.progress == result.progress)
+    }
+
+    @Test("practice matching still updates FSRS progress for wrong pairs")
+    @MainActor
+    func practiceMatchingUpdatesProgressForWrongPairs() throws {
+        let deckID = UUID()
+        let card = TestFixtures.card(word: "cast", translation: "бросать")
+        let progress = CardProgress.newCard(cardID: card.id)
+        let session = StudySession(
+            deckID: UUID(),
+            mode: .matching,
+            queue: [StudyQueueItem(card: card, progress: progress, deckID: deckID)],
+            dailyUsage: nil,
+            engine: StudySessionEngine(),
+            savesProgress: false
+        )
+        let pair = try #require(session.matchingVisibleItems.first)
+
+        let result = try #require(try session.recordIncorrectMatchingPair(id: pair.id))
+
+        #expect(result.deckID == deckID)
+        #expect(result.progress.fsrsCard.reps > progress.fsrsCard.reps)
+        #expect(session.matchingVisibleItems.first?.progress == result.progress)
+    }
+
     @Test("non-matching mode uses queue for remaining count")
     @MainActor
     func nonMatchingRemainingCount() {

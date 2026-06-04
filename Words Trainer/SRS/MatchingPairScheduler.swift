@@ -31,6 +31,20 @@ struct MatchingPairScheduler: Sendable {
         }
     }
 
+    func pair(id: String) -> MatchingPair? {
+        visible.first(where: { $0.id == id })
+            ?? pool.first(where: { $0.id == id })
+    }
+
+    mutating func updateProgress(cardID: UUID, progress: CardProgress) {
+        for index in visible.indices where visible[index].cardID == cardID {
+            visible[index].progress = progress
+        }
+        for index in pool.indices where pool[index].cardID == cardID {
+            pool[index].progress = progress
+        }
+    }
+
     /// Visible pairs must not share the same source card.
     var visibleCardIDsAreUnique: Bool {
         let cardIDs = visible.map(\.cardID)

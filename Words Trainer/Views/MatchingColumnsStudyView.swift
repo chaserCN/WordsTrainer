@@ -283,6 +283,7 @@ struct MatchingColumnsStudyView: View {
                 shuffle: shuffle
             )
         } else {
+            recordIncorrectSelection(pairID: wordPairID)
             if let pair = pairCache[wordPairID] {
                 WordAudioPlayer.shared.playWord(from: pair.card, style: .wrong)
             }
@@ -296,6 +297,16 @@ struct MatchingColumnsStudyView: View {
                     wrongTranslationSlot = nil
                 }
             }
+        }
+    }
+
+    private func recordIncorrectSelection(pairID: String) {
+        do {
+            guard let result = try session.recordIncorrectMatchingPair(id: pairID) else { return }
+            try store.saveProgress(deckID: result.deckID, progress: result.progress, wasNew: false)
+            store.notifyLocalDataDidChange(deckID: result.deckID)
+        } catch {
+            assertionFailure("Failed to record matching incorrect answer: \(error)")
         }
     }
 

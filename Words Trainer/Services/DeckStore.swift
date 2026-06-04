@@ -91,7 +91,7 @@ final class DeckStore {
     }
 
     /// Игра «Колонки» из самых забываемых слов всех активных колод.
-    /// Чистая практика: ничего не сохраняем (`savesProgress: false`).
+    /// Review events не пишем (`savesProgress: false`), но ошибки в matching всё равно обновляют FSRS.
     func weakCardsMatchingSession(
         from weakStats: [WeakCardStat],
         limit: Int = 12
@@ -104,19 +104,28 @@ final class DeckStore {
                 cardByID[card.id] = card
             }
         }
-        let cards = weak.compactMap { cardByID[$0.cardID] }
-        guard cards.count >= 2 else { return nil }
-        let queue = cards.map { card in
-            StudyQueueItem(card: card, progress: CardProgress.newCard(cardID: card.id))
+        var progressByDeckID: [UUID: [UUID: CardProgress]] = [:]
+        let queue = try weak.compactMap { weakCard -> StudyQueueItem? in
+            guard let card = cardByID[weakCard.cardID] else { return nil }
+            if progressByDeckID[weakCard.deckID] == nil {
+                progressByDeckID[weakCard.deckID] = try database.progressMap(deckID: weakCard.deckID)
+            }
+            return StudyQueueItem(
+                card: card,
+                progress: progressByDeckID[weakCard.deckID]?[weakCard.cardID]
+                    ?? CardProgress.newCard(cardID: weakCard.cardID),
+                deckID: weakCard.deckID
+            )
         }
+        guard queue.count >= 2 else { return nil }
         return StudySession(
             deckID: WeakCardsPractice.deckID,
             mode: .matching,
             queue: queue,
-            deckCards: cards,
+            deckCards: queue.map(\.card),
             dailyUsage: nil,
             engine: engine,
-            matchingRecordScope: .none,
+            matchingRecordScope: MatchingRecordScope.none,
             reviewSource: .weakCards,
             savesProgress: false
         )
@@ -330,7 +339,7 @@ final class DeckStore {
             deckCards: studyCards,
             dailyUsage: usage,
             engine: engine,
-            matchingRecordScope: mode.isMatching ? .none : .deck(deck.id),
+            matchingRecordScope: mode.isMatching ? MatchingRecordScope.none : .deck(deck.id),
             reviewSource: .weakCards
         )
     }

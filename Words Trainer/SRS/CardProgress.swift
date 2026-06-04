@@ -1,7 +1,7 @@
 import Foundation
 import FSRS
 
-struct CardProgress: Codable, Sendable {
+struct CardProgress: Codable, Hashable, Sendable {
     let cardID: UUID
     var fsrsCard: Card
     var updatedAt: Date

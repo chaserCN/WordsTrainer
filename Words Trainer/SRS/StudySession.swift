@@ -10,7 +10,8 @@ final class StudySession {
     let mode: StudyMode
     let matchingRecordScope: MatchingRecordScope
     let reviewSource: StudyReviewSource
-    /// Когда false — чистая практика: учебный прогресс и review events не сохраняются.
+    /// Когда false — обычные review events не сохраняются.
+    /// Неправильный выбор в matching всё равно обновляет FSRS progress.
     /// Matching-рекорд управляется отдельно через `matchingRecordScope`.
     let savesProgress: Bool
     let matchingTotalPairCount: Int
@@ -92,6 +93,16 @@ final class StudySession {
         matchingScheduler?.removeMatched(id: id, rng: &rng)
     }
 
+    func recordIncorrectMatchingPair(id: String) throws -> MatchingIncorrectReviewResult? {
+        guard mode.isMatching, let pair = matchingScheduler?.pair(id: id) else { return nil }
+        let updated = try engine.applyReview(progress: pair.progress, outcome: .incorrect)
+        matchingScheduler?.updateProgress(cardID: pair.cardID, progress: updated)
+        return MatchingIncorrectReviewResult(
+            deckID: pair.deckID ?? deckID,
+            progress: updated
+        )
+    }
+
     func advanceAfterReview(
         outcome: ReviewOutcome,
         onSave: (_ progress: CardProgress, _ wasNew: Bool) throws -> Void,
@@ -158,4 +169,9 @@ final class StudySession {
     private func startNextCurrentIfNeeded() {
         currentStartedAt = queue.isEmpty ? nil : Date()
     }
+}
+
+struct MatchingIncorrectReviewResult: Sendable {
+    let deckID: UUID
+    let progress: CardProgress
 }
