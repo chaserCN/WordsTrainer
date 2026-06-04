@@ -1074,7 +1074,7 @@ private struct StudyTodayCard: View {
         Button(action: action) {
             HStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Учить сегодня")
+                    Text("Учить по плану")
                         .font(.system(size: 24, weight: .bold))
                     Text(subtitle)
                         .font(.system(size: 14, weight: .medium))
@@ -1111,7 +1111,7 @@ private struct StudyTodayCard: View {
             return "\(stats.studyTotal) карточек в очереди"
         }
         if practiceCount > 0 {
-            return "На сегодня всё · можно повторить \(practiceCount)"
+            return "Пока всё · можно повторить \(practiceCount)"
         }
         return "Пока всё"
     }
@@ -1143,7 +1143,7 @@ private struct TodayStudyModesView: View {
                         WordListView(
                             title: "Слова",
                             cards: wordListCards,
-                            emptyMessage: "На сегодня пока нет слов.",
+                            emptyMessage: "Пока нет слов.",
                             backgroundVariant: .today
                         )
                     } label: {
@@ -1462,7 +1462,7 @@ private struct QueueSummaryCard: View {
         if queueCount == 0, practiceCount > 0 {
             return "Очередь закончена · \(practiceCount) для практики"
         }
-        return "\(queueCount) \(cardsLabel(queueCount)) · сегодня"
+        return "\(queueCount) \(cardsLabel(queueCount))"
     }
 }
 
