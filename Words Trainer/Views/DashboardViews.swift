@@ -388,7 +388,7 @@ struct StatisticsView: View {
     @State private var weekMatchingAttemptCount = 0
     @State private var monthUniqueCardCount = 0
     @State private var monthMatchingAttemptCount = 0
-    @State private var monthStudyTimeBreakdown: StudyTimeBreakdown = .zero
+    @State private var todayStudyTimeBreakdown: StudyTimeBreakdown = .zero
     @State private var studyDaysCount = 0
     @State private var activityMonths: [ActivityMonth] = []
     @State private var scheduledDays: [ScheduledReviewDay] = []
@@ -413,7 +413,7 @@ struct StatisticsView: View {
                         studyDaysCount: studyDaysCount
                     )
 
-                    StudyTimeBreakdownPanel(breakdown: monthStudyTimeBreakdown)
+                    StudyTimeBreakdownPanel(breakdown: todayStudyTimeBreakdown)
                     ActivityHeatmap(months: activityMonths)
                     ForecastSection(days: scheduledDays)
                     WeakCardsSection(
@@ -469,7 +469,7 @@ struct StatisticsView: View {
                 weekMatchingAttemptCount = 0
                 monthUniqueCardCount = 0
                 monthMatchingAttemptCount = 0
-                monthStudyTimeBreakdown = .zero
+                todayStudyTimeBreakdown = .zero
                 studyDaysCount = 0
                 activityMonths = []
                 scheduledDays = []
@@ -496,7 +496,7 @@ struct StatisticsView: View {
             weekMatchingAttemptCount = try deckStore.matchingAttemptCount(since: weekStart)
             monthUniqueCardCount = try deckStore.uniqueStudyCardCount(since: monthStart)
             monthMatchingAttemptCount = try deckStore.matchingAttemptCount(since: monthStart)
-            monthStudyTimeBreakdown = try deckStore.studyTimeBreakdown(since: monthStart)
+            todayStudyTimeBreakdown = try deckStore.studyTimeBreakdown(since: todayStart)
             studyDaysCount = Self.studyDaysCount(from: activityDays)
             let maxActivityCount = max(activityDays.map(\.reviewedCount).max() ?? 0, 1)
             activityMonths = ActivityCalendarBuilder.months(from: activityDays, maxCount: maxActivityCount)
@@ -675,14 +675,14 @@ private struct StatisticsMetricsGrid: View {
                 DashboardMetric(
                     title: "Сегодня",
                     value: "\(todayCount)",
-                    subtitle: cardsLabel(todayCount),
+                    subtitle: wordsLabel(todayCount),
                     secondaryValue: "\(todayMatchingAttemptCount)",
                     secondarySubtitle: gamesLabel(todayMatchingAttemptCount)
                 )
                 DashboardMetric(
                     title: "7 дней",
                     value: "\(weekCount)",
-                    subtitle: cardsLabel(weekCount),
+                    subtitle: wordsLabel(weekCount),
                     secondaryValue: "\(weekMatchingAttemptCount)",
                     secondarySubtitle: gamesLabel(weekMatchingAttemptCount)
                 )
@@ -692,7 +692,7 @@ private struct StatisticsMetricsGrid: View {
                 DashboardMetric(
                     title: "30 дней",
                     value: "\(monthCount)",
-                    subtitle: cardsLabel(monthCount),
+                    subtitle: wordsLabel(monthCount),
                     secondaryValue: "\(monthMatchingAttemptCount)",
                     secondarySubtitle: gamesLabel(monthMatchingAttemptCount)
                 )
@@ -737,7 +737,7 @@ private struct StudyTimeBreakdownPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Время занятий")
+                Text("Время занятий сегодня")
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(oklch(0.99, 0.01, 240))
 
@@ -758,7 +758,7 @@ private struct StudyTimeBreakdownPanel: View {
         .padding(18)
         .statisticsPanel(cornerRadius: 24)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Время занятий за 30 дней")
+        .accessibilityLabel("Время занятий сегодня")
         .accessibilityValue(studyDurationLabel(milliseconds: breakdown.totalMilliseconds))
     }
 }
@@ -2330,6 +2330,21 @@ private func currentStreakDays(from activity: [StudyActivityDay]) -> Int {
         date = previous
     }
     return streak
+}
+
+private func wordsLabel(_ count: Int) -> String {
+    let mod10 = count % 10
+    let mod100 = count % 100
+    if mod100 >= 11 && mod100 <= 14 {
+        return "слов"
+    }
+    if mod10 == 1 {
+        return "слово"
+    }
+    if mod10 >= 2 && mod10 <= 4 {
+        return "слова"
+    }
+    return "слов"
 }
 
 private func cardsLabel(_ count: Int) -> String {
