@@ -414,7 +414,7 @@ struct FlashcardStudyView: View {
 
     @ViewBuilder
     private func flipLabel(isBack: Bool, minHeight: CGFloat, layout: CardBodyLayout) -> some View {
-        if layout == .fixed {
+        if layout == .fixed && !isBack {
             flipLabelContent(isBack: isBack, layout: layout)
                 .padding(.horizontal, 18)
                 .padding(.top, 18)
@@ -468,7 +468,7 @@ struct FlashcardStudyView: View {
                     .layoutPriority(1)
             }
 
-            if layout == .fixed {
+            if layout == .fixed && !isBack {
                 Spacer(minLength: 0)
             }
         }
