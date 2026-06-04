@@ -153,45 +153,6 @@ struct ServerSyncClientTests {
         #expect(response.serverRevision == "42")
     }
 
-    @Test("changes sends selected user and device id")
-    func changesSendsDeviceHeader() async throws {
-        let suiteName = "ServerSyncClientTests-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-        defaults.set("https://example.test", forKey: "server.baseURL")
-        defaults.set("test-token", forKey: "server.householdSyncToken")
-
-        let selectedUserID = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
-        let deviceID = UUID(uuidString: "77777777-7777-4777-8777-777777777777")!
-        let captured = LockedRequest()
-        StubURLProtocol.handler = { request in
-            captured.request = request
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: 200,
-                httpVersion: nil,
-                headerFields: ["Content-Type": "application/json"]
-            )!
-            return (response, Data(#"{"progress":[],"reviews":[],"matching_records":[],"server_revision":"42"}"#.utf8))
-        }
-        defer { StubURLProtocol.handler = nil }
-
-        let client = ServerSyncClient(session: Self.stubSession(), userDefaultsSuiteName: suiteName)
-        let changes = try await client.changes(
-            sinceRevision: "7",
-            selectedUserID: selectedUserID,
-            deviceID: deviceID
-        )
-
-        let request = try #require(captured.request)
-        #expect(request.url?.absoluteString == "https://example.test/v1/sync/changes?sinceRevision=7")
-        #expect(request.httpMethod == "GET")
-        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
-        #expect(request.value(forHTTPHeaderField: "X-FlashGame-User-Id") == selectedUserID.databaseString)
-        #expect(request.value(forHTTPHeaderField: "X-FlashGame-Device-Id") == deviceID.databaseString)
-        #expect(changes.serverRevision == "42")
-    }
-
     private static func stubSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]

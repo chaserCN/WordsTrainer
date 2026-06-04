@@ -78,13 +78,6 @@ struct ServerBootstrap: Decodable, Sendable {
     }
 }
 
-struct ServerSyncChanges: Decodable, Sendable {
-    let progress: [ServerProgressPayload]
-    let reviews: [ServerReviewEventPayload]
-    let matchingRecords: [ServerMatchingRecordPayload]
-    let serverRevision: String?
-}
-
 struct ServerUser: Decodable, Sendable {
     let id: UUID
     let displayName: String
@@ -647,22 +640,6 @@ struct ServerSyncClient: Sendable {
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         do {
             return try decoder.decode(ServerSyncEventsResponse.self, from: responseData)
-        } catch {
-            throw ServerSyncError.invalidResponse
-        }
-    }
-
-    func changes(sinceRevision: String, selectedUserID: UUID?, deviceID: UUID?) async throws -> ServerSyncChanges {
-        let data = try await data(
-            for: "sync/changes?sinceRevision=\(sinceRevision)",
-            method: "GET",
-            selectedUserID: selectedUserID,
-            deviceID: deviceID
-        )
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        do {
-            return try decoder.decode(ServerSyncChanges.self, from: data)
         } catch {
             throw ServerSyncError.invalidResponse
         }

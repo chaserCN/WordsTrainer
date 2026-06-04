@@ -160,22 +160,6 @@ final class ContentDatabase {
         }
     }
 
-    func importServerChanges(_ changes: ServerSyncChanges, selectedUserID: UUID) throws {
-        try beginTransaction()
-        do {
-            try upsertServerProgress(changes.progress)
-            try upsertServerReviews(changes.reviews, selectedUserID: selectedUserID)
-            try upsertServerMatchingRecords(changes.matchingRecords, selectedUserID: selectedUserID)
-            if let serverRevision = changes.serverRevision {
-                try setServerRevision(serverRevision)
-            }
-            try commitTransaction()
-        } catch {
-            try? rollbackTransaction()
-            throw error
-        }
-    }
-
     func serverRevision() throws -> String {
         try syncMetadataValue(SyncMetadataKey.serverRevision) ?? "0"
     }
