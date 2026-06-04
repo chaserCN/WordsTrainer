@@ -19,7 +19,6 @@ struct FlashcardStudyView: View {
     @State private var cardChangeDirection: StudyCardChangeDirection = .right
     @State private var isFlipAnimating = false
     @State private var flipGeneration = 0
-    @State private var exampleToggleGeneration = 0
     @State private var renderedCardID: UUID?
     @State private var progressHeaderBottom: CGFloat = 0
     @State private var collapsedCardTop: CGFloat = 0
@@ -36,7 +35,7 @@ struct FlashcardStudyView: View {
     private static let maxMediaImageSize: CGFloat = 180
     private static let fallbackProgressHeaderBottom: CGFloat = 21
     private static let fallbackActionHeight: CGFloat = 56
-    private static let exampleCollapseDelay = 0.08
+    private static let exampleAnimation = Animation.spring(response: 0.22, dampingFraction: 0.88)
     private static let layoutCoordinateSpace = "FlashcardStudyLayout"
 
     private var hasWordAudio: Bool {
@@ -215,7 +214,7 @@ struct FlashcardStudyView: View {
                         .frame(height: cardHeight, alignment: .top)
                 }
             }
-            .animation(.spring(response: 0.35, dampingFraction: 0.86), value: isShowingExampleExpanded)
+            .animation(Self.exampleAnimation, value: isShowingExampleExpanded)
 
             if hasWordAudio {
                 Button {
@@ -510,9 +509,6 @@ struct FlashcardStudyView: View {
     }
 
     private func toggleExampleDetails() {
-        exampleToggleGeneration += 1
-        let generation = exampleToggleGeneration
-
         if isExampleExpanded {
             var transaction = Transaction()
             transaction.disablesAnimations = true
@@ -520,15 +516,7 @@ struct FlashcardStudyView: View {
                 isExampleDetailsVisible = false
             }
 
-            guard !reduceMotion else {
-                isExampleExpanded = false
-                return
-            }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.exampleCollapseDelay) {
-                guard generation == exampleToggleGeneration else { return }
-                setExampleExpanded(false)
-            }
+            setExampleExpanded(false)
         } else {
             isExampleDetailsVisible = true
             setExampleExpanded(true)
@@ -539,7 +527,7 @@ struct FlashcardStudyView: View {
         if reduceMotion {
             isExampleExpanded = isExpanded
         } else {
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+            withAnimation(Self.exampleAnimation) {
                 isExampleExpanded = isExpanded
             }
         }
@@ -643,7 +631,6 @@ struct FlashcardStudyView: View {
 
     private func resetForNewCard() {
         flipGeneration += 1
-        exampleToggleGeneration += 1
         renderedCardID = card.id
         isFlipped = false
         isExampleExpanded = false
