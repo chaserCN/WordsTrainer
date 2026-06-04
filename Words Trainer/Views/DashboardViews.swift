@@ -382,9 +382,12 @@ struct StatisticsView: View {
     @Environment(AppUserStore.self) private var userStore
     @State private var store: DeckStore?
     @State private var storeUserID: UUID?
-    @State private var todayCount: StudyReviewCount = .zero
-    @State private var weekCount: StudyReviewCount = .zero
-    @State private var monthCount: StudyReviewCount = .zero
+    @State private var todayUniqueCardCount = 0
+    @State private var todayMatchingAttemptCount = 0
+    @State private var weekUniqueCardCount = 0
+    @State private var weekMatchingAttemptCount = 0
+    @State private var monthUniqueCardCount = 0
+    @State private var monthMatchingAttemptCount = 0
     @State private var studyDaysCount = 0
     @State private var activityMonths: [ActivityMonth] = []
     @State private var activityMaxCount = 1
@@ -401,9 +404,12 @@ struct StatisticsView: View {
                     StatisticsHeader()
 
                     StatisticsMetricsGrid(
-                        todayCount: todayCount.total,
-                        weekCount: weekCount.total,
-                        monthCount: monthCount.total,
+                        todayCount: todayUniqueCardCount,
+                        todayMatchingAttemptCount: todayMatchingAttemptCount,
+                        weekCount: weekUniqueCardCount,
+                        weekMatchingAttemptCount: weekMatchingAttemptCount,
+                        monthCount: monthUniqueCardCount,
+                        monthMatchingAttemptCount: monthMatchingAttemptCount,
                         studyDaysCount: studyDaysCount
                     )
 
@@ -456,9 +462,12 @@ struct StatisticsView: View {
     private func reload() async {
         do {
             guard let selectedUserID = userStore.selectedUserID else {
-                todayCount = .zero
-                weekCount = .zero
-                monthCount = .zero
+                todayUniqueCardCount = 0
+                todayMatchingAttemptCount = 0
+                weekUniqueCardCount = 0
+                weekMatchingAttemptCount = 0
+                monthUniqueCardCount = 0
+                monthMatchingAttemptCount = 0
                 studyDaysCount = 0
                 activityMonths = []
                 activityMaxCount = 1
@@ -480,9 +489,12 @@ struct StatisticsView: View {
             let weekStart = calendar.date(byAdding: .day, value: -6, to: todayStart) ?? todayStart
             let monthStart = calendar.date(byAdding: .day, value: -29, to: todayStart) ?? todayStart
             let activityDays = try deckStore.studyActivity(days: 120)
-            todayCount = try deckStore.studyReviewCount(since: todayStart)
-            weekCount = try deckStore.studyReviewCount(since: weekStart)
-            monthCount = try deckStore.studyReviewCount(since: monthStart)
+            todayUniqueCardCount = try deckStore.uniqueStudyCardCount(since: todayStart)
+            todayMatchingAttemptCount = try deckStore.matchingAttemptCount(since: todayStart)
+            weekUniqueCardCount = try deckStore.uniqueStudyCardCount(since: weekStart)
+            weekMatchingAttemptCount = try deckStore.matchingAttemptCount(since: weekStart)
+            monthUniqueCardCount = try deckStore.uniqueStudyCardCount(since: monthStart)
+            monthMatchingAttemptCount = try deckStore.matchingAttemptCount(since: monthStart)
             studyDaysCount = Self.studyDaysCount(from: activityDays)
             activityMonths = ActivityCalendarBuilder.months(from: activityDays)
             activityMaxCount = max(activityDays.map(\.reviewedCount).max() ?? 0, 1)
@@ -648,19 +660,40 @@ private struct StatisticsHeader: View {
 
 private struct StatisticsMetricsGrid: View {
     let todayCount: Int
+    let todayMatchingAttemptCount: Int
     let weekCount: Int
+    let weekMatchingAttemptCount: Int
     let monthCount: Int
+    let monthMatchingAttemptCount: Int
     let studyDaysCount: Int
 
     var body: some View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
-                DashboardMetric(title: "Сегодня", value: "\(todayCount)", subtitle: cardsLabel(todayCount))
-                DashboardMetric(title: "7 дней", value: "\(weekCount)", subtitle: cardsLabel(weekCount))
+                DashboardMetric(
+                    title: "Сегодня",
+                    value: "\(todayCount)",
+                    subtitle: cardsLabel(todayCount),
+                    secondaryValue: "\(todayMatchingAttemptCount)",
+                    secondarySubtitle: gamesLabel(todayMatchingAttemptCount)
+                )
+                DashboardMetric(
+                    title: "7 дней",
+                    value: "\(weekCount)",
+                    subtitle: cardsLabel(weekCount),
+                    secondaryValue: "\(weekMatchingAttemptCount)",
+                    secondarySubtitle: gamesLabel(weekMatchingAttemptCount)
+                )
             }
 
             HStack(spacing: 12) {
-                DashboardMetric(title: "30 дней", value: "\(monthCount)", subtitle: cardsLabel(monthCount))
+                DashboardMetric(
+                    title: "30 дней",
+                    value: "\(monthCount)",
+                    subtitle: cardsLabel(monthCount),
+                    secondaryValue: "\(monthMatchingAttemptCount)",
+                    secondarySubtitle: gamesLabel(monthMatchingAttemptCount)
+                )
                 DashboardMetric(title: "Дни занятий", value: "\(studyDaysCount)", subtitle: "за 30 дней")
             }
         }
@@ -1513,24 +1546,62 @@ private struct DashboardMetric: View {
     let title: String
     let value: String
     let subtitle: String
+    var detail: String? = nil
+    var secondaryValue: String? = nil
+    var secondarySubtitle: String? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(oklch(0.82, 0.03, 250, 0.7))
-            Text(value)
-                .font(.system(size: 32, weight: .bold))
-                .foregroundStyle(oklch(0.99, 0.01, 240))
+                .frame(maxWidth: .infinity, alignment: .center)
+                .multilineTextAlignment(.center)
+            HStack(alignment: .top, spacing: 12) {
+                if let secondaryValue, let secondarySubtitle {
+                    DashboardMetricValue(value: value, subtitle: subtitle, isCentered: true)
+                        .frame(maxWidth: .infinity)
+                    DashboardMetricValue(value: secondaryValue, subtitle: secondarySubtitle, isCentered: true)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    DashboardMetricValue(value: value, subtitle: subtitle, isCentered: true)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            Text(detail ?? " ")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(oklch(0.82, 0.03, 250, detail == nil ? 0 : 0.72))
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(subtitle)
-                .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(oklch(0.82, 0.03, 250, 0.65))
+                .minimumScaleFactor(0.78)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .statisticsPanel(cornerRadius: 20)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct DashboardMetricValue: View {
+    let value: String
+    let subtitle: String
+    var isCentered = false
+
+    var body: some View {
+        VStack(alignment: isCentered ? .center : .leading, spacing: 4) {
+            Text(value)
+                .font(.system(size: 32, weight: .bold))
+                .foregroundStyle(oklch(0.99, 0.01, 240))
+                .lineLimit(1)
+                .minimumScaleFactor(0.64)
+                .multilineTextAlignment(isCentered ? .center : .leading)
+            Text(subtitle)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(oklch(0.82, 0.03, 250, 0.65))
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+                .multilineTextAlignment(isCentered ? .center : .leading)
+        }
     }
 }
 
@@ -2117,4 +2188,19 @@ private func cardsLabel(_ count: Int) -> String {
         return "карточки"
     }
     return "карточек"
+}
+
+private func gamesLabel(_ count: Int) -> String {
+    let mod10 = count % 10
+    let mod100 = count % 100
+    if mod100 >= 11 && mod100 <= 14 {
+        return "игр"
+    }
+    if mod10 == 1 {
+        return "игра"
+    }
+    if mod10 >= 2 && mod10 <= 4 {
+        return "игры"
+    }
+    return "игр"
 }

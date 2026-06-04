@@ -70,6 +70,14 @@ final class DeckStore {
         try database.studyReviewCount(since: startDate)
     }
 
+    func uniqueStudyCardCount(since startDate: Date) throws -> Int {
+        try database.uniqueStudyCardCount(since: startDate)
+    }
+
+    func matchingAttemptCount(since startDate: Date) throws -> Int {
+        try database.matchingAttemptCount(since: startDate)
+    }
+
     func weakCards(limit: Int = 30) throws -> [WeakCardStat] {
         try database.weakCards(limit: limit)
     }
@@ -349,6 +357,7 @@ final class DeckStore {
 
     func saveMatchingAttempt(_ event: MatchingAttemptEvent) throws {
         try database.saveMatchingAttempt(event)
+        notifyLocalDataDidChange(deckID: event.deckID ?? WeakCardsPractice.deckID)
     }
 
     func matchingRecord(deckID: UUID) throws -> DeckMatchingRecord? {

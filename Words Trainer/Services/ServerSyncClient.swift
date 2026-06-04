@@ -10,10 +10,9 @@ struct ServerBootstrap: Decodable, Sendable {
     let progress: [ServerProgressPayload]
     let reviews: [ServerReviewEventPayload]
     let matchingRecords: [ServerMatchingRecordPayload]
+    let matchingAttempts: [ServerMatchingAttemptPayload]
     let dailyUsage: [ServerDailyUsagePayload]
     let hasDailyUsageSnapshot: Bool
-    let statsSummary: ServerStatsSummaryPayload
-    let hasStatsSummarySnapshot: Bool
     let serverRevision: String?
 
     init(
@@ -25,10 +24,9 @@ struct ServerBootstrap: Decodable, Sendable {
         progress: [ServerProgressPayload],
         reviews: [ServerReviewEventPayload],
         matchingRecords: [ServerMatchingRecordPayload],
+        matchingAttempts: [ServerMatchingAttemptPayload] = [],
         dailyUsage: [ServerDailyUsagePayload] = [],
         hasDailyUsageSnapshot: Bool = true,
-        statsSummary: ServerStatsSummaryPayload = .empty,
-        hasStatsSummarySnapshot: Bool = true,
         serverRevision: String? = nil
     ) {
         self.user = user
@@ -39,10 +37,9 @@ struct ServerBootstrap: Decodable, Sendable {
         self.progress = progress
         self.reviews = reviews
         self.matchingRecords = matchingRecords
+        self.matchingAttempts = matchingAttempts
         self.dailyUsage = dailyUsage
         self.hasDailyUsageSnapshot = hasDailyUsageSnapshot
-        self.statsSummary = statsSummary
-        self.hasStatsSummarySnapshot = hasStatsSummarySnapshot
         self.serverRevision = serverRevision
     }
 
@@ -55,8 +52,8 @@ struct ServerBootstrap: Decodable, Sendable {
         case progress
         case reviews
         case matchingRecords
+        case matchingAttempts
         case dailyUsage
-        case statsSummary
         case serverRevision
     }
 
@@ -70,10 +67,9 @@ struct ServerBootstrap: Decodable, Sendable {
         progress = try container.decodeIfPresent([ServerProgressPayload].self, forKey: .progress) ?? []
         reviews = try container.decodeIfPresent([ServerReviewEventPayload].self, forKey: .reviews) ?? []
         matchingRecords = try container.decodeIfPresent([ServerMatchingRecordPayload].self, forKey: .matchingRecords) ?? []
+        matchingAttempts = try container.decodeIfPresent([ServerMatchingAttemptPayload].self, forKey: .matchingAttempts) ?? []
         dailyUsage = try container.decodeIfPresent([ServerDailyUsagePayload].self, forKey: .dailyUsage) ?? []
         hasDailyUsageSnapshot = container.contains(.dailyUsage)
-        statsSummary = try container.decodeIfPresent(ServerStatsSummaryPayload.self, forKey: .statsSummary) ?? .empty
-        hasStatsSummarySnapshot = container.contains(.statsSummary)
         serverRevision = try container.decodeIfPresent(String.self, forKey: .serverRevision)
     }
 }
@@ -333,27 +329,6 @@ struct ServerDailyUsagePayload: Codable, Sendable {
     let deckId: UUID
     let dayKey: String
     let newCardsStudied: Int
-}
-
-struct ServerStatsSummaryPayload: Codable, Sendable {
-    static let empty = ServerStatsSummaryPayload(activityDays: [], weakCards: [])
-
-    let activityDays: [ServerStudyActivityDayPayload]
-    let weakCards: [ServerWeakCardStatPayload]
-}
-
-struct ServerStudyActivityDayPayload: Codable, Sendable {
-    let dayKey: String
-    let reviewedCount: Int
-    let passedCount: Int
-}
-
-struct ServerWeakCardStatPayload: Codable, Sendable {
-    let cardId: UUID
-    let deckId: UUID
-    let failedCount: Int
-    let reviewedCount: Int
-    let lastFailedAt: String?
 }
 
 struct ServerSyncEventsResponse: Decodable, Sendable {

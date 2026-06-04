@@ -174,11 +174,7 @@ struct ServerSyncClientTests {
       "progress": [],
       "reviews": [],
       "matching_records": [],
-      "daily_usage": [],
-      "stats_summary": {
-        "activity_days": [],
-        "weak_cards": []
-      }
+      "daily_usage": []
     }
     """
 }

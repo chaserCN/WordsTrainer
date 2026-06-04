@@ -194,37 +194,115 @@ struct ContentDatabaseTests {
         }
     }
 
-    @Test("server stats summary snapshot drives dashboard stats without raw reviews")
-    func serverStatsSummarySnapshotDrivesDashboardStatsWithoutRawReviews() throws {
+    @Test("unique study card count counts repeated reviews once")
+    func uniqueStudyCardCountCountsRepeatedReviewsOnce() throws {
         try withIsolatedDatabase { database in
-            let lastFailedAt = "2026-06-02T12:00:00.000Z"
             try database.importServerBootstrap(
                 bootstrap(
-                    statsSummary: statsSummaryJSON(
-                        activityDays: [
-                            activityDayJSON(dayKey: "2026-06-02", reviewedCount: 5, passedCount: 3),
-                        ],
-                        weakCards: [
-                            weakCardJSON(failedCount: 2, reviewedCount: 5, lastFailedAt: lastFailedAt),
-                        ]
-                    )
+                    reviews: [
+                        reviewJSON(
+                            id: UUID(uuidString: "55555555-5555-4555-8555-555555555555")!,
+                            outcome: "remembered",
+                            reviewedAt: "2026-06-02T12:00:00.000Z",
+                            wasNew: true
+                        ),
+                        reviewJSON(
+                            id: UUID(uuidString: "66666666-6666-4666-8666-666666666666")!,
+                            outcome: "forgot",
+                            reviewedAt: "2026-06-02T12:10:00.000Z",
+                            wasNew: false
+                        ),
+                    ]
                 ),
                 selectedUserID: userID
             )
 
-            let since = try #require(Self.isoDate("2026-06-01T00:00:00.000Z"))
-            #expect(try database.studyActivity(since: since) == [
-                StudyActivityDay(dayKey: "2026-06-02", reviewedCount: 5, passedCount: 3),
-            ])
-            #expect(try database.studyReviewCount(since: since) == StudyReviewCount(total: 5, passed: 3))
+            let since = try #require(Self.isoDate("2026-06-02T00:00:00.000Z"))
+            #expect(try database.studyReviewCount(since: since).total == 2)
+            #expect(try database.uniqueStudyCardCount(since: since) == 1)
+        }
+    }
 
-            let weakCards = try database.weakCards(limit: 10)
-            let weakCard = try #require(weakCards.first)
-            #expect(weakCard.cardID == cardID)
-            #expect(weakCard.deckID == deckID)
-            #expect(weakCard.failedCount == 2)
-            #expect(weakCard.reviewedCount == 5)
-            #expect(weakCard.lastFailedAt == Self.isoDate(lastFailedAt))
+    @Test("server matching attempts import into local statistics")
+    func serverMatchingAttemptsImportIntoLocalStatistics() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(
+                bootstrap(
+                    matchingAttempts: [
+                        matchingAttemptJSON(
+                            id: UUID(uuidString: "55555555-5555-4555-8555-555555555555")!,
+                            mode: "matching",
+                            completedAt: "2026-06-02T12:00:00.000Z"
+                        ),
+                        matchingAttemptJSON(
+                            id: UUID(uuidString: "66666666-6666-4666-8666-666666666666")!,
+                            mode: "matching_audio",
+                            completedAt: "2026-06-02T12:10:00.000Z"
+                        ),
+                    ]
+                ),
+                selectedUserID: userID
+            )
+
+            let since = try #require(Self.isoDate("2026-06-02T00:00:00.000Z"))
+            #expect(try database.matchingAttemptCount(since: since) == 2)
+        }
+    }
+
+    @Test("matching attempt count combines normal and audio columns")
+    func matchingAttemptCountCombinesNormalAndAudioColumns() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
+            let since = try #require(Self.isoDate("2026-06-02T00:00:00.000Z"))
+            let completedAt = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
+            let earlier = try #require(Self.isoDate("2026-06-01T12:00:00.000Z"))
+
+            try database.saveMatchingAttempt(
+                MatchingAttemptEvent(
+                    id: UUID(uuidString: "55555555-5555-4555-8555-555555555555")!,
+                    deckID: deckID,
+                    mode: .matching,
+                    source: .deckSession,
+                    completedAt: completedAt,
+                    duration: 12,
+                    pairCount: 4
+                )
+            )
+            try database.saveMatchingAttempt(
+                MatchingAttemptEvent(
+                    id: UUID(uuidString: "66666666-6666-4666-8666-666666666666")!,
+                    deckID: deckID,
+                    mode: .matchingAudio,
+                    source: .deckSession,
+                    completedAt: completedAt,
+                    duration: 14,
+                    pairCount: 4
+                )
+            )
+            try database.saveMatchingAttempt(
+                MatchingAttemptEvent(
+                    id: UUID(uuidString: "77777777-7777-4777-8777-777777777777")!,
+                    deckID: deckID,
+                    mode: .flashcards,
+                    source: .deckSession,
+                    completedAt: completedAt,
+                    duration: 10,
+                    pairCount: 4
+                )
+            )
+            try database.saveMatchingAttempt(
+                MatchingAttemptEvent(
+                    id: UUID(uuidString: "88888888-8888-4888-8888-888888888888")!,
+                    deckID: deckID,
+                    mode: .matching,
+                    source: .deckSession,
+                    completedAt: earlier,
+                    duration: 11,
+                    pairCount: 4
+                )
+            )
+
+            #expect(try database.matchingAttemptCount(since: since) == 2)
         }
     }
 
@@ -233,15 +311,18 @@ struct ContentDatabaseTests {
         try withIsolatedDatabase { database in
             try database.importServerBootstrap(
                 bootstrap(
-                    statsSummary: statsSummaryJSON(
-                        weakCards: [
-                            weakCardJSON(
-                                failedCount: 1,
-                                reviewedCount: 10,
-                                lastFailedAt: "2026-06-02T12:00:00.000Z"
-                            ),
-                        ]
-                    )
+                    reviews: reviewJSONs(outcomes: [
+                        "forgot",
+                        "remembered",
+                        "remembered",
+                        "remembered",
+                        "remembered",
+                        "remembered",
+                        "remembered",
+                        "remembered",
+                        "remembered",
+                        "remembered",
+                    ])
                 ),
                 selectedUserID: userID
             )
@@ -265,15 +346,13 @@ struct ContentDatabaseTests {
         try withIsolatedDatabase { database in
             try database.importServerBootstrap(
                 bootstrap(
-                    statsSummary: statsSummaryJSON(
-                        weakCards: [
-                            weakCardJSON(
-                                failedCount: 2,
-                                reviewedCount: 5,
-                                lastFailedAt: "2026-06-02T12:00:00.000Z"
-                            ),
-                        ]
-                    )
+                    reviews: reviewJSONs(outcomes: [
+                        "forgot",
+                        "forgot",
+                        "remembered",
+                        "remembered",
+                        "remembered",
+                    ])
                 ),
                 selectedUserID: userID
             )
@@ -297,15 +376,18 @@ struct ContentDatabaseTests {
         try withIsolatedDatabase { database in
             try database.importServerBootstrap(
                 bootstrap(
-                    statsSummary: statsSummaryJSON(
-                        weakCards: [
-                            weakCardJSON(
-                                failedCount: 1,
-                                reviewedCount: 10,
-                                lastFailedAt: "2026-06-02T12:00:00.000Z"
-                            ),
-                        ]
-                    )
+                    reviews: reviewJSONs(outcomes: [
+                        "forgot",
+                        "remembered",
+                        "remembered",
+                        "remembered",
+                        "remembered",
+                        "remembered",
+                        "remembered",
+                        "remembered",
+                        "remembered",
+                        "remembered",
+                    ])
                 ),
                 selectedUserID: userID
             )
@@ -321,82 +403,6 @@ struct ContentDatabaseTests {
 
             #expect(try database.weakCards(limit: 10).map(\.cardID) == [cardID])
             #expect(try database.weakCards(limit: 10, deckID: deckID).map(\.cardID) == [cardID])
-        }
-    }
-
-    @Test("server stats summary snapshot keeps unsynced local reviews counted")
-    func serverStatsSummarySnapshotKeepsUnsyncedLocalReviewsCounted() throws {
-        try withIsolatedDatabase { database in
-            let summary = statsSummaryJSON(
-                activityDays: [
-                    activityDayJSON(dayKey: "2026-06-02", reviewedCount: 2, passedCount: 1),
-                ],
-                weakCards: [
-                    weakCardJSON(
-                        failedCount: 1,
-                        reviewedCount: 2,
-                        lastFailedAt: "2026-06-01T12:00:00.000Z"
-                    ),
-                ]
-            )
-            try database.importServerBootstrap(bootstrap(statsSummary: summary), selectedUserID: userID)
-
-            let localFailedAt = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
-            try database.saveStudyReview(
-                StudyReviewEvent(
-                    id: UUID(uuidString: "77777777-7777-4777-8777-777777777777")!,
-                    cardID: cardID,
-                    deckID: deckID,
-                    mode: .flashcards,
-                    outcome: .forgot,
-                    reviewedAt: localFailedAt,
-                    durationMS: 1000,
-                    wasNew: false,
-                    previousState: "review",
-                    newState: "review"
-                )
-            )
-
-            try database.importServerBootstrap(bootstrap(statsSummary: summary), selectedUserID: userID)
-
-            let since = try #require(Self.isoDate("2026-06-02T00:00:00.000Z"))
-            #expect(try database.studyReviewCount(since: since) == StudyReviewCount(total: 3, passed: 1))
-            let weakCards = try database.weakCards(limit: 10)
-            let weakCard = try #require(weakCards.first)
-            #expect(weakCard.failedCount == 2)
-            #expect(weakCard.reviewedCount == 3)
-            #expect(weakCard.lastFailedAt == localFailedAt)
-        }
-    }
-
-    @Test("empty server stats summary snapshot clears synced local stats")
-    func emptyServerStatsSummarySnapshotClearsSyncedLocalStats() throws {
-        try withIsolatedDatabase { database in
-            try database.importServerBootstrap(
-                bootstrap(
-                    reviews: [
-                        reviewJSON(
-                            id: UUID(uuidString: "55555555-5555-4555-8555-555555555555")!,
-                            outcome: "forgot",
-                            reviewedAt: "2026-06-02T12:00:00.000Z",
-                            wasNew: false
-                        ),
-                    ]
-                ),
-                selectedUserID: userID
-            )
-            let since = try #require(Self.isoDate("2026-06-02T00:00:00.000Z"))
-            #expect(try database.studyReviewCount(since: since).total == 1)
-            #expect(try database.weakCards(limit: 10).count == 1)
-
-            try database.importServerBootstrap(
-                bootstrap(statsSummary: statsSummaryJSON()),
-                selectedUserID: userID
-            )
-
-            #expect(try database.studyActivity(since: since) == [])
-            #expect(try database.studyReviewCount(since: since) == .zero)
-            #expect(try database.weakCards(limit: 10) == [])
         }
     }
 
@@ -838,14 +844,14 @@ struct ContentDatabaseTests {
             let failedAt = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
             try database.importServerBootstrap(
                 bootstrap(
-                    statsSummary: statsSummaryJSON(
-                        activityDays: [
-                            activityDayJSON(dayKey: "2026-06-02", reviewedCount: 1, passedCount: 0),
-                        ],
-                        weakCards: [
-                            weakCardJSON(failedCount: 1, reviewedCount: 1, lastFailedAt: "2026-06-02T12:00:00.000Z"),
-                        ]
-                    )
+                    reviews: [
+                        reviewJSON(
+                            id: UUID(uuidString: "55555555-5555-4555-8555-555555555555")!,
+                            outcome: "forgot",
+                            reviewedAt: "2026-06-02T12:00:00.000Z",
+                            wasNew: false
+                        ),
+                    ]
                 ),
                 selectedUserID: userID
             )
@@ -853,14 +859,6 @@ struct ContentDatabaseTests {
 
             try database.importServerBootstrap(
                 bootstrap(
-                    statsSummary: statsSummaryJSON(
-                        activityDays: [
-                            activityDayJSON(dayKey: "2026-06-02", reviewedCount: 1, passedCount: 0),
-                        ],
-                        weakCards: [
-                            weakCardJSON(failedCount: 1, reviewedCount: 1, lastFailedAt: "2026-06-02T12:00:00.000Z"),
-                        ]
-                    ),
                     assignmentStatus: "archived",
                     includeContent: false
                 ),
@@ -944,8 +942,8 @@ struct ContentDatabaseTests {
     private func bootstrap(
         progress: [String] = [],
         reviews: [String] = [],
+        matchingAttempts: [String] = [],
         dailyUsage: [String]? = nil,
-        statsSummary: String? = nil,
         includeAssignment: Bool = true,
         assignmentStatus: String = "active",
         includeContent: Bool = true,
@@ -1059,8 +1057,8 @@ struct ContentDatabaseTests {
           "media": [\(media.joined(separator: ","))],
           "progress": [\(progress.joined(separator: ","))],
           "reviews": [\(reviews.joined(separator: ","))],
+          "matching_attempts": [\(matchingAttempts.joined(separator: ","))],
           \(dailyUsage.map { #""daily_usage": ["# + $0.joined(separator: ",") + #"],"# } ?? "")
-          \(statsSummary.map { #""stats_summary": "# + $0 + #","# } ?? "")
           "matching_records": []
         }
         """
@@ -1088,6 +1086,32 @@ struct ContentDatabaseTests {
           "was_new": \(wasNew ? "true" : "false"),
           "previous_state": "new",
           "new_state": "review"
+        }
+        """
+    }
+
+    private func reviewJSONs(outcomes: [String], day: String = "2026-06-02") -> [String] {
+        outcomes.enumerated().map { index, outcome in
+            let id = UUID(uuidString: String(format: "55555555-5555-4555-8555-%012d", index + 1))!
+            let reviewedAt = String(format: "%@T12:%02d:00.000Z", day, index)
+            return reviewJSON(id: id, outcome: outcome, reviewedAt: reviewedAt, wasNew: false)
+        }
+    }
+
+    private func matchingAttemptJSON(
+        id: UUID,
+        mode: String,
+        completedAt: String
+    ) -> String {
+        """
+        {
+          "client_event_id": "\(id.databaseString)",
+          "deck_id": "\(deckID.databaseString)",
+          "mode": "\(mode)",
+          "source": "deck_session",
+          "completed_at": "\(completedAt)",
+          "duration_ms": 12000,
+          "pair_count": 4
         }
         """
     }
@@ -1137,48 +1161,6 @@ struct ContentDatabaseTests {
           "deck_id": "\(deckID.databaseString)",
           "day_key": "\(dayKey)",
           "new_cards_studied": \(newCardsStudied)
-        }
-        """
-    }
-
-    private func statsSummaryJSON(
-        activityDays: [String] = [],
-        weakCards: [String] = []
-    ) -> String {
-        """
-        {
-          "activity_days": [\(activityDays.joined(separator: ","))],
-          "weak_cards": [\(weakCards.joined(separator: ","))]
-        }
-        """
-    }
-
-    private func activityDayJSON(
-        dayKey: String,
-        reviewedCount: Int,
-        passedCount: Int
-    ) -> String {
-        """
-        {
-          "day_key": "\(dayKey)",
-          "reviewed_count": \(reviewedCount),
-          "passed_count": \(passedCount)
-        }
-        """
-    }
-
-    private func weakCardJSON(
-        failedCount: Int,
-        reviewedCount: Int,
-        lastFailedAt: String
-    ) -> String {
-        """
-        {
-          "card_id": "\(cardID.databaseString)",
-          "deck_id": "\(deckID.databaseString)",
-          "failed_count": \(failedCount),
-          "reviewed_count": \(reviewedCount),
-          "last_failed_at": "\(lastFailedAt)"
         }
         """
     }
