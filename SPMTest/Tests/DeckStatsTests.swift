@@ -5,6 +5,21 @@ import Testing
 
 @Suite("Deck stats and SRS")
 struct DeckStatsTests {
+    @Test("default SRS engine skips short-term learning steps")
+    func defaultEngineUsesLongTermScheduling() throws {
+        let now = Date()
+        let progress = CardProgress.newCard(cardID: UUID(), now: now)
+
+        let reviewed = try StudySessionEngine().applyReview(
+            progress: progress,
+            outcome: .remembered,
+            now: now
+        )
+
+        #expect(reviewed.fsrsCard.state == .review)
+        #expect(reviewed.fsrsCard.due > now.addingTimeInterval(23 * 60 * 60))
+    }
+
     @Test("deck stats count new cards")
     func newCardCount() {
         let id = UUID()

@@ -141,7 +141,7 @@ enum StudyQueueBuilder {
 final class StudySessionEngine: @unchecked Sendable {
     let scheduler: FSRS
 
-    init(parameters: FSRSParameters = FSRSParameters()) {
+    init(parameters: FSRSParameters = FSRSParameters(enableShortTerm: false)) {
         self.scheduler = FSRS(parameters: parameters)
     }
 
