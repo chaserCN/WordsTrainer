@@ -420,6 +420,8 @@ struct StatisticsView: View {
                         cards: Array(weakCardsPool.prefix(WeakCardsPractice.displayLimit)),
                         onPractice: startWeakGame
                     )
+
+                    AppVersionFooter()
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
@@ -517,6 +519,24 @@ struct StatisticsView: View {
 
     private static func studyDaysCount(from activity: [StudyActivityDay]) -> Int {
         activity.suffix(30).filter { $0.reviewedCount > 0 }.count
+    }
+}
+
+private struct AppVersionFooter: View {
+    private var versionText: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            ?? "1.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+            ?? "-"
+        return "Версия \(version) (\(build))"
+    }
+
+    var body: some View {
+        Text(versionText)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary.opacity(0.72))
+            .frame(maxWidth: .infinity, alignment: .center)
+            .accessibilityLabel(versionText)
     }
 }
 
