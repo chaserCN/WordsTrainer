@@ -132,37 +132,23 @@ final class DeckStore {
     }
 
     func scheduledReviewDays(days: Int) throws -> [ScheduledReviewDay] {
-        let calendar = Calendar.current
-        let today = StudyDay.start(for: .now, calendar: calendar)
         let activeDecks = try allDecks().filter(\.isActive)
-        var countsByDay: [String: Int] = [:]
-
-        for offset in 0..<days {
-            let date = calendar.date(byAdding: .day, value: offset, to: today) ?? today
-            countsByDay[DeckDailyUsage.dayKey(for: date, calendar: calendar)] = 0
-        }
+        var progressByDeckID: [UUID: [UUID: CardProgress]] = [:]
+        var dailyUsageByDeckID: [UUID: DeckDailyUsage] = [:]
 
         for deck in activeDecks {
-            let activeCardIDs = Set(deck.activeCards.map(\.id))
-            let progress = try database.progressMap(deckID: deck.id)
-            for (cardID, cardProgress) in progress where activeCardIDs.contains(cardID) {
-                let state = cardProgress.fsrsCard.state
-                guard state != .new else { continue }
-                let dueDay = StudyDay.start(for: cardProgress.fsrsCard.due, calendar: calendar)
-                let normalizedDay = dueDay < today ? today : dueDay
-                guard let dayOffset = calendar.dateComponents([.day], from: today, to: normalizedDay).day,
-                      dayOffset >= 0,
-                      dayOffset < days else { continue }
-                let key = DeckDailyUsage.dayKey(for: normalizedDay, calendar: calendar)
-                countsByDay[key, default: 0] += 1
+            progressByDeckID[deck.id] = try database.progressMap(deckID: deck.id)
+            if let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey()) {
+                dailyUsageByDeckID[deck.id] = usage
             }
         }
 
-        return (0..<days).map { offset in
-            let date = calendar.date(byAdding: .day, value: offset, to: today) ?? today
-            let key = DeckDailyUsage.dayKey(for: date, calendar: calendar)
-            return ScheduledReviewDay(dayKey: key, dueCount: countsByDay[key, default: 0])
-        }
+        return StudyPlanForecastCalculator.compute(
+            days: days,
+            decks: activeDecks,
+            progressByDeckID: progressByDeckID,
+            dailyUsageByDeckID: dailyUsageByDeckID
+        )
     }
 
     func startTodaySession(mode: StudyMode) throws -> StudySession? {

@@ -227,6 +227,88 @@ struct DeckStatsTests {
         #expect(stats.dueLaterToday == 0)
     }
 
+    @Test("weekly study plan includes due and new cards for today")
+    func weeklyPlanIncludesDueAndNewCardsForToday() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 5, hour: 9))!
+        let dueCards = (0..<13).map { index in
+            TestFixtures.card(word: "due \(index)", translation: "повтор \(index)")
+        }
+        let newCards = (0..<8).map { index in
+            TestFixtures.card(word: "new \(index)", translation: "новая \(index)")
+        }
+        let deck = DeckContent(
+            id: UUID(),
+            title: "Test",
+            avatarSystemName: nil,
+            languageCode: "en",
+            newCardsPerDay: 8,
+            reviewCardsPerDay: 200,
+            cards: dueCards + newCards
+        )
+        let progressByCardID = Dictionary(
+            uniqueKeysWithValues: dueCards.map {
+                ($0.id, CardProgress(cardID: $0.id, fsrsCard: reviewCard(due: now.addingTimeInterval(-60), now: now)))
+            }
+        )
+
+        let days = StudyPlanForecastCalculator.compute(
+            days: 7,
+            decks: [deck],
+            progressByDeckID: [deck.id: progressByCardID],
+            dailyUsageByDeckID: [:],
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(days.first?.dueCount == 21)
+    }
+
+    @Test("weekly study plan adds future new card slots")
+    func weeklyPlanAddsFutureNewCardSlots() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 5, hour: 9))!
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: now)!
+        let dueTomorrow = (0..<2).map { index in
+            TestFixtures.card(word: "review \(index)", translation: "повтор \(index)")
+        }
+        let newCards = (0..<5).map { index in
+            TestFixtures.card(word: "new \(index)", translation: "новая \(index)")
+        }
+        let deck = DeckContent(
+            id: UUID(),
+            title: "Test",
+            avatarSystemName: nil,
+            languageCode: "en",
+            newCardsPerDay: 2,
+            reviewCardsPerDay: 200,
+            cards: dueTomorrow + newCards
+        )
+        let progressByCardID = Dictionary(
+            uniqueKeysWithValues: dueTomorrow.map {
+                ($0.id, CardProgress(cardID: $0.id, fsrsCard: reviewCard(due: tomorrow, now: now)))
+            }
+        )
+
+        let days = StudyPlanForecastCalculator.compute(
+            days: 3,
+            decks: [deck],
+            progressByDeckID: [deck.id: progressByCardID],
+            dailyUsageByDeckID: [
+                deck.id: DeckDailyUsage(
+                    dayKey: DeckDailyUsage.dayKey(for: now, calendar: calendar),
+                    newCardsStudied: 1
+                ),
+            ],
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(days.map(\.dueCount) == [1, 4, 2])
+    }
+
     @Test("cloze queue falls back to full deck when SRS queue is empty")
     @MainActor
     func clozeQueueFallback() throws {

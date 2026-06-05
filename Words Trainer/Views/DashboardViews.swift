@@ -1783,9 +1783,9 @@ private struct ActivityMonthView: View, Equatable {
                                     .overlay {
                                         if day.isToday {
                                             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                                .stroke(.white.opacity(0.9), lineWidth: 1.5)
+                                                .stroke(day.todayStrokeColor, lineWidth: 1.5)
                                                 .frame(width: 15, height: 15)
-                                                .shadow(color: ActivityHeatmapPalette.todayGlow, radius: 5)
+                                                .shadow(color: day.todayGlowColor, radius: 5)
                                         }
                                     }
                                     .accessibilityLabel(day.accessibilityLabel)
@@ -1809,8 +1809,9 @@ private enum ActivityHeatmapPalette {
     static let medium = oklch(0.65, 0.15, 235, 0.75)
     static let high = oklch(0.72, 0.18, 235, 0.9)
     static let peak = oklch(0.8, 0.2, 235)
-    static let today = oklch(0.78, 0.2, 235)
     static let todayGlow = oklch(0.7, 0.18, 235, 0.6)
+    static let todayIdleStroke = oklch(0.9, 0.02, 250, 0.62)
+    static let todayActiveStroke = oklch(0.97, 0.01, 240, 0.92)
 }
 
 private enum ActivityHeatmapLevel: Hashable {
@@ -1856,7 +1857,15 @@ private struct ActivityCalendarDay: Hashable {
     let accessibilityLabel: String
 
     var fillColor: Color {
-        isToday ? ActivityHeatmapPalette.today : level.color
+        level.color
+    }
+
+    var todayStrokeColor: Color {
+        reviewedCount > 0 ? ActivityHeatmapPalette.todayActiveStroke : ActivityHeatmapPalette.todayIdleStroke
+    }
+
+    var todayGlowColor: Color {
+        reviewedCount > 0 ? ActivityHeatmapPalette.todayGlow : .clear
     }
 }
 
