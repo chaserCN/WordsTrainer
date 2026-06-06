@@ -5,7 +5,7 @@
     <key>count.cards</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>
-        <string>%d %#@cards@</string>
+        <string>%#@cards@</string>
         <key>cards</key>
         <dict>
             <key>NSStringFormatSpecTypeKey</key>
@@ -13,19 +13,19 @@
             <key>NSStringFormatValueTypeKey</key>
             <string>d</string>
             <key>one</key>
-            <string>карточка</string>
+            <string>%d карточка</string>
             <key>few</key>
-            <string>карточки</string>
+            <string>%d карточки</string>
             <key>many</key>
-            <string>карточек</string>
+            <string>%d карточек</string>
             <key>other</key>
-            <string>карточки</string>
+            <string>%d карточки</string>
         </dict>
     </dict>
     <key>count.decks</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>
-        <string>%d %#@decks@</string>
+        <string>%#@decks@</string>
         <key>decks</key>
         <dict>
             <key>NSStringFormatSpecTypeKey</key>
@@ -33,19 +33,19 @@
             <key>NSStringFormatValueTypeKey</key>
             <string>d</string>
             <key>one</key>
-            <string>колода</string>
+            <string>%d колода</string>
             <key>few</key>
-            <string>колоды</string>
+            <string>%d колоды</string>
             <key>many</key>
-            <string>колод</string>
+            <string>%d колод</string>
             <key>other</key>
-            <string>колоды</string>
+            <string>%d колоды</string>
         </dict>
     </dict>
     <key>count.days</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>
-        <string>%d %#@days@</string>
+        <string>%#@days@</string>
         <key>days</key>
         <dict>
             <key>NSStringFormatSpecTypeKey</key>
@@ -53,13 +53,13 @@
             <key>NSStringFormatValueTypeKey</key>
             <string>d</string>
             <key>one</key>
-            <string>день</string>
+            <string>%d день</string>
             <key>few</key>
-            <string>дня</string>
+            <string>%d дня</string>
             <key>many</key>
-            <string>дней</string>
+            <string>%d дней</string>
             <key>other</key>
-            <string>дня</string>
+            <string>%d дня</string>
         </dict>
     </dict>
     <key>count.games.word</key>
@@ -85,7 +85,7 @@
     <key>count.hours.short</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>
-        <string>%d %#@hours@</string>
+        <string>%#@hours@</string>
         <key>hours</key>
         <dict>
             <key>NSStringFormatSpecTypeKey</key>
@@ -93,19 +93,19 @@
             <key>NSStringFormatValueTypeKey</key>
             <string>d</string>
             <key>one</key>
-            <string>ч</string>
+            <string>%d ч</string>
             <key>few</key>
-            <string>ч</string>
+            <string>%d ч</string>
             <key>many</key>
-            <string>ч</string>
+            <string>%d ч</string>
             <key>other</key>
-            <string>ч</string>
+            <string>%d ч</string>
         </dict>
     </dict>
     <key>count.minutes.short</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>
-        <string>%d %#@minutes@</string>
+        <string>%#@minutes@</string>
         <key>minutes</key>
         <dict>
             <key>NSStringFormatSpecTypeKey</key>
@@ -113,19 +113,19 @@
             <key>NSStringFormatValueTypeKey</key>
             <string>d</string>
             <key>one</key>
-            <string>мин</string>
+            <string>%d мин</string>
             <key>few</key>
-            <string>мин</string>
+            <string>%d мин</string>
             <key>many</key>
-            <string>мин</string>
+            <string>%d мин</string>
             <key>other</key>
-            <string>мин</string>
+            <string>%d мин</string>
         </dict>
     </dict>
     <key>count.months.short</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>
-        <string>%d %#@months@</string>
+        <string>%#@months@</string>
         <key>months</key>
         <dict>
             <key>NSStringFormatSpecTypeKey</key>
@@ -133,13 +133,13 @@
             <key>NSStringFormatValueTypeKey</key>
             <string>d</string>
             <key>one</key>
-            <string>мес.</string>
+            <string>%d мес.</string>
             <key>few</key>
-            <string>мес.</string>
+            <string>%d мес.</string>
             <key>many</key>
-            <string>мес.</string>
+            <string>%d мес.</string>
             <key>other</key>
-            <string>мес.</string>
+            <string>%d мес.</string>
         </dict>
     </dict>
     <key>count.words.word</key>

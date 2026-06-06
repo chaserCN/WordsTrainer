@@ -6,7 +6,14 @@ enum L10n {
     }
 
     static func format(_ key: String, _ arguments: CVarArg...) -> String {
-        String(format: text(key), locale: .current, arguments: arguments)
+        String(format: text(key), locale: .current, arguments: arguments.map(normalizedFormatArgument))
+    }
+
+    private static func normalizedFormatArgument(_ argument: CVarArg) -> CVarArg {
+        if let value = argument as? Int {
+            return Int32(value)
+        }
+        return argument
     }
 }
 
@@ -73,7 +80,7 @@ enum LocalizedCounts {
 
     private static func localizedPlural(_ key: String, _ count: Int) -> String {
         let format = NSLocalizedString(key, comment: "")
-        return String.localizedStringWithFormat(format, count)
+        return String.localizedStringWithFormat(format, Int32(count))
     }
 
     private static func localizedFormat(_ key: String, _ argument: String) -> String {

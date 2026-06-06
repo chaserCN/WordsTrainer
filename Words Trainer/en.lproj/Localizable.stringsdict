@@ -5,7 +5,7 @@
     <key>count.cards</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>
-        <string>%d %#@cards@</string>
+        <string>%#@cards@</string>
         <key>cards</key>
         <dict>
             <key>NSStringFormatSpecTypeKey</key>
@@ -13,15 +13,15 @@
             <key>NSStringFormatValueTypeKey</key>
             <string>d</string>
             <key>one</key>
-            <string>card</string>
+            <string>%d card</string>
             <key>other</key>
-            <string>cards</string>
+            <string>%d cards</string>
         </dict>
     </dict>
     <key>count.decks</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>
-        <string>%d %#@decks@</string>
+        <string>%#@decks@</string>
         <key>decks</key>
         <dict>
             <key>NSStringFormatSpecTypeKey</key>
@@ -29,15 +29,15 @@
             <key>NSStringFormatValueTypeKey</key>
             <string>d</string>
             <key>one</key>
-            <string>deck</string>
+            <string>%d deck</string>
             <key>other</key>
-            <string>decks</string>
+            <string>%d decks</string>
         </dict>
     </dict>
     <key>count.days</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>
-        <string>%d %#@days@</string>
+        <string>%#@days@</string>
         <key>days</key>
         <dict>
             <key>NSStringFormatSpecTypeKey</key>
@@ -45,9 +45,9 @@
             <key>NSStringFormatValueTypeKey</key>
             <string>d</string>
             <key>one</key>
-            <string>day</string>
+            <string>%d day</string>
             <key>other</key>
-            <string>days</string>
+            <string>%d days</string>
         </dict>
     </dict>
     <key>count.games.word</key>
@@ -69,7 +69,7 @@
     <key>count.hours.short</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>
-        <string>%d %#@hours@</string>
+        <string>%#@hours@</string>
         <key>hours</key>
         <dict>
             <key>NSStringFormatSpecTypeKey</key>
@@ -77,15 +77,15 @@
             <key>NSStringFormatValueTypeKey</key>
             <string>d</string>
             <key>one</key>
-            <string>hr</string>
+            <string>%d hr</string>
             <key>other</key>
-            <string>hr</string>
+            <string>%d hr</string>
         </dict>
     </dict>
     <key>count.minutes.short</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>
-        <string>%d %#@minutes@</string>
+        <string>%#@minutes@</string>
         <key>minutes</key>
         <dict>
             <key>NSStringFormatSpecTypeKey</key>
@@ -93,15 +93,15 @@
             <key>NSStringFormatValueTypeKey</key>
             <string>d</string>
             <key>one</key>
-            <string>min</string>
+            <string>%d min</string>
             <key>other</key>
-            <string>min</string>
+            <string>%d min</string>
         </dict>
     </dict>
     <key>count.months.short</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>
-        <string>%d %#@months@</string>
+        <string>%#@months@</string>
         <key>months</key>
         <dict>
             <key>NSStringFormatSpecTypeKey</key>
@@ -109,9 +109,9 @@
             <key>NSStringFormatValueTypeKey</key>
             <string>d</string>
             <key>one</key>
-            <string>mo.</string>
+            <string>%d mo.</string>
             <key>other</key>
-            <string>mo.</string>
+            <string>%d mo.</string>
         </dict>
     </dict>
     <key>count.words.word</key>

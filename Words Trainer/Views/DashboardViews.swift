@@ -804,7 +804,7 @@ private struct StudyTimeRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(row.title)
+                Text(L10n.text(row.title))
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(oklch(0.82, 0.03, 250, 0.78))
                     .lineLimit(1)
