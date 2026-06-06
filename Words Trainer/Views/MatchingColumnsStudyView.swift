@@ -5,7 +5,8 @@ struct MatchingColumnsStudyView: View {
     private static let confirmHighlightDuration: TimeInterval = 1.0
     private static let fadeOutDuration: TimeInterval = 1.5
     /// Появление новой лексики.
-    private static let fadeInDuration: TimeInterval = 0.7
+    private static let fadeInDuration: TimeInterval = 0.5
+    private static let partnerNextStepProbability = 0.75
 
     @Bindable var session: StudySession
     let store: DeckStore
@@ -49,6 +50,8 @@ struct MatchingColumnsStudyView: View {
     /// Левая ячейка тянет случайное слово, правая — случайный перевод (колонки независимо).
     @State private var pendingWords: [String] = []
     @State private var pendingTranslations: [String] = []
+    @State private var pendingWordPartnerDelays: [String: Int] = [:]
+    @State private var pendingTranslationPartnerDelays: [String: Int] = [:]
 
     /// Лейблы всех виденных пар — чтобы текст не пропадал, пока матченная пара гаснет.
     @State private var pairCache: [String: MatchingPair] = [:]
@@ -443,14 +446,17 @@ struct MatchingColumnsStudyView: View {
         guard !pendingWords.isEmpty, !pendingTranslations.isEmpty else {
             wordColumn[wordIndex].pairID = nil
             translationColumn[translationIndex].pairID = nil
+            pendingWordPartnerDelays.removeAll()
+            pendingTranslationPartnerDelays.removeAll()
             wordSlotOpacity.removeValue(forKey: wordSlotID)
             translationSlotOpacity.removeValue(forKey: translationSlotID)
             finishIfBoardEmpty()
             return
         }
 
-        let wordPick = pendingWords.remove(at: Int.random(in: pendingWords.indices))
-        let translationPick = removeRandomTranslation(excluding: wordPick)
+        let wordPick = removeScheduledWord()
+        let translationPick = removeScheduledTranslation(excluding: wordPick)
+        scheduleMissingPartners(wordPick: wordPick, translationPick: translationPick)
         resetSlotOpacityForReplacement(wordSlotID: wordSlotID, translationSlotID: translationSlotID)
         wordColumn[wordIndex].pairID = wordPick
         wordColumn[wordIndex].contentID = UUID()
@@ -469,12 +475,104 @@ struct MatchingColumnsStudyView: View {
         }
     }
 
-    private func removeRandomTranslation(excluding pairID: String) -> String {
-        let eligible = pendingTranslations.indices.filter { pendingTranslations[$0] != pairID }
-        if let index = eligible.randomElement() {
-            return pendingTranslations.remove(at: index)
+    private func removeScheduledWord() -> String {
+        let index = scheduledPickIndex(in: pendingWords, delays: pendingWordPartnerDelays)
+        let pick = pendingWords.remove(at: index)
+        pendingWordPartnerDelays.removeValue(forKey: pick)
+        advanceWordPartnerDelays()
+        return pick
+    }
+
+    private func removeScheduledTranslation(excluding pairID: String) -> String {
+        let index = scheduledTranslationPickIndex(excluding: pairID)
+        let pick = pendingTranslations.remove(at: index)
+        pendingTranslationPartnerDelays.removeValue(forKey: pick)
+        advanceTranslationPartnerDelays()
+        return pick
+    }
+
+    private func scheduledTranslationPickIndex(excluding pairID: String) -> Int {
+        let due = pendingTranslations.indices.filter {
+            pendingTranslations[$0] != pairID && pendingTranslationPartnerDelays[pendingTranslations[$0]] == 0
         }
-        return pendingTranslations.remove(at: Int.random(in: pendingTranslations.indices))
+        if let index = due.randomElement() {
+            return index
+        }
+
+        let unscheduled = pendingTranslations.indices.filter {
+            pendingTranslations[$0] != pairID && pendingTranslationPartnerDelays[pendingTranslations[$0]] == nil
+        }
+        if let index = unscheduled.randomElement() {
+            return index
+        }
+
+        let delayed = pendingTranslations.indices.filter {
+            pendingTranslations[$0] != pairID
+        }
+        if let index = delayed.randomElement() {
+            return index
+        }
+
+        return scheduledPickIndex(in: pendingTranslations, delays: pendingTranslationPartnerDelays)
+    }
+
+    private func scheduledPickIndex(in pending: [String], delays: [String: Int]) -> Int {
+        let due = pending.indices.filter { delays[pending[$0]] == 0 }
+        if let index = due.randomElement() {
+            return index
+        }
+
+        let unscheduled = pending.indices.filter { delays[pending[$0]] == nil }
+        if let index = unscheduled.randomElement() {
+            return index
+        }
+
+        return Int.random(in: pending.indices)
+    }
+
+    private func scheduleMissingPartners(wordPick: String, translationPick: String) {
+        if wordPick != translationPick, pendingTranslations.contains(wordPick) {
+            scheduleTranslationPartner(for: wordPick)
+        }
+        if translationPick != wordPick, pendingWords.contains(translationPick) {
+            scheduleWordPartner(for: translationPick)
+        }
+    }
+
+    private func scheduleWordPartner(for pairID: String) {
+        guard pendingWordPartnerDelays[pairID] == nil else { return }
+        pendingWordPartnerDelays[pairID] = partnerDelay()
+    }
+
+    private func scheduleTranslationPartner(for pairID: String) {
+        guard pendingTranslationPartnerDelays[pairID] == nil else { return }
+        pendingTranslationPartnerDelays[pairID] = partnerDelay()
+    }
+
+    private func partnerDelay() -> Int {
+        Double.random(in: 0..<1) < Self.partnerNextStepProbability ? 0 : 1
+    }
+
+    private func advanceWordPartnerDelays() {
+        let pending = Set(pendingWords)
+        for (pairID, delay) in Array(pendingWordPartnerDelays) {
+            if !pending.contains(pairID) {
+                pendingWordPartnerDelays.removeValue(forKey: pairID)
+            } else if delay > 0 {
+                pendingWordPartnerDelays[pairID] = delay - 1
+            }
+        }
+    }
+
+    private func advanceTranslationPartnerDelays() {
+        let pending = Set(pendingTranslations)
+        for (pairID, delay) in Array(pendingTranslationPartnerDelays) {
+            if !pending.contains(pairID) {
+                pendingTranslationPartnerDelays.removeValue(forKey: pairID)
+            } else if delay > 0 {
+                pendingTranslationPartnerDelays[pairID] = delay - 1
+            }
+        }
     }
 
     /// Перетасовка всего поля: занятые ячейки тоже переезжают (исключение из «ячейки не двигаются»).
@@ -482,6 +580,8 @@ struct MatchingColumnsStudyView: View {
     private func applyReshuffle() {
         pendingWords.removeAll()
         pendingTranslations.removeAll()
+        pendingWordPartnerDelays.removeAll()
+        pendingTranslationPartnerDelays.removeAll()
         wordSlotOpacity.removeAll()
         translationSlotOpacity.removeAll()
         correctWordSlots.removeAll()
@@ -775,9 +875,13 @@ private struct MatchingCell: View {
     let isWrong: Bool
     let isCorrect: Bool
     let action: () -> Void
+    @State private var feedbackTrigger = false
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            feedbackTrigger.toggle()
+            action()
+        } label: {
             cellContent
             .foregroundStyle(MatchPalette.cardForeground)
             .frame(maxWidth: .infinity, minHeight: 68, alignment: .center)
@@ -793,6 +897,7 @@ private struct MatchingCell: View {
         .frame(maxWidth: .infinity)
         .modifier(ShakeEffect(animatableData: isWrong ? 1 : 0))
         .animation(.linear(duration: 0.4), value: isWrong)
+        .sensoryFeedback(.selection, trigger: feedbackTrigger)
         .transition(.scale.combined(with: .opacity))
     }
 

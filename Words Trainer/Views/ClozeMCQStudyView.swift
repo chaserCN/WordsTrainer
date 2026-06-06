@@ -16,6 +16,8 @@ struct ClozeMCQStudyView: View {
     @State private var previewPair: MatchingPair?
     @State private var suppressedOptionTap: String?
     @State private var previousCorrectOption: String?
+    @State private var optionFeedbackTrigger = false
+    @State private var nextFeedbackTrigger = false
 
     private var passed: Bool {
         guard let selected else { return false }
@@ -44,6 +46,7 @@ struct ClozeMCQStudyView: View {
                             isDimmed: answered && selected != option && !optionsMatch(option, card.effectiveClozeAnswer),
                             isReplayOnly: answered && optionsMatch(option, card.effectiveClozeAnswer)
                         ) {
+                            optionFeedbackTrigger.toggle()
                             select(option)
                         }
                         .simultaneousGesture(
@@ -74,12 +77,14 @@ struct ClozeMCQStudyView: View {
                         }
 
                         Button("Дальше") {
+                            nextFeedbackTrigger.toggle()
                             advance()
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(MatchPalette.primary)
                         .controlSize(.large)
                         .frame(maxWidth: .infinity)
+                        .sensoryFeedback(.selection, trigger: nextFeedbackTrigger)
                     }
                     .padding(.top, 20)
                 }
@@ -91,6 +96,7 @@ struct ClozeMCQStudyView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 10)
+        .sensoryFeedback(.selection, trigger: optionFeedbackTrigger)
         .onAppear {
             resetRoundIfNeeded()
         }

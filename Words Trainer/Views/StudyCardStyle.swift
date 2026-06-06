@@ -11,9 +11,13 @@ struct RecallOutcomeButton: View {
     let iconBackground: Color
     var verticalPadding: CGFloat = 16
     let action: () -> Void
+    @State private var feedbackTrigger = false
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            feedbackTrigger.toggle()
+            action()
+        } label: {
             HStack(spacing: 10) {
                 Image(systemName: systemImage)
                     .font(.system(size: 15, weight: .heavy))
@@ -33,6 +37,7 @@ struct RecallOutcomeButton: View {
             .shadow(color: MatchPalette.shadow.opacity(0.12), radius: 10, x: 0, y: 6)
         }
         .buttonStyle(.plain)
+        .sensoryFeedback(.selection, trigger: feedbackTrigger)
     }
 
     private var cardFill: LinearGradient {
