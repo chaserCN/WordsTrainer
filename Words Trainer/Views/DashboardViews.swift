@@ -48,6 +48,10 @@ struct TodayView: View {
     @State private var toast: TodayToast?
     @State private var toastDismissTask: Task<Void, Never>?
     @State private var loadError: String?
+    @State private var isVisible = false
+    @State private var reloadTask: Task<Void, Never>?
+    @State private var reloadGeneration = 0
+    @State private var needsReloadWhenVisible = false
 
     private var activeDecks: [DeckContent] {
         decks.filter(\.isActive)
@@ -92,20 +96,31 @@ struct TodayView: View {
         .task {
             await reload()
         }
+        .onAppear {
+            isVisible = true
+            if needsReloadWhenVisible {
+                needsReloadWhenVisible = false
+                scheduleLocalDataReload()
+            }
+        }
+        .onDisappear {
+            isVisible = false
+            cancelScheduledReload()
+        }
         .onChange(of: userStore.selectedUserID) {
             store = nil
             storeUserID = nil
             clearToast()
-            Task { await reload() }
+            reloadImmediately()
         }
         .onChange(of: userStore.bootstrapState) { _, state in
             presentToast(forBootstrapState: state)
             if state == .loaded {
-                Task { await reload() }
+                reloadImmediately()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: DeckStore.localDataDidChangeNotification)) { _ in
-            Task { await reload() }
+            scheduleLocalDataReload()
         }
     }
 
@@ -300,9 +315,39 @@ struct TodayView: View {
         }
     }
 
+    private func reloadImmediately() {
+        cancelScheduledReload()
+        Task { await reload() }
+    }
+
+    private func scheduleLocalDataReload() {
+        guard isVisible else {
+            needsReloadWhenVisible = true
+            return
+        }
+        reloadGeneration += 1
+        let generation = reloadGeneration
+        reloadTask?.cancel()
+        reloadTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, reloadGeneration == generation else { return }
+            await reload()
+            guard reloadGeneration == generation else { return }
+            reloadTask = nil
+        }
+    }
+
+    private func cancelScheduledReload() {
+        reloadGeneration += 1
+        reloadTask?.cancel()
+        reloadTask = nil
+        needsReloadWhenVisible = false
+    }
+
     @MainActor
     private func syncNow() async {
         guard !userStore.syncStatus.isSyncing else { return }
+        cancelScheduledReload()
         Self.syncLogger.info("syncNow invoked isSyncing=\(self.userStore.syncStatus.isSyncing, privacy: .public)")
         let result = await userStore.refreshFromServer()
         Self.syncLogger.info("syncNow refresh finished")
@@ -397,6 +442,10 @@ struct StatisticsView: View {
     @State private var weakGameSession: StudySession?
     @State private var showWeakGame = false
     @State private var loadError: String?
+    @State private var isVisible = false
+    @State private var reloadTask: Task<Void, Never>?
+    @State private var reloadGeneration = 0
+    @State private var needsReloadWhenVisible = false
 
     var body: some View {
         NavigationStack {
@@ -449,17 +498,28 @@ struct StatisticsView: View {
         .task {
             await reload()
         }
+        .onAppear {
+            isVisible = true
+            if needsReloadWhenVisible {
+                needsReloadWhenVisible = false
+                scheduleLocalDataReload()
+            }
+        }
+        .onDisappear {
+            isVisible = false
+            cancelScheduledReload()
+        }
         .onChange(of: userStore.selectedUserID) {
             store = nil
             storeUserID = nil
-            Task { await reload() }
+            reloadImmediately()
         }
         .onChange(of: userStore.bootstrapState) { _, state in
             guard state == .loaded else { return }
-            Task { await reload() }
+            reloadImmediately()
         }
         .onReceive(NotificationCenter.default.publisher(for: DeckStore.localDataDidChangeNotification)) { _ in
-            Task { await reload() }
+            scheduleLocalDataReload()
         }
     }
 
@@ -509,6 +569,35 @@ struct StatisticsView: View {
         } catch {
             loadError = error.localizedDescription
         }
+    }
+
+    private func reloadImmediately() {
+        cancelScheduledReload()
+        Task { await reload() }
+    }
+
+    private func scheduleLocalDataReload() {
+        guard isVisible else {
+            needsReloadWhenVisible = true
+            return
+        }
+        reloadGeneration += 1
+        let generation = reloadGeneration
+        reloadTask?.cancel()
+        reloadTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, reloadGeneration == generation else { return }
+            await reload()
+            guard reloadGeneration == generation else { return }
+            reloadTask = nil
+        }
+    }
+
+    private func cancelScheduledReload() {
+        reloadGeneration += 1
+        reloadTask?.cancel()
+        reloadTask = nil
+        needsReloadWhenVisible = false
     }
 
     private func startWeakGame() {
@@ -1427,6 +1516,10 @@ private struct TodayAllDecksModesView: View {
     @State private var practiceCount = 0
     @State private var wordListCards: [WordCardContent] = []
     @State private var loadError: String?
+    @State private var isVisible = false
+    @State private var reloadTask: Task<Void, Never>?
+    @State private var reloadGeneration = 0
+    @State private var needsReloadWhenVisible = false
 
     var body: some View {
         TodayStudyModesView(
@@ -1451,12 +1544,23 @@ private struct TodayAllDecksModesView: View {
             Text(loadError ?? "")
         }
         .task { await reloadPracticeCount() }
+        .onAppear {
+            isVisible = true
+            if needsReloadWhenVisible {
+                needsReloadWhenVisible = false
+                scheduleLocalDataReload()
+            }
+        }
+        .onDisappear {
+            isVisible = false
+            cancelScheduledReload()
+        }
         .onReceive(NotificationCenter.default.publisher(for: DeckStore.localDataDidChangeNotification)) { _ in
-            Task { await reloadPracticeCount() }
+            scheduleLocalDataReload()
         }
         .onChange(of: showStudy) { _, isShowing in
             guard !isShowing else { return }
-            Task { await reloadPracticeCount() }
+            reloadPracticeCountImmediately()
         }
     }
 
@@ -1484,6 +1588,35 @@ private struct TodayAllDecksModesView: View {
         } catch {
             loadError = error.localizedDescription
         }
+    }
+
+    private func reloadPracticeCountImmediately() {
+        cancelScheduledReload()
+        Task { await reloadPracticeCount() }
+    }
+
+    private func scheduleLocalDataReload() {
+        guard isVisible else {
+            needsReloadWhenVisible = true
+            return
+        }
+        reloadGeneration += 1
+        let generation = reloadGeneration
+        reloadTask?.cancel()
+        reloadTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, reloadGeneration == generation else { return }
+            await reloadPracticeCount()
+            guard reloadGeneration == generation else { return }
+            reloadTask = nil
+        }
+    }
+
+    private func cancelScheduledReload() {
+        reloadGeneration += 1
+        reloadTask?.cancel()
+        reloadTask = nil
+        needsReloadWhenVisible = false
     }
 
     private func reloadPracticeCount() async {
@@ -1561,11 +1694,15 @@ private struct QueueSummaryCard: View {
     }
 
     private var todayMonthShort: String {
+        Self.monthFormatter.string(from: .now)
+    }
+
+    private static let monthFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = .current
         formatter.setLocalizedDateFormatFromTemplate("LLL")
-        return formatter.string(from: .now)
-    }
+        return formatter
+    }()
 
     @ViewBuilder private var deckOrDateAvatar: some View {
         if let deck {

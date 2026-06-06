@@ -7,6 +7,10 @@ struct DeckListView: View {
     @State private var storeUserID: UUID?
     @State private var loadError: String?
     @State private var isSearching = false
+    @State private var isVisible = false
+    @State private var reloadTask: Task<Void, Never>?
+    @State private var reloadGeneration = 0
+    @State private var needsReloadWhenVisible = false
 
     static let searchTransition: Animation = .snappy(duration: 0.32, extraBounce: 0)
 
@@ -20,17 +24,28 @@ struct DeckListView: View {
         .task {
             await bootstrap()
         }
+        .onAppear {
+            isVisible = true
+            if needsReloadWhenVisible {
+                needsReloadWhenVisible = false
+                scheduleLocalDataReload()
+            }
+        }
+        .onDisappear {
+            isVisible = false
+            cancelScheduledReload()
+        }
         .onChange(of: userStore.selectedUserID) {
             store = nil
             storeUserID = nil
-            Task { await bootstrap() }
+            reloadImmediately()
         }
         .onChange(of: userStore.bootstrapState) { _, state in
             guard state == .loaded else { return }
-            Task { await bootstrap() }
+            reloadImmediately()
         }
         .onReceive(NotificationCenter.default.publisher(for: DeckStore.localDataDidChangeNotification)) { _ in
-            Task { await bootstrap() }
+            scheduleLocalDataReload()
         }
     }
 
@@ -76,7 +91,7 @@ struct DeckListView: View {
                 DeckListHeader(
                     deckCount: activeDecks.count,
                     cardCount: activeCardCount,
-                    isSearchEnabled: !searchItems.isEmpty
+                    isSearchEnabled: hasSearchItems
                 ) {
                     withAnimation(Self.searchTransition) { isSearching = true }
                 }
@@ -110,6 +125,10 @@ struct DeckListView: View {
         activeDecks.reduce(0) { count, deck in
             count + deck.activeCards.count
         }
+    }
+
+    private var hasSearchItems: Bool {
+        activeDecks.contains { !$0.activeCards.isEmpty }
     }
 
     private var searchItems: [DeckWordSearchItem] {
@@ -166,6 +185,35 @@ struct DeckListView: View {
         default:
             userStore.bootstrapState.message ?? "Сначала синхронизируйте пользователей с сервером."
         }
+    }
+
+    private func reloadImmediately() {
+        cancelScheduledReload()
+        Task { await bootstrap() }
+    }
+
+    private func scheduleLocalDataReload() {
+        guard isVisible else {
+            needsReloadWhenVisible = true
+            return
+        }
+        reloadGeneration += 1
+        let generation = reloadGeneration
+        reloadTask?.cancel()
+        reloadTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, reloadGeneration == generation else { return }
+            await bootstrap()
+            guard reloadGeneration == generation else { return }
+            reloadTask = nil
+        }
+    }
+
+    private func cancelScheduledReload() {
+        reloadGeneration += 1
+        reloadTask?.cancel()
+        reloadTask = nil
+        needsReloadWhenVisible = false
     }
 
     private func bootstrap() async {
