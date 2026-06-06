@@ -54,7 +54,7 @@ struct DeckListView: View {
         } else if let store {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    DeckListHeader(deckCount: activeDecks.count)
+                    DeckListHeader(deckCount: activeDecks.count, cardCount: activeCardCount)
 
                     LazyVStack(alignment: .leading, spacing: 16) {
                         ForEach(sortedDeckBindings) { $deck in
@@ -80,6 +80,12 @@ struct DeckListView: View {
 
     private var activeDecks: [DeckContent] {
         decks.filter(\.isActive)
+    }
+
+    private var activeCardCount: Int {
+        activeDecks.reduce(0) { count, deck in
+            count + deck.activeCards.count
+        }
     }
 
     /// Активные колоды выше, отключённые ниже; внутри каждой группы — порядок из БД (по названию).
@@ -177,6 +183,7 @@ struct DataPlaceholderView: View {
 
 private struct DeckListHeader: View {
     let deckCount: Int
+    let cardCount: Int
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -188,7 +195,14 @@ private struct DeckListHeader: View {
                 Image(systemName: "books.vertical.fill")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(MatchPalette.primary)
-                Text("\(deckCount) \(decksLabel(deckCount))")
+                Text(RussianPluralization.deckPhrase(deckCount))
+                    .font(.system(size: 13, weight: .regular))
+                    .monospacedDigit()
+                    .foregroundStyle(LovableSurface.muted)
+                Text("·")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(LovableSurface.muted.opacity(0.7))
+                Text(RussianPluralization.cardPhrase(cardCount))
                     .font(.system(size: 13, weight: .regular))
                     .monospacedDigit()
                     .foregroundStyle(LovableSurface.muted)
@@ -197,15 +211,6 @@ private struct DeckListHeader: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
-}
-
-private func decksLabel(_ count: Int) -> String {
-    let mod10 = count % 10
-    let mod100 = count % 100
-    if mod100 >= 11 && mod100 <= 14 { return "колод" }
-    if mod10 == 1 { return "колода" }
-    if mod10 >= 2 && mod10 <= 4 { return "колоды" }
-    return "колод"
 }
 
 private extension DeckStats {
@@ -241,7 +246,7 @@ struct LovableDeckCard: View {
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    Text("\(deck.activeCards.count) \(cardsGenitive(deck.activeCards.count)) · \(deck.languageCode.uppercased())")
+                    Text("\(RussianPluralization.cardPhrase(deck.activeCards.count)) · \(deck.languageCode.uppercased())")
                         .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(.white.opacity(0.55))
                         .lineLimit(1)
@@ -274,15 +279,6 @@ struct LovableDeckCard: View {
         }
         .lovablePanel(cornerRadius: 24)
     }
-}
-
-private func cardsGenitive(_ count: Int) -> String {
-    let mod10 = count % 10
-    let mod100 = count % 100
-    if mod100 >= 11 && mod100 <= 14 { return "карточек" }
-    if mod10 == 1 { return "карточка" }
-    if mod10 >= 2 && mod10 <= 4 { return "карточки" }
-    return "карточек"
 }
 
 struct DeckAvatarPalette {
@@ -363,7 +359,7 @@ struct DeckCardView: View {
                         .foregroundStyle(Color(red: 0.08, green: 0.08, blue: 0.13))
 
                     HStack(spacing: 8) {
-                        Text("\(activeCardCount) карточек · \(deck.languageCode.uppercased())")
+                        Text("\(RussianPluralization.cardPhrase(activeCardCount)) · \(deck.languageCode.uppercased())")
                             .font(.subheadline)
                             .foregroundStyle(Color(red: 0.45, green: 0.46, blue: 0.55))
 
@@ -571,7 +567,7 @@ struct DeckDetailView: View {
         case .all:
             return "Учим все карты в колоде"
         case .weak:
-            return "\(weakCardIDs.count) \(cardsGenitive(weakCardIDs.count)) в сложных"
+            return "\(RussianPluralization.cardPhrase(weakCardIDs.count)) в сложных"
         }
     }
 
@@ -1028,7 +1024,7 @@ private struct DeckQueueSummary: View {
         if stats.studyTotal == 0 {
             return "На сегодня всё готово"
         }
-        return "\(stats.studyTotal) карточки в очереди"
+        return "\(RussianPluralization.cardPhrase(stats.studyTotal)) в очереди"
     }
 
     private var summaryColor: Color {

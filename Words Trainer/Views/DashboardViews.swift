@@ -302,6 +302,7 @@ struct TodayView: View {
 
     @MainActor
     private func syncNow() async {
+        guard !userStore.syncStatus.isSyncing else { return }
         Self.syncLogger.info("syncNow invoked isSyncing=\(self.userStore.syncStatus.isSyncing, privacy: .public)")
         let result = await userStore.refreshFromServer()
         Self.syncLogger.info("syncNow refresh finished")

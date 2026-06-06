@@ -90,6 +90,7 @@ final class AppUserStore {
 
     private var refreshTask: Task<AppUserRefreshResult, Never>?
     private var refreshTaskID: UUID?
+    private var refreshTaskUserID: UUID?
 
     init(defaults: UserDefaults, syncClient: ServerSyncClient) {
         self.defaults = defaults
@@ -114,16 +115,17 @@ final class AppUserStore {
     func refreshFromServer() async -> AppUserRefreshResult {
         let targetUserID = selectedUserID
         if let refreshTask {
-            if syncStatus.isSyncing, syncStatus.userID == targetUserID {
+            if refreshTaskUserID == targetUserID {
                 Self.logger.info("refreshFromServer joined existing task selectedUserID=\(targetUserID?.uuidString ?? "nil", privacy: .public)")
                 return await refreshTask.value
             }
-            Self.logger.info("refreshFromServer cancelling stale task selectedUserID=\(self.syncStatus.userID?.uuidString ?? "nil", privacy: .public)")
+            Self.logger.info("refreshFromServer cancelling stale task selectedUserID=\(self.refreshTaskUserID?.uuidString ?? "nil", privacy: .public)")
             refreshTask.cancel()
         }
 
         let taskID = UUID()
         refreshTaskID = taskID
+        refreshTaskUserID = targetUserID
         let task = Task { @MainActor in
             await performRefreshFromServer(targetUserID: targetUserID, taskID: taskID)
         }
@@ -132,6 +134,7 @@ final class AppUserStore {
         if refreshTaskID == taskID {
             refreshTask = nil
             refreshTaskID = nil
+            refreshTaskUserID = nil
         }
         return result
     }
