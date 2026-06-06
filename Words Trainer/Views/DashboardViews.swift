@@ -293,22 +293,16 @@ struct TodayView: View {
                 loadError = nil
                 return
             }
-            let deckStore: DeckStore
-            if let store, storeUserID == selectedUserID {
-                deckStore = store
-            } else {
-                deckStore = try DeckStore(userID: selectedUserID)
-                store = deckStore
+            let snapshot = try await DeckStore.todayDashboardSnapshot(userID: selectedUserID)
+            guard userStore.selectedUserID == selectedUserID else { return }
+            if store == nil || storeUserID != selectedUserID {
+                store = try DeckStore(userID: selectedUserID)
                 storeUserID = selectedUserID
             }
-            decks = try deckStore.allDecks()
-            var nextStats: [UUID: DeckStats] = [:]
-            for deck in decks where deck.isActive {
-                nextStats[deck.id] = try deckStore.stats(for: deck)
-            }
-            statsByDeckID = nextStats
-            todayPracticeCount = try deckStore.todayPracticeCardCount()
-            streakDays = currentStreakDays(from: try deckStore.studyActivity(days: 90))
+            decks = snapshot.decks
+            statsByDeckID = snapshot.statsByDeckID
+            todayPracticeCount = snapshot.todayPracticeCount
+            streakDays = currentStreakDays(from: snapshot.activityDays)
             loadError = nil
         } catch {
             loadError = error.localizedDescription

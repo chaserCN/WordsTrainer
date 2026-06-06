@@ -1,6 +1,6 @@
 import Foundation
 
-struct TodayStudyDeckSnapshot: Sendable {
+nonisolated struct TodayStudyDeckSnapshot: Sendable {
     let deck: DeckContent
     let progressByCardID: [UUID: CardProgress]
     let dailyUsage: DeckDailyUsage?

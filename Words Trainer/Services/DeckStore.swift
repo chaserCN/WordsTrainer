@@ -20,7 +20,14 @@ nonisolated enum WeakCardsPractice {
     static let gamePairLimit = 12
 }
 
-struct DeckStatisticsSnapshot: Sendable {
+nonisolated struct DeckTodaySnapshot: Sendable {
+    let decks: [DeckContent]
+    let statsByDeckID: [UUID: DeckStats]
+    let todayPracticeCount: Int
+    let activityDays: [StudyActivityDay]
+}
+
+nonisolated struct DeckStatisticsSnapshot: Sendable {
     let todayUniqueCardCount: Int
     let todayMatchingAttemptCount: Int
     let weekUniqueCardCount: Int
@@ -60,6 +67,12 @@ final class DeckStore {
     }
 
     static var databaseExists: Bool { ContentDatabase.databaseExists() }
+
+    nonisolated static func todayDashboardSnapshot(userID: UUID) async throws -> DeckTodaySnapshot {
+        try await Task.detached(priority: .userInitiated) {
+            try loadTodayDashboardSnapshot(userID: userID)
+        }.value
+    }
 
     nonisolated static func statisticsSnapshot(userID: UUID) async throws -> DeckStatisticsSnapshot {
         try await Task.detached(priority: .userInitiated) {
@@ -459,12 +472,7 @@ final class DeckStore {
     }
 
     private func todaySnapshot(deck: DeckContent) throws -> TodayStudyDeckSnapshot {
-        try TodayStudyDeckSnapshot(
-            deck: deck,
-            progressByCardID: database.progressMap(deckID: deck.id),
-            dailyUsage: database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey()),
-            reviewedCardIDs: database.reviewedCardIDs(deckID: deck.id, source: .todayQueue)
-        )
+        try Self.todayStudyDeckSnapshot(database: database, deck: deck)
     }
 
     private func uniqueCards(_ cards: [WordCardContent]) -> [WordCardContent] {
@@ -472,6 +480,31 @@ final class DeckStore {
         return cards.filter { card in
             seen.insert(card.id).inserted
         }
+    }
+
+    nonisolated private static func loadTodayDashboardSnapshot(userID: UUID) throws -> DeckTodaySnapshot {
+        let database = try ContentDatabase(userID: userID)
+        let decks = try database.loadDecks()
+        let activeDecks = decks.filter(\.isActive)
+        var statsByDeckID: [UUID: DeckStats] = [:]
+        var todayPracticeCount = 0
+
+        for deck in activeDecks {
+            let snapshot = try todayStudyDeckSnapshot(database: database, deck: deck)
+            statsByDeckID[deck.id] = DeckStatsCalculator.compute(
+                deck: deck,
+                progressByCardID: snapshot.progressByCardID,
+                dailyUsage: snapshot.dailyUsage
+            )
+            todayPracticeCount += todayPracticeCardCount(snapshot: snapshot)
+        }
+
+        return DeckTodaySnapshot(
+            decks: decks,
+            statsByDeckID: statsByDeckID,
+            todayPracticeCount: todayPracticeCount,
+            activityDays: try studyActivity(database: database, days: 90)
+        )
     }
 
     nonisolated private static func loadStatisticsSnapshot(userID: UUID) throws -> DeckStatisticsSnapshot {
@@ -504,6 +537,26 @@ final class DeckStore {
             to: StudyDay.start(for: .now)
         ) ?? .now
         return try database.studyActivity(since: start)
+    }
+
+    nonisolated private static func todayStudyDeckSnapshot(
+        database: ContentDatabase,
+        deck: DeckContent
+    ) throws -> TodayStudyDeckSnapshot {
+        try TodayStudyDeckSnapshot(
+            deck: deck,
+            progressByCardID: database.progressMap(deckID: deck.id),
+            dailyUsage: database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey()),
+            reviewedCardIDs: database.reviewedCardIDs(deckID: deck.id, source: .todayQueue)
+        )
+    }
+
+    nonisolated private static func todayPracticeCardCount(snapshot: TodayStudyDeckSnapshot) -> Int {
+        guard snapshot.deck.isActive, !snapshot.reviewedCardIDs.isEmpty else { return 0 }
+        let activeCardIDs = Set(snapshot.deck.activeCards.map(\.id))
+        return snapshot.reviewedCardIDs.reduce(0) { count, cardID in
+            activeCardIDs.contains(cardID) ? count + 1 : count
+        }
     }
 
     nonisolated private static func scheduledReviewDays(
