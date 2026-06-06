@@ -1422,6 +1422,67 @@ struct ContentDatabaseTests {
         #expect(try database.loadDecks().isEmpty)
     }
 
+    @Test("delta sync falls back to full bootstrap when delta times out")
+    @MainActor
+    func deltaSyncFallsBackToFullBootstrapWhenDeltaTimesOut() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)
+        let suiteName = "AppUserStoreTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            AppDataPaths.dataDirectoryOverride = nil
+            StubAppUserStoreURLProtocol.handler = nil
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        AppDataPaths.dataDirectoryOverride = root
+        defaults.set("https://example.test", forKey: "server.baseURL")
+        defaults.set("test-token", forKey: "server.householdSyncToken")
+        let appUser = AppUser(id: userID, displayName: "Learner", avatarMediaID: nil, avatarImageURL: nil, accentHue: 42)
+        defaults.set(try JSONEncoder().encode([appUser]), forKey: "app.users")
+        defaults.set(userID.uuidString, forKey: "app.selectedUserID")
+
+        let database = try ContentDatabase(userID: userID)
+        try database.importServerBootstrap(bootstrap(serverRevision: "10"), selectedUserID: userID)
+        try database.markInitialSyncCompleted()
+
+        let captured = LockedRequests()
+        StubAppUserStoreURLProtocol.handler = { request in
+            captured.append(request)
+            if request.url?.path == "/v1/sync/changes" {
+                throw URLError(.timedOut)
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            switch request.url?.path {
+            case "/v1/bootstrap":
+                return (response, Data(appUserStoreBootstrapJSON(revision: "11").utf8))
+            default:
+                Issue.record("Unexpected request path: \(request.url?.absoluteString ?? "nil")")
+                return (response, Data(appUserStoreBootstrapJSON(revision: "11").utf8))
+            }
+        }
+
+        let store = AppUserStore(
+            defaults: defaults,
+            syncClient: ServerSyncClient(session: Self.stubAppUserStoreSession(), userDefaultsSuiteName: suiteName)
+        )
+        let result = await store.refreshFromServer()
+
+        #expect(result == .loaded(userCount: 1, assignmentCount: 0, activeAssignmentCount: 0))
+        let requests = captured.requests
+        #expect(requests.map(\.url?.path) == ["/v1/sync/changes", "/v1/bootstrap"])
+        let bootstrapRequest = try #require(requests.last)
+        #expect(bootstrapRequest.value(forHTTPHeaderField: "X-FlashGame-Cached-Deck-Version-Ids") == nil)
+        #expect(try database.serverRevision() == "11")
+        #expect(try database.loadDecks().isEmpty)
+    }
+
     private func withIsolatedDatabase(_ operation: (ContentDatabase) throws -> Void) throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)

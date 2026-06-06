@@ -364,6 +364,9 @@ final class AppUserStore {
     }
 
     private func changesFullBootstrapFallbackReason(forDeltaError error: Error) -> String? {
+        if case ServerSyncError.timedOut = error {
+            return "delta_timed_out"
+        }
         if case ServerSyncError.httpStatus(let statusCode) = error,
            statusCode == 400 || statusCode == 409 {
             return "server_rejected_delta_revision"
