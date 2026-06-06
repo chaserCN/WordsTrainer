@@ -22,11 +22,17 @@ struct MatchingColumnsStudyView: View {
         var pairID: String?
     }
 
+    private enum SelectionSide {
+        case word
+        case translation
+    }
+
     @State private var wordColumn: [Slot] = []
     @State private var translationColumn: [Slot] = []
 
     @State private var selectedWordSlot: UUID?
     @State private var selectedTranslationSlot: UUID?
+    @State private var firstSelectedSide: SelectionSide?
     @State private var wrongWordSlot: UUID?
     @State private var wrongTranslationSlot: UUID?
 
@@ -219,7 +225,13 @@ struct MatchingColumnsStudyView: View {
                 return
             }
             selectedWordSlot = nil
+            if selectedTranslationSlot == nil {
+                firstSelectedSide = nil
+            }
             return
+        }
+        if selectedTranslationSlot == nil {
+            firstSelectedSide = .word
         }
         selectedWordSlot = slot.id
         accelerateIfPartnerMissing(pairID: pairID, selectedWord: true)
@@ -233,7 +245,13 @@ struct MatchingColumnsStudyView: View {
         guard wrongWordSlot == nil, isTranslationTappable(slot.id) else { return }
         if selectedTranslationSlot == slot.id {
             selectedTranslationSlot = nil
+            if selectedWordSlot == nil {
+                firstSelectedSide = nil
+            }
             return
+        }
+        if selectedWordSlot == nil {
+            firstSelectedSide = .translation
         }
         selectedTranslationSlot = slot.id
         guard let pairID = slot.pairID else { return }
@@ -264,17 +282,18 @@ struct MatchingColumnsStudyView: View {
         guard let wordSlotID = selectedWordSlot, let translationSlotID = selectedTranslationSlot else { return }
         guard let wordSlot = wordColumn.first(where: { $0.id == wordSlotID }),
               let translationSlot = translationColumn.first(where: { $0.id == translationSlotID }) else {
-            selectedWordSlot = nil
-            selectedTranslationSlot = nil
+            clearSelection()
             return
         }
 
-        guard let wordPairID = wordSlot.pairID else { return }
+        guard let wordPairID = wordSlot.pairID, let translationPairID = translationSlot.pairID else {
+            clearSelection()
+            return
+        }
 
-        if wordPairID == translationSlot.pairID {
+        if wordPairID == translationPairID {
             let shuffle = shouldShuffleAfterMatch(wordSlot: wordSlotID, translationSlot: translationSlotID)
-            selectedWordSlot = nil
-            selectedTranslationSlot = nil
+            clearSelection()
             beginMatchTransition(
                 matchedID: wordPairID,
                 wordSlotID: wordSlotID,
@@ -282,14 +301,14 @@ struct MatchingColumnsStudyView: View {
                 shuffle: shuffle
             )
         } else {
-            recordIncorrectSelection(pairID: wordPairID)
-            if let pair = pairCache[wordPairID] {
+            let incorrectPairID = incorrectPairID(wordPairID: wordPairID, translationPairID: translationPairID)
+            recordIncorrectSelection(pairID: incorrectPairID)
+            if let pair = pairCache[incorrectPairID] {
                 WordAudioPlayer.shared.playWord(from: pair.card, style: .wrong)
             }
             wrongWordSlot = wordSlotID
             wrongTranslationSlot = translationSlotID
-            selectedWordSlot = nil
-            selectedTranslationSlot = nil
+            clearSelection()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
                 withAnimation(.easeOut(duration: 0.2)) {
                     wrongWordSlot = nil
@@ -297,6 +316,16 @@ struct MatchingColumnsStudyView: View {
                 }
             }
         }
+    }
+
+    private func incorrectPairID(wordPairID: String, translationPairID: String) -> String {
+        firstSelectedSide == .translation ? translationPairID : wordPairID
+    }
+
+    private func clearSelection() {
+        selectedWordSlot = nil
+        selectedTranslationSlot = nil
+        firstSelectedSide = nil
     }
 
     private func recordIncorrectSelection(pairID: String) {
@@ -591,8 +620,7 @@ struct MatchingColumnsStudyView: View {
         for (_, task) in transitionTasks { task.cancel() }
         transitionTasks.removeAll()
         pendingTransitions.removeAll()
-        selectedWordSlot = nil
-        selectedTranslationSlot = nil
+        clearSelection()
 
         let pairs = session.matchingVisibleItems
         for pair in pairs { pairCache[pair.id] = pair }
