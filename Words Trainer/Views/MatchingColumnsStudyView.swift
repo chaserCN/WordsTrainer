@@ -17,6 +17,7 @@ struct MatchingColumnsStudyView: View {
     /// `pairID` — содержимое: его и перемешиваем при подстановке.
     private struct Slot: Identifiable, Equatable {
         let id = UUID()
+        var contentID = UUID()
         var pairID: String?
     }
 
@@ -152,8 +153,8 @@ struct MatchingColumnsStudyView: View {
                 )
             }
         }
+        .id(slot.contentID)
         .opacity(wordSlotOpacity[slot.id] ?? 1)
-        .scaleEffect(scale(for: wordSlotOpacity[slot.id]))
         .opacity(slot.pairID == nil ? 0 : 1)
         .allowsHitTesting(slot.pairID != nil && isWordTappable(slot.id))
     }
@@ -167,15 +168,10 @@ struct MatchingColumnsStudyView: View {
             isCorrect: correctTranslationSlots.contains(slot.id),
             action: { selectTranslation(slot) }
         )
+        .id(slot.contentID)
         .opacity(translationSlotOpacity[slot.id] ?? 1)
-        .scaleEffect(scale(for: translationSlotOpacity[slot.id]))
         .opacity(slot.pairID == nil ? 0 : 1)
         .allowsHitTesting(slot.pairID != nil && isTranslationTappable(slot.id))
-    }
-
-    private func scale(for opacity: Double?) -> Double {
-        guard let opacity else { return 1 }
-        return 0.9 + (0.1 * opacity)
     }
 
     // Тапать можно по свободным ячейкам и по тем, что уже проявляются (контент валиден).
@@ -356,6 +352,7 @@ struct MatchingColumnsStudyView: View {
 
         // 2. Резервируем замену из пула — чтобы её можно было подмешать к соседним матчам.
         reserveReplacement(for: matchedID)
+        finishPendingReplacementsNow()
 
         // 3. Подтверждение → гашение → подстановка, в отменяемой задаче.
         let id = UUID()
@@ -374,6 +371,19 @@ struct MatchingColumnsStudyView: View {
             }
             try? await Task.sleep(for: .seconds(Self.fadeOutDuration))
             guard !Task.isCancelled else { return }
+            finishTransition(id)
+        }
+    }
+
+    /// Новый правильный матч не ждёт старые гашения: предыдущие обычные переходы
+    /// сразу получают replacement и запускают проявление новой лексики.
+    private func finishPendingReplacementsNow() {
+        let ids = pendingTransitions
+            .filter { !$0.value.shuffle }
+            .map(\.key)
+        guard !ids.isEmpty else { return }
+        for id in ids {
+            transitionTasks.removeValue(forKey: id)?.cancel()
             finishTransition(id)
         }
     }
@@ -440,11 +450,31 @@ struct MatchingColumnsStudyView: View {
         }
 
         let wordPick = pendingWords.remove(at: Int.random(in: pendingWords.indices))
-        let translationPick = pendingTranslations.remove(at: Int.random(in: pendingTranslations.indices))
+        let translationPick = removeRandomTranslation(excluding: wordPick)
+        resetSlotOpacityForReplacement(wordSlotID: wordSlotID, translationSlotID: translationSlotID)
         wordColumn[wordIndex].pairID = wordPick
+        wordColumn[wordIndex].contentID = UUID()
         translationColumn[translationIndex].pairID = translationPick
+        translationColumn[translationIndex].contentID = UUID()
 
         startAppearTransition(wordSlotID: wordSlotID, translationSlotID: translationSlotID)
+    }
+
+    private func resetSlotOpacityForReplacement(wordSlotID: UUID, translationSlotID: UUID) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            wordSlotOpacity[wordSlotID] = 0
+            translationSlotOpacity[translationSlotID] = 0
+        }
+    }
+
+    private func removeRandomTranslation(excluding pairID: String) -> String {
+        let eligible = pendingTranslations.indices.filter { pendingTranslations[$0] != pairID }
+        if let index = eligible.randomElement() {
+            return pendingTranslations.remove(at: index)
+        }
+        return pendingTranslations.remove(at: Int.random(in: pendingTranslations.indices))
     }
 
     /// Перетасовка всего поля: занятые ячейки тоже переезжают (исключение из «ячейки не двигаются»).
@@ -488,14 +518,14 @@ struct MatchingColumnsStudyView: View {
 
     /// Проявляем новую лексику в тех же ячейках, где был матч.
     private func startAppearTransition(wordSlotID: UUID, translationSlotID: UUID) {
-        wordSlotOpacity[wordSlotID] = 0
-        translationSlotOpacity[translationSlotID] = 0
         appearingWordSlots.insert(wordSlotID)
         appearingTranslationSlots.insert(translationSlotID)
 
-        withAnimation(.easeInOut(duration: Self.fadeInDuration)) {
-            wordSlotOpacity[wordSlotID] = 1
-            translationSlotOpacity[translationSlotID] = 1
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: Self.fadeInDuration)) {
+                wordSlotOpacity[wordSlotID] = 1
+                translationSlotOpacity[translationSlotID] = 1
+            }
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.fadeInDuration) {
