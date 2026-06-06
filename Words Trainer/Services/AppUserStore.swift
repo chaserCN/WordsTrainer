@@ -205,9 +205,15 @@ final class AppUserStore {
                 Self.logger.info("changes imported localServerRevision=\(importedServerRevision, privacy: .public)")
                 guard isCurrentRefreshTask(taskID) else { return .cancelled }
                 bootstrapState = .loaded
-                let assignmentCount = changes.assignments.count
+                let decks = try database.loadDecks()
+                let assignmentCount = decks.count
+                let activeAssignmentCount = decks.filter(\.isActive).count
                 return finishSync(
-                    .loaded(userCount: users.count, assignmentCount: assignmentCount, activeAssignmentCount: assignmentCount),
+                    .loaded(
+                        userCount: users.count,
+                        assignmentCount: assignmentCount,
+                        activeAssignmentCount: activeAssignmentCount
+                    ),
                     userID: targetUserID,
                     startedAt: startedAt,
                     taskID: taskID

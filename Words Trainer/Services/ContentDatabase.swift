@@ -1233,9 +1233,7 @@ nonisolated final class ContentDatabase {
                practice_reviews.mode, practice_reviews.outcome, practice_reviews.source,
                practice_reviews.practiced_at, practice_reviews.duration_ms
         FROM practice_reviews
-        JOIN cards ON cards.id = practice_reviews.card_id AND cards.deck_id = practice_reviews.deck_id
         WHERE practice_reviews.user_id = ?
-          AND cards.status = 'active'
           AND practice_reviews.synced_at IS NULL
         ORDER BY practice_reviews.practiced_at
         LIMIT ?
@@ -1285,9 +1283,7 @@ nonisolated final class ContentDatabase {
         let sql = """
         SELECT card_progress.card_id, card_progress.deck_id, card_progress.fsrs_data, card_progress.updated_at
         FROM card_progress
-        JOIN cards ON cards.id = card_progress.card_id AND cards.deck_id = card_progress.deck_id
         WHERE card_progress.user_id = ?
-          AND cards.status = 'active'
           AND card_progress.synced_at IS NULL
         ORDER BY card_progress.updated_at
         LIMIT ?

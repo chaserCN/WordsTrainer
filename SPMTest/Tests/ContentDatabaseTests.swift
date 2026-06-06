@@ -881,6 +881,44 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("pending practice and progress are exported after card becomes inactive")
+    func pendingPracticeAndProgressAreExportedAfterCardBecomesInactive() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
+            let date = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
+            let practiceReviewID = UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-cccccccccccc")!
+
+            try database.saveProgress(
+                deckID: deckID,
+                progress: CardProgress.newCard(cardID: cardID, now: date)
+            )
+            try database.savePracticeReview(
+                PracticeReviewEvent(
+                    id: practiceReviewID,
+                    cardID: cardID,
+                    deckID: deckID,
+                    mode: .clozeMultipleChoice,
+                    outcome: .correct,
+                    source: .todayPractice,
+                    practicedAt: date,
+                    durationMS: 900
+                )
+            )
+
+            try database.importServerBootstrap(
+                bootstrap(cardStatus: "inactive"),
+                selectedUserID: userID,
+                progressSnapshotIsComplete: false
+            )
+
+            let batch = try database.pendingServerSyncBatch()
+            #expect(batch.progressCardIDs == [cardID])
+            #expect(batch.practiceReviewIDs == [practiceReviewID])
+            #expect(batch.payload.progress.map(\.cardId) == [cardID])
+            #expect(batch.payload.practiceReviews.map(\.clientEventId) == [practiceReviewID])
+        }
+    }
+
     @Test("mark uploaded keeps newer progress pending when it changed after batch snapshot")
     func markUploadedKeepsNewerProgressPending() throws {
         try withIsolatedDatabase { database in
@@ -1355,6 +1393,7 @@ struct ContentDatabaseTests {
         includeAssignment: Bool = true,
         assignmentStatus: String = "active",
         includeContent: Bool = true,
+        cardStatus: String = "active",
         cardImageMediaID: UUID? = nil,
         audioWordMediaID: UUID? = nil,
         exampleImageMediaID: UUID? = nil,
@@ -1377,7 +1416,7 @@ struct ContentDatabaseTests {
                   {
                     "deck_version_id": "\(versionID.databaseString)",
                     "card_id": "\(cardID.databaseString)",
-                    "status": "active",
+                    "status": "\(cardStatus)",
                     "lemma": "test",
                     "display_word": "test",
                     "part_of_speech": "noun",
