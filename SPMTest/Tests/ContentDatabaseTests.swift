@@ -1092,6 +1092,26 @@ struct ContentDatabaseTests {
         #expect(try reopenedDatabase.serverRevision() == "123")
     }
 
+    @Test("database opens in WAL mode and supports read-only connections")
+    func databaseOpensInWALModeAndSupportsReadOnlyConnections() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            AppDataPaths.dataDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        AppDataPaths.dataDirectoryOverride = root
+        let database = try ContentDatabase(userID: userID)
+        try database.importServerBootstrap(bootstrap(serverRevision: "321"), selectedUserID: userID)
+        #expect(try database.journalMode().lowercased() == "wal")
+
+        let readOnlyDatabase = try ContentDatabase(userID: userID, mode: .readOnly)
+        #expect(try readOnlyDatabase.journalMode().lowercased() == "wal")
+        #expect(try readOnlyDatabase.serverRevision() == "321")
+        #expect(try readOnlyDatabase.loadDecks().count == 1)
+    }
+
     @Test("concurrent database opens serialize setup")
     func concurrentDatabaseOpensSerializeSetup() async throws {
         let root = FileManager.default.temporaryDirectory

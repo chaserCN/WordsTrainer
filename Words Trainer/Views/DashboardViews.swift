@@ -1629,8 +1629,13 @@ private struct TodayAllDecksModesView: View {
     }
 
     private func reloadPracticeCount() async {
-        practiceCount = (try? store.todayPracticeCardCount()) ?? 0
-        wordListCards = (try? store.todayStudyCards()) ?? []
+        guard let snapshot = try? await DeckStore.todayDashboardSnapshot(userID: store.currentUserID) else {
+            practiceCount = 0
+            wordListCards = []
+            return
+        }
+        practiceCount = snapshot.todayPracticeCount
+        wordListCards = snapshot.todayStudyCards
     }
 }
 
@@ -1670,9 +1675,16 @@ private struct TodayDeckModesView: View {
     }
 
     private func reload() async {
-        stats = (try? store.stats(for: deck)) ?? .zero
-        practiceCount = (try? store.todayPracticeCardCount(deck: deck)) ?? 0
-        wordListCards = (try? store.todayStudyCards(deck: deck)) ?? []
+        guard let snapshot = try? await DeckStore.todayDashboardSnapshot(userID: store.currentUserID) else {
+            stats = .zero
+            practiceCount = 0
+            wordListCards = []
+            return
+        }
+        let deckID = deck.id
+        stats = snapshot.statsByDeckID[deckID] ?? .zero
+        practiceCount = snapshot.todayPracticeCountByDeckID[deckID] ?? 0
+        wordListCards = snapshot.todayStudyCardsByDeckID[deckID] ?? []
     }
 
     private func start(_ mode: StudyMode) {

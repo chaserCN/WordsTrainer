@@ -24,7 +24,9 @@ nonisolated struct DeckTodaySnapshot: Sendable {
     let decks: [DeckContent]
     let statsByDeckID: [UUID: DeckStats]
     let todayPracticeCount: Int
+    let todayPracticeCountByDeckID: [UUID: Int]
     let todayStudyCards: [WordCardContent]
+    let todayStudyCardsByDeckID: [UUID: [WordCardContent]]
     let activityDays: [StudyActivityDay]
 }
 
@@ -50,6 +52,7 @@ final class DeckStore {
     private let userID: UUID
     private let database: ContentDatabase
     private let engine = StudySessionEngine()
+    var currentUserID: UUID { userID }
 
     init(database: ContentDatabase) {
         self.userID = database.currentUserID
@@ -484,10 +487,18 @@ final class DeckStore {
     }
 
     nonisolated private static func loadTodayDashboardSnapshot(userID: UUID) throws -> DeckTodaySnapshot {
-        let database = try ContentDatabase(userID: userID)
+        let database = try ContentDatabase(userID: userID, mode: .readOnly)
+        return try database.readTransaction {
+            try loadTodayDashboardSnapshot(database: database)
+        }
+    }
+
+    nonisolated private static func loadTodayDashboardSnapshot(database: ContentDatabase) throws -> DeckTodaySnapshot {
         let decks = try database.loadDecks()
         let activeDecks = decks.filter(\.isActive)
         var statsByDeckID: [UUID: DeckStats] = [:]
+        var todayPracticeCountByDeckID: [UUID: Int] = [:]
+        var todayStudyCardsByDeckID: [UUID: [WordCardContent]] = [:]
         var queueCards: [WordCardContent] = []
         var practiceCards: [WordCardContent] = []
         var todayPracticeCount = 0
@@ -498,6 +509,8 @@ final class DeckStore {
             queueCards.append(contentsOf: deckQueueCards)
             let deckPracticeCards = todayPracticeCards(snapshot: snapshot)
             practiceCards.append(contentsOf: deckPracticeCards)
+            todayPracticeCountByDeckID[deck.id] = deckPracticeCards.count
+            todayStudyCardsByDeckID[deck.id] = uniqueCards(deckQueueCards.isEmpty ? deckPracticeCards : deckQueueCards)
             statsByDeckID[deck.id] = DeckStatsCalculator.compute(
                 deck: deck,
                 progressByCardID: snapshot.progressByCardID,
@@ -510,13 +523,21 @@ final class DeckStore {
             decks: decks,
             statsByDeckID: statsByDeckID,
             todayPracticeCount: todayPracticeCount,
+            todayPracticeCountByDeckID: todayPracticeCountByDeckID,
             todayStudyCards: uniqueCards(queueCards.isEmpty ? practiceCards : queueCards),
+            todayStudyCardsByDeckID: todayStudyCardsByDeckID,
             activityDays: try studyActivity(database: database, days: 90)
         )
     }
 
     nonisolated private static func loadStatisticsSnapshot(userID: UUID) throws -> DeckStatisticsSnapshot {
-        let database = try ContentDatabase(userID: userID)
+        let database = try ContentDatabase(userID: userID, mode: .readOnly)
+        return try database.readTransaction {
+            try loadStatisticsSnapshot(database: database)
+        }
+    }
+
+    nonisolated private static func loadStatisticsSnapshot(database: ContentDatabase) throws -> DeckStatisticsSnapshot {
         let calendar = Calendar.current
         let todayStart = StudyDay.start(for: .now, calendar: calendar)
         let weekStart = calendar.date(byAdding: .day, value: -6, to: todayStart) ?? todayStart

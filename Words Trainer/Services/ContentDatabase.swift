@@ -14,6 +14,7 @@ nonisolated private enum SyncMetadataKey {
 }
 
 nonisolated private let contentDatabaseSetupLock = NSLock()
+nonisolated(unsafe) private var contentDatabaseSetupPaths: Set<String> = []
 
 nonisolated private enum WeakCardFilter {
     static let minimumFailureRate = 0.25
@@ -73,23 +74,97 @@ struct PendingServerSyncBatch {
 
 /// Read/write access to `Documents/Data/flashgame.db` (content + study progress).
 nonisolated final class ContentDatabase {
+    enum OpenMode {
+        case readWrite
+        case readOnly
+    }
+
     private var db: OpaquePointer?
     private let userID: UUID
     var currentUserID: UUID { userID }
 
-    init(userID: UUID = ContentDatabaseDefaults.userID) throws {
+    init(userID: UUID = ContentDatabaseDefaults.userID, mode: OpenMode = .readWrite) throws {
         self.userID = userID
         _ = try AppDataPaths.dataDirectoryURL()
         let path = try AppDataPaths.databaseURL().path
-        guard sqlite3_open(path, &db) == SQLITE_OK, db != nil else {
+        let flags: Int32
+        switch mode {
+        case .readWrite:
+            flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
+        case .readOnly:
+            flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
+        }
+        guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK, db != nil else {
             throw ContentDatabaseError.openFailed
         }
         sqlite3_busy_timeout(db, 5_000)
+        try configureConnection(mode: mode)
+        if mode == .readWrite {
+            try prepareSchemaIfNeeded(path: path)
+        }
+    }
+
+    convenience init(userID: UUID = ContentDatabaseDefaults.userID, readOnly: Bool) throws {
+        try self.init(userID: userID, mode: readOnly ? .readOnly : .readWrite)
+    }
+
+    private func configureConnection(mode: OpenMode) throws {
+        guard sqlite3_exec(db, "PRAGMA busy_timeout = 5000", nil, nil, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        switch mode {
+        case .readWrite:
+            guard sqlite3_exec(db, "PRAGMA synchronous = NORMAL", nil, nil, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+        case .readOnly:
+            guard sqlite3_exec(db, "PRAGMA query_only = ON", nil, nil, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+        }
+    }
+
+    private func prepareSchemaIfNeeded(path: String) throws {
         contentDatabaseSetupLock.lock()
         defer { contentDatabaseSetupLock.unlock() }
+        guard !contentDatabaseSetupPaths.contains(path) else { return }
+        guard sqlite3_exec(db, "PRAGMA journal_mode = WAL", nil, nil, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
         try executeMigrations()
         try normalizeUUIDColumns()
         try AppDataPaths.normalizeDeckMediaFolders()
+        contentDatabaseSetupPaths.insert(path)
+    }
+
+    func readTransaction<T>(_ body: () throws -> T) throws -> T {
+        guard sqlite3_exec(db, "BEGIN DEFERRED TRANSACTION", nil, nil, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        do {
+            let value = try body()
+            guard sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            return value
+        } catch {
+            _ = sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+            throw error
+        }
+    }
+
+    func journalMode() throws -> String {
+        let sql = "PRAGMA journal_mode"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW,
+              let mode = textColumn(statement, index: 0) else {
+            throw ContentDatabaseError.queryFailed
+        }
+        return mode
     }
 
     deinit {
