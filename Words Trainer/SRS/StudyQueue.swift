@@ -1,7 +1,7 @@
 import Foundation
 import FSRS
 
-struct StudyQueueItem: Identifiable, Sendable {
+nonisolated struct StudyQueueItem: Identifiable, Sendable {
     let id: UUID
     let deckID: UUID?
     let card: WordCardContent
@@ -73,7 +73,7 @@ struct MatchingPair: Identifiable, Sendable, Hashable {
     }
 }
 
-enum StudyQueueBuilder {
+nonisolated enum StudyQueueBuilder {
     static func build(
         deck: DeckContent,
         progressByCardID: [UUID: CardProgress],

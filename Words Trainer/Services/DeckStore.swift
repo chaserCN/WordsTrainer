@@ -24,6 +24,7 @@ nonisolated struct DeckTodaySnapshot: Sendable {
     let decks: [DeckContent]
     let statsByDeckID: [UUID: DeckStats]
     let todayPracticeCount: Int
+    let todayStudyCards: [WordCardContent]
     let activityDays: [StudyActivityDay]
 }
 
@@ -487,22 +488,29 @@ final class DeckStore {
         let decks = try database.loadDecks()
         let activeDecks = decks.filter(\.isActive)
         var statsByDeckID: [UUID: DeckStats] = [:]
+        var queueCards: [WordCardContent] = []
+        var practiceCards: [WordCardContent] = []
         var todayPracticeCount = 0
 
         for deck in activeDecks {
             let snapshot = try todayStudyDeckSnapshot(database: database, deck: deck)
+            let deckQueueCards = todayQueueCards(snapshot: snapshot)
+            queueCards.append(contentsOf: deckQueueCards)
+            let deckPracticeCards = todayPracticeCards(snapshot: snapshot)
+            practiceCards.append(contentsOf: deckPracticeCards)
             statsByDeckID[deck.id] = DeckStatsCalculator.compute(
                 deck: deck,
                 progressByCardID: snapshot.progressByCardID,
                 dailyUsage: snapshot.dailyUsage
             )
-            todayPracticeCount += todayPracticeCardCount(snapshot: snapshot)
+            todayPracticeCount += deckPracticeCards.count
         }
 
         return DeckTodaySnapshot(
             decks: decks,
             statsByDeckID: statsByDeckID,
             todayPracticeCount: todayPracticeCount,
+            todayStudyCards: uniqueCards(queueCards.isEmpty ? practiceCards : queueCards),
             activityDays: try studyActivity(database: database, days: 90)
         )
     }
@@ -556,6 +564,27 @@ final class DeckStore {
         let activeCardIDs = Set(snapshot.deck.activeCards.map(\.id))
         return snapshot.reviewedCardIDs.reduce(0) { count, cardID in
             activeCardIDs.contains(cardID) ? count + 1 : count
+        }
+    }
+
+    nonisolated private static func todayQueueCards(snapshot: TodayStudyDeckSnapshot) -> [WordCardContent] {
+        StudyQueueBuilder.build(
+            deck: snapshot.deck,
+            progressByCardID: snapshot.progressByCardID,
+            dailyUsage: snapshot.dailyUsage
+        ).map(\.card)
+    }
+
+    nonisolated private static func todayPracticeCards(snapshot: TodayStudyDeckSnapshot) -> [WordCardContent] {
+        guard snapshot.deck.isActive, !snapshot.reviewedCardIDs.isEmpty else { return [] }
+        let activeCardsByID = Dictionary(uniqueKeysWithValues: snapshot.deck.activeCards.map { ($0.id, $0) })
+        return snapshot.reviewedCardIDs.compactMap { activeCardsByID[$0] }
+    }
+
+    nonisolated private static func uniqueCards(_ cards: [WordCardContent]) -> [WordCardContent] {
+        var seen: Set<UUID> = []
+        return cards.filter { card in
+            seen.insert(card.id).inserted
         }
     }
 

@@ -42,6 +42,7 @@ struct TodayView: View {
     @State private var decks: [DeckContent] = []
     @State private var statsByDeckID: [UUID: DeckStats] = [:]
     @State private var todayPracticeCount = 0
+    @State private var todayStudyCards: [WordCardContent] = []
     @State private var streakDays = 0
     @State private var showUserSwitcher = false
     @State private var showTodayModes = false
@@ -192,7 +193,9 @@ struct TodayView: View {
                 queueCount: stats.studyTotal,
                 newCount: stats.newAvailable,
                 dueCount: stats.learningDue + stats.reviewDue,
-                laterCount: stats.dueLaterToday
+                laterCount: stats.dueLaterToday,
+                initialPracticeCount: todayPracticeCount,
+                initialWordListCards: todayStudyCards
             )
         }
     }
@@ -289,6 +292,7 @@ struct TodayView: View {
                 decks = []
                 statsByDeckID = [:]
                 todayPracticeCount = 0
+                todayStudyCards = []
                 streakDays = 0
                 loadError = nil
                 return
@@ -302,6 +306,7 @@ struct TodayView: View {
             decks = snapshot.decks
             statsByDeckID = snapshot.statsByDeckID
             todayPracticeCount = snapshot.todayPracticeCount
+            todayStudyCards = snapshot.todayStudyCards
             streakDays = currentStreakDays(from: snapshot.activityDays)
             loadError = nil
         } catch {
@@ -1500,13 +1505,31 @@ private struct TodayAllDecksModesView: View {
     @State private var session: StudySession?
     @State private var sessionDeckTitle = ""
     @State private var showStudy = false
-    @State private var practiceCount = 0
-    @State private var wordListCards: [WordCardContent] = []
+    @State private var practiceCount: Int
+    @State private var wordListCards: [WordCardContent]
     @State private var loadError: String?
     @State private var isVisible = false
     @State private var reloadTask: Task<Void, Never>?
     @State private var reloadGeneration = 0
     @State private var needsReloadWhenVisible = false
+
+    init(
+        store: DeckStore,
+        queueCount: Int,
+        newCount: Int,
+        dueCount: Int,
+        laterCount: Int,
+        initialPracticeCount: Int,
+        initialWordListCards: [WordCardContent]
+    ) {
+        self.store = store
+        self.queueCount = queueCount
+        self.newCount = newCount
+        self.dueCount = dueCount
+        self.laterCount = laterCount
+        _practiceCount = State(initialValue: initialPracticeCount)
+        _wordListCards = State(initialValue: initialWordListCards)
+    }
 
     var body: some View {
         TodayStudyModesView(
@@ -1530,7 +1553,6 @@ private struct TodayAllDecksModesView: View {
         } message: {
             Text(loadError ?? "")
         }
-        .task { await reloadPracticeCount() }
         .onAppear {
             isVisible = true
             if needsReloadWhenVisible {
