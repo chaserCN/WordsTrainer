@@ -144,3 +144,8 @@
 "Пока всё" = "All clear";
 "Пока всё · можно повторить %@" = "All clear · review %@";
 "Очередь закончена · %@" = "Queue complete · %@";
+"Поиск" = "Search";
+"Искать слово" = "Search word";
+"Нет совпадений" = "No matches";
+"Попробуйте другое написание." = "Try a different spelling.";
+"В колодах пока нет активных карточек." = "Decks do not have active cards yet.";

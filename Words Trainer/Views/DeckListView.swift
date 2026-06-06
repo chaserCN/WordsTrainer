@@ -6,6 +6,7 @@ struct DeckListView: View {
     @State private var store: DeckStore?
     @State private var storeUserID: UUID?
     @State private var loadError: String?
+    @State private var showsWordSearch = false
 
     var body: some View {
         NavigationStack {
@@ -54,7 +55,13 @@ struct DeckListView: View {
         } else if let store {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    DeckListHeader(deckCount: activeDecks.count, cardCount: activeCardCount)
+                    DeckListHeader(
+                        deckCount: activeDecks.count,
+                        cardCount: activeCardCount,
+                        isSearchEnabled: !searchItems.isEmpty
+                    ) {
+                        showsWordSearch = true
+                    }
 
                     LazyVStack(alignment: .leading, spacing: 16) {
                         ForEach(sortedDeckBindings) { $deck in
@@ -75,6 +82,9 @@ struct DeckListView: View {
                 .padding(.top, 28)
                 .padding(.bottom, 32)
             }
+            .sheet(isPresented: $showsWordSearch) {
+                WordSearchSheet(items: searchItems)
+            }
         }
     }
 
@@ -85,6 +95,14 @@ struct DeckListView: View {
     private var activeCardCount: Int {
         activeDecks.reduce(0) { count, deck in
             count + deck.activeCards.count
+        }
+    }
+
+    private var searchItems: [DeckWordSearchItem] {
+        decks.flatMap { deck in
+            deck.activeCards.map { card in
+                DeckWordSearchItem(card: card, deckID: deck.id, deckTitle: deck.title)
+            }
         }
     }
 
@@ -184,32 +202,439 @@ struct DataPlaceholderView: View {
 private struct DeckListHeader: View {
     let deckCount: Int
     let cardCount: Int
+    let isSearchEnabled: Bool
+    let search: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Колоды")
-                .font(.system(size: 40, weight: .bold))
-                .foregroundStyle(LovableSurface.foreground)
+        HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Колоды")
+                    .font(.system(size: 40, weight: .bold))
+                    .foregroundStyle(LovableSurface.foreground)
 
-            HStack(spacing: 8) {
-                Image(systemName: "books.vertical.fill")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(MatchPalette.primary)
-                Text(LocalizedCounts.deckPhrase(deckCount))
-                    .font(.system(size: 13, weight: .regular))
-                    .monospacedDigit()
-                    .foregroundStyle(LovableSurface.muted)
-                Text("·")
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(LovableSurface.muted.opacity(0.7))
-                Text(LocalizedCounts.cardPhrase(cardCount))
-                    .font(.system(size: 13, weight: .regular))
-                    .monospacedDigit()
-                    .foregroundStyle(LovableSurface.muted)
+                HStack(spacing: 8) {
+                    Image(systemName: "books.vertical.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(MatchPalette.primary)
+                    Text(LocalizedCounts.deckPhrase(deckCount))
+                        .font(.system(size: 13, weight: .regular))
+                        .monospacedDigit()
+                        .foregroundStyle(LovableSurface.muted)
+                    Text("·")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(LovableSurface.muted.opacity(0.7))
+                    Text(LocalizedCounts.cardPhrase(cardCount))
+                        .font(.system(size: 13, weight: .regular))
+                        .monospacedDigit()
+                        .foregroundStyle(LovableSurface.muted)
+                }
+                .padding(.top, 4)
             }
-            .padding(.top, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: search) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(LovableSurface.foreground)
+                    .frame(width: 44, height: 44)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(.white.opacity(0.58), lineWidth: 0.8)
+                    }
+                    .shadow(color: oklch(0.18, 0.05, 260, 0.12), radius: 12, x: 0, y: 6)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!isSearchEnabled)
+            .opacity(isSearchEnabled ? 1 : 0.45)
+            .accessibilityLabel(L10n.text("Поиск"))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct DeckWordSearchItem: Identifiable, Hashable {
+    let card: WordCardContent
+    let deckID: UUID
+    let deckTitle: String
+
+    var id: String { "\(deckID.databaseString)-\(card.id.databaseString)" }
+}
+
+private struct WordSearchSheet: View {
+    private let items: [DeckWordSearchItem]
+    private let index: DeckWordSearchIndex
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var debouncedQuery = ""
+    @State private var visibleItems: [DeckWordSearchItem]
+    @FocusState private var isSearchFieldFocused: Bool
+
+    private static let searchDebounceNanoseconds: UInt64 = 180_000_000
+
+    init(items: [DeckWordSearchItem]) {
+        let index = DeckWordSearchIndex(items: items)
+        self.items = items
+        self.index = index
+        _visibleItems = State(initialValue: index.sortedItems)
+    }
+
+    var body: some View {
+        ZStack {
+            // Мягкий светло-серый фон в духе iOS grouped-списка: белые карточки-строки
+            // на нём читаются естественно, без «цветного на цветном». Color/oklch как
+            // элемент ZStack гибкий и заполняет предложенный размер, поэтому (в отличие
+            // от LovableBackground с его орбами) не раздувает ZStack шире экрана.
+            oklch(0.95, 0.005, 240)
+                .ignoresSafeArea()
+
+            VStack(spacing: 22) {
+                searchHeader
+
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if items.isEmpty {
+                            DataPlaceholderView(
+                                title: "Нет слов",
+                                systemImage: "text.book.closed",
+                                message: "В колодах пока нет активных карточек."
+                            )
+                            .frame(minHeight: 360)
+                        } else if visibleItems.isEmpty {
+                            DataPlaceholderView(
+                                title: "Нет совпадений",
+                                systemImage: "magnifyingglass",
+                                message: "Попробуйте другое написание."
+                            )
+                            .frame(minHeight: 360)
+                        } else {
+                            ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
+                                DeckSearchWordRow(
+                                    item: item,
+                                    position: rowPosition(index: index, count: visibleItems.count)
+                                )
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 32)
+                }
+            }
+        }
+        .task {
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            isSearchFieldFocused = true
+        }
+        .task(id: query) {
+            let nextQuery = query
+            if nextQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                debouncedQuery = nextQuery
+                visibleItems = index.sortedItems
+                return
+            }
+
+            try? await Task.sleep(nanoseconds: Self.searchDebounceNanoseconds)
+            guard !Task.isCancelled else { return }
+            debouncedQuery = nextQuery
+            visibleItems = index.results(for: nextQuery)
+        }
+        .onChange(of: items) {
+            visibleItems = index.results(for: debouncedQuery)
+        }
+        .presentationDetents([.large])
+    }
+
+    private var searchHeader: some View {
+        HStack(spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.black)
+
+                TextField(L10n.text("Искать слово"), text: $query)
+                    .font(.system(size: 24, weight: .regular))
+                    .foregroundStyle(LovableSurface.foreground)
+                    .tint(LovableSurface.foreground)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($isSearchFieldFocused)
+                    .submitLabel(.search)
+            }
+            .padding(.horizontal, 18)
+            .frame(height: 58)
+            .background(oklch(0.998, 0.002, 240), in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(.black.opacity(0.06), lineWidth: 0.8)
+            }
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(.black)
+                    .frame(width: 58, height: 58)
+                    .background(oklch(0.998, 0.002, 240), in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(.black.opacity(0.06), lineWidth: 0.8)
+                    }
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.text("Закрыть"))
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 20)
+    }
+
+    private func rowPosition(index: Int, count: Int) -> DeckSearchWordRow.Position {
+        if count == 1 { return .single }
+        if index == 0 { return .top }
+        if index == count - 1 { return .bottom }
+        return .middle
+    }
+}
+
+private struct DeckWordSearchIndex {
+    private struct Entry {
+        let item: DeckWordSearchItem
+        let sortOrder: Int
+        let candidates: [Candidate]
+    }
+
+    private struct Candidate {
+        let original: String
+        let normalized: String
+    }
+
+    let sortedItems: [DeckWordSearchItem]
+    private let entries: [Entry]
+
+    init(items: [DeckWordSearchItem]) {
+        let sortedItems = items.sorted(by: Self.sortItems)
+        self.sortedItems = sortedItems
+        self.entries = sortedItems.enumerated().map { sortOrder, item in
+            Entry(
+                item: item,
+                sortOrder: sortOrder,
+                candidates: Self.candidates(for: item)
+            )
+        }
+    }
+
+    func results(for query: String) -> [DeckWordSearchItem] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedQuery = trimmedQuery.normalizedForWordSearch
+        guard !normalizedQuery.isEmpty else { return sortedItems }
+        guard normalizedQuery.count >= 2 else { return [] }
+
+        return entries
+            .compactMap { entry -> (entry: Entry, score: Int)? in
+                guard let score = Self.searchScore(
+                    query: trimmedQuery,
+                    normalizedQuery: normalizedQuery,
+                    entry: entry
+                ) else { return nil }
+                return (entry, score)
+            }
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score < rhs.score }
+                return lhs.entry.sortOrder < rhs.entry.sortOrder
+            }
+            .map(\.entry.item)
+    }
+
+    private static func sortItems(_ lhs: DeckWordSearchItem, _ rhs: DeckWordSearchItem) -> Bool {
+        let lemmaOrder = lhs.card.lemma.localizedCaseInsensitiveCompare(rhs.card.lemma)
+        if lemmaOrder != .orderedSame {
+            return lemmaOrder == .orderedAscending
+        }
+
+        let wordOrder = lhs.card.word.localizedCaseInsensitiveCompare(rhs.card.word)
+        if wordOrder != .orderedSame {
+            return wordOrder == .orderedAscending
+        }
+
+        let deckOrder = lhs.deckTitle.localizedCaseInsensitiveCompare(rhs.deckTitle)
+        if deckOrder != .orderedSame {
+            return deckOrder == .orderedAscending
+        }
+
+        return lhs.card.translation.localizedCaseInsensitiveCompare(rhs.card.translation) == .orderedAscending
+    }
+
+    private static func candidates(for item: DeckWordSearchItem) -> [Candidate] {
+        [item.card.word, item.card.lemma]
+            .flatMap { text in [text] + text.split(separator: " ").map(String.init) }
+            .map { text in
+                Candidate(original: text, normalized: text.normalizedForWordSearch)
+            }
+            .filter { !$0.normalized.isEmpty }
+    }
+
+    private static func searchScore(query: String, normalizedQuery: String, entry: Entry) -> Int? {
+        var bestScore: Int?
+        for candidate in entry.candidates {
+            let score: Int?
+            if candidate.normalized == normalizedQuery {
+                score = 0
+            } else if candidate.normalized.hasPrefix(normalizedQuery) {
+                score = 1
+            } else if candidate.normalized.contains(normalizedQuery) || candidate.original.localizedStandardRange(of: query) != nil {
+                score = 2
+            } else {
+                score = fuzzyScore(query: normalizedQuery, candidate: candidate.normalized)
+            }
+
+            if let score, bestScore == nil || score < bestScore! {
+                bestScore = score
+            }
+        }
+        return bestScore
+    }
+
+    private static func fuzzyScore(query: String, candidate: String) -> Int? {
+        guard query.count >= 3 else { return nil }
+        let maxDistance = allowedTypoDistance(for: query.count)
+        guard abs(candidate.count - query.count) <= maxDistance + 1 else { return nil }
+
+        let distance = levenshteinDistance(query, candidate, maximumDistance: maxDistance)
+        guard distance <= maxDistance else { return nil }
+        return 10 + distance
+    }
+
+    private static func allowedTypoDistance(for length: Int) -> Int {
+        if length <= 4 { return 1 }
+        if length <= 8 { return 2 }
+        return 3
+    }
+
+    private static func levenshteinDistance(_ lhs: String, _ rhs: String, maximumDistance: Int) -> Int {
+        let lhsCharacters = Array(lhs)
+        let rhsCharacters = Array(rhs)
+        guard !lhsCharacters.isEmpty else { return rhsCharacters.count }
+        guard !rhsCharacters.isEmpty else { return lhsCharacters.count }
+
+        var previous = Array(0...rhsCharacters.count)
+        var current = Array(repeating: 0, count: rhsCharacters.count + 1)
+
+        for lhsIndex in 1...lhsCharacters.count {
+            current[0] = lhsIndex
+            var rowMinimum = current[0]
+
+            for rhsIndex in 1...rhsCharacters.count {
+                let substitutionCost = lhsCharacters[lhsIndex - 1] == rhsCharacters[rhsIndex - 1] ? 0 : 1
+                current[rhsIndex] = min(
+                    previous[rhsIndex] + 1,
+                    current[rhsIndex - 1] + 1,
+                    previous[rhsIndex - 1] + substitutionCost
+                )
+                rowMinimum = min(rowMinimum, current[rhsIndex])
+            }
+
+            if rowMinimum > maximumDistance {
+                return maximumDistance + 1
+            }
+
+            swap(&previous, &current)
+        }
+
+        return previous[rhsCharacters.count]
+    }
+}
+
+private struct DeckSearchWordRow: View {
+    enum Position: Equatable {
+        case single
+        case top
+        case middle
+        case bottom
+
+        var hasSeparator: Bool {
+            self == .top || self == .middle
+        }
+
+        var cornerRadii: RectangleCornerRadii {
+            let radius: CGFloat = 20
+            switch self {
+            case .single:
+                return RectangleCornerRadii(
+                    topLeading: radius,
+                    bottomLeading: radius,
+                    bottomTrailing: radius,
+                    topTrailing: radius
+                )
+            case .top:
+                return RectangleCornerRadii(topLeading: radius, topTrailing: radius)
+            case .middle:
+                return RectangleCornerRadii()
+            case .bottom:
+                return RectangleCornerRadii(bottomLeading: radius, bottomTrailing: radius)
+            }
+        }
+    }
+
+    let item: DeckWordSearchItem
+    let position: Position
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(item.card.word)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(LovableSurface.foreground)
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                Text(item.deckTitle)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(LovableSurface.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            Text(item.card.translation)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(LovableSurface.muted)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            oklch(0.998, 0.002, 240),
+            in: UnevenRoundedRectangle(cornerRadii: position.cornerRadii, style: .continuous)
+        )
+        .overlay {
+            UnevenRoundedRectangle(cornerRadii: position.cornerRadii, style: .continuous)
+                .stroke(.black.opacity(0.05), lineWidth: 0.5)
+        }
+        .overlay(alignment: .bottom) {
+            if position.hasSeparator {
+                Rectangle()
+                    .fill(.black.opacity(0.08))
+                    .frame(height: 0.5)
+                    .padding(.leading, 16)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private extension String {
+    var normalizedForWordSearch: String {
+        folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .lowercased()
     }
 }
 
