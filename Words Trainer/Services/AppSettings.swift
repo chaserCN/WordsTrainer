@@ -54,6 +54,7 @@ final class AppSettings {
             soundVolume = legacySoundEnabled ? Self.defaultSoundVolume : 0
         }
         isPaceBarEnabled = defaults.object(forKey: Keys.paceBarEnabled) as? Bool ?? true
+        WordAudioPlayer.shared.applyVolume(soundVolume)
     }
 
     private static func clampedVolume(_ value: Double) -> Double {

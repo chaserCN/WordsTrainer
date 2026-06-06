@@ -14,9 +14,11 @@ final class WordAudioPlayer {
     private let timePitch = AVAudioUnitTimePitch()
     private let speechSynthesizer = AVSpeechSynthesizer()
     private var effectPlayer: AVAudioPlayer?
+    private var currentVolume: Float = 0.75
 
     private static let wrongPitchCents: Float = -500
     private static let wrongSpeechPitchMultiplier: Float = 0.72
+    private static let effectVolumeMultiplier: Float = 0.45
 
     private init() {}
 
@@ -48,7 +50,7 @@ final class WordAudioPlayer {
         configureAudioSession()
         do {
             let player = try AVAudioPlayer(contentsOf: url)
-            player.volume = outputVolume
+            player.volume = effectOutputVolume
             effectPlayer = player
             player.play()
         } catch {
@@ -58,9 +60,10 @@ final class WordAudioPlayer {
 
     func applyVolume(_ volume: Double) {
         let value = Float(min(max(volume, 0), 1))
+        currentVolume = value
         playerNode.volume = value
         engine.mainMixerNode.outputVolume = value
-        effectPlayer?.volume = value
+        effectPlayer?.volume = effectOutputVolume
     }
 
     func stop() {
@@ -70,6 +73,8 @@ final class WordAudioPlayer {
         }
         engine.reset()
         speechSynthesizer.stopSpeaking(at: .immediate)
+        effectPlayer?.stop()
+        effectPlayer = nil
     }
 
     private func playFile(at url: URL, pitchCents: Float) {
@@ -128,6 +133,10 @@ final class WordAudioPlayer {
     }
 
     private var outputVolume: Float {
-        Float(min(max(AppSettings.shared.soundVolume, 0), 1))
+        currentVolume
+    }
+
+    private var effectOutputVolume: Float {
+        outputVolume * Self.effectVolumeMultiplier
     }
 }
