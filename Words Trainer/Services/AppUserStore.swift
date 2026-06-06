@@ -162,6 +162,9 @@ final class AppUserStore {
                     bootstrapDeviceID = deviceID
                     bootstrapSinceRevision = try database.serverRevision()
                     cachedDeckVersionIDs = try database.cachedDeckVersionIDs()
+                    Self.logger.info(
+                        "bootstrap state selectedUserID=\(targetUserID.uuidString, privacy: .public) sinceRevision=\(bootstrapSinceRevision, privacy: .public) cachedDeckVersions=\(cachedDeckVersionIDs.count, privacy: .public) deviceID=\(deviceID.databaseString, privacy: .public)"
+                    )
                     updateSyncProgress(.uploadingChanges, taskID: taskID)
                     try await uploadPendingEvents(
                         database: database,
@@ -186,6 +189,7 @@ final class AppUserStore {
                 sinceRevision: bootstrapSinceRevision,
                 deviceID: bootstrapDeviceID
             )
+            Self.logger.info("bootstrap response serverRevision=\(bootstrap.serverRevision ?? "nil", privacy: .public)")
             guard isCurrentRefreshTask(taskID) else { return .cancelled }
             let serverUsers = bootstrap.users.map(\.appUser)
             Self.logger.info("bootstrap loaded users=\(serverUsers.count, privacy: .public) assignments=\(bootstrap.assignments.count, privacy: .public)")
@@ -209,6 +213,8 @@ final class AppUserStore {
                     selectedUserID: resolvedUserID,
                     progressSnapshotIsComplete: bootstrapDeviceID == nil && bootstrapSinceRevision == "0"
                 )
+                let importedServerRevision = try database.serverRevision()
+                Self.logger.info("bootstrap imported localServerRevision=\(importedServerRevision, privacy: .public)")
                 let mediaFailureCount = try await cacheMedia(from: bootstrap, database: database, taskID: taskID)
                 try applyCachedUserAvatarURLs(from: bootstrap)
                 guard isCurrentRefreshTask(taskID) else { return .cancelled }
@@ -294,8 +300,12 @@ final class AppUserStore {
         while true {
             let batch = try database.pendingServerSyncBatch()
             guard !batch.isEmpty else { return }
-            _ = try await syncClient.uploadEvents(batch.payload, selectedUserID: selectedUserID, deviceID: deviceID)
+            let response = try await syncClient.uploadEvents(batch.payload, selectedUserID: selectedUserID, deviceID: deviceID)
             try database.markServerSyncBatchUploaded(batch)
+            if let serverRevision = response.serverRevision {
+                try database.setServerRevision(serverRevision)
+                Self.logger.info("uploaded pending events serverRevision=\(serverRevision, privacy: .public)")
+            }
         }
     }
 

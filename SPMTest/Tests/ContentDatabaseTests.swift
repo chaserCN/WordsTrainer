@@ -1071,6 +1071,52 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("bootstrap server revision is readable after reopening database")
+    func bootstrapServerRevisionIsReadableAfterReopeningDatabase() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            AppDataPaths.dataDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        AppDataPaths.dataDirectoryOverride = root
+        let database = try ContentDatabase(userID: userID)
+        try database.importServerBootstrap(
+            bootstrap(serverRevision: "123"),
+            selectedUserID: userID
+        )
+        #expect(try database.serverRevision() == "123")
+
+        let reopenedDatabase = try ContentDatabase(userID: userID)
+        #expect(try reopenedDatabase.serverRevision() == "123")
+    }
+
+    @Test("concurrent database opens serialize setup")
+    func concurrentDatabaseOpensSerializeSetup() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)
+        let testUserID = userID
+        defer {
+            AppDataPaths.dataDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        AppDataPaths.dataDirectoryOverride = root
+        try await withThrowingTaskGroup(of: Int.self) { group in
+            for _ in 0..<6 {
+                group.addTask {
+                    let database = try ContentDatabase(userID: testUserID)
+                    return try database.loadDecks().count
+                }
+            }
+
+            for try await deckCount in group {
+                #expect(deckCount == 0)
+            }
+        }
+    }
+
     private func withIsolatedDatabase(_ operation: (ContentDatabase) throws -> Void) throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)
@@ -1100,7 +1146,8 @@ struct ContentDatabaseTests {
         media: [String] = [],
         userEnabled: Bool = true,
         preferenceUpdatedAt: String? = nil,
-        legacyAssignmentVersionID: UUID? = nil
+        legacyAssignmentVersionID: UUID? = nil,
+        serverRevision: String? = nil
     ) throws -> ServerBootstrap {
         let cardImageMediaValue = cardImageMediaID.map { #"""# + $0.databaseString + #"""# } ?? "null"
         let audioWordMediaValue = audioWordMediaID.map { #"""# + $0.databaseString + #"""# } ?? "null"
@@ -1206,6 +1253,7 @@ struct ContentDatabaseTests {
           "practice_reviews": [\(practiceReviews.joined(separator: ","))],
           "matching_attempts": [\(matchingAttempts.joined(separator: ","))],
           \(dailyUsage.map { #""daily_usage": ["# + $0.joined(separator: ",") + #"],"# } ?? "")
+          \(serverRevision.map { #""serverRevision": ""# + $0 + #"","# } ?? "")
           "matching_records": []
         }
         """

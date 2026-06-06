@@ -13,6 +13,8 @@ nonisolated private enum SyncMetadataKey {
     static let deviceID = "device_id"
 }
 
+nonisolated private let contentDatabaseSetupLock = NSLock()
+
 nonisolated private enum WeakCardFilter {
     static let minimumFailureRate = 0.25
 }
@@ -82,6 +84,9 @@ nonisolated final class ContentDatabase {
         guard sqlite3_open(path, &db) == SQLITE_OK, db != nil else {
             throw ContentDatabaseError.openFailed
         }
+        sqlite3_busy_timeout(db, 5_000)
+        contentDatabaseSetupLock.lock()
+        defer { contentDatabaseSetupLock.unlock() }
         try executeMigrations()
         try normalizeUUIDColumns()
         try AppDataPaths.normalizeDeckMediaFolders()
