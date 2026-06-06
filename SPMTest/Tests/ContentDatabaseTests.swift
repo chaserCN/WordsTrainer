@@ -39,81 +39,6 @@ struct ContentDatabaseTests {
         }
     }
 
-    @Test("server daily usage snapshot replaces locally rebuilt usage")
-    func serverDailyUsageSnapshotReplacesLocallyRebuiltUsage() throws {
-        try withIsolatedDatabase { database in
-            let reviewID = UUID(uuidString: "55555555-5555-4555-8555-555555555555")!
-            let reviewedAt = "2026-06-02T12:00:00.000Z"
-            try database.importServerBootstrap(
-                bootstrap(
-                    reviews: [
-                        reviewJSON(id: reviewID, outcome: "remembered", reviewedAt: reviewedAt, wasNew: true),
-                    ]
-                ),
-                selectedUserID: userID
-            )
-            let reviewedDate = try #require(Self.isoDate(reviewedAt))
-            #expect(
-                try database.dailyUsage(deckID: deckID, dayKey: DeckDailyUsage.dayKey(for: reviewedDate))?.newCardsStudied == 1
-            )
-
-            try database.importServerBootstrap(
-                bootstrap(
-                    dailyUsage: [
-                        dailyUsageJSON(dayKey: "2026-06-02", newCardsStudied: 4),
-                    ]
-                ),
-                selectedUserID: userID
-            )
-
-            let dailyUsage = try database.dailyUsage(deckID: deckID, dayKey: "2026-06-02")
-            let usage = try #require(dailyUsage)
-            #expect(usage.newCardsStudied == 4)
-        }
-    }
-
-    @Test("server daily usage snapshot keeps unsynced local reviews counted")
-    func serverDailyUsageSnapshotKeepsUnsyncedLocalReviewsCounted() throws {
-        try withIsolatedDatabase { database in
-            try database.importServerBootstrap(
-                bootstrap(
-                    dailyUsage: [
-                        dailyUsageJSON(dayKey: "2026-06-02", newCardsStudied: 2),
-                    ]
-                ),
-                selectedUserID: userID
-            )
-            let reviewedAt = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
-            try database.saveStudyReview(
-                StudyReviewEvent(
-                    id: UUID(uuidString: "77777777-7777-4777-8777-777777777777")!,
-                    cardID: cardID,
-                    deckID: deckID,
-                    mode: .flashcards,
-                    outcome: .remembered,
-                    reviewedAt: reviewedAt,
-                    durationMS: 1000,
-                    wasNew: true,
-                    previousState: "new",
-                    newState: "review"
-                )
-            )
-
-            try database.importServerBootstrap(
-                bootstrap(
-                    dailyUsage: [
-                        dailyUsageJSON(dayKey: "2026-06-02", newCardsStudied: 2),
-                    ]
-                ),
-                selectedUserID: userID
-            )
-
-            let dailyUsage = try database.dailyUsage(deckID: deckID, dayKey: "2026-06-02")
-            let usage = try #require(dailyUsage)
-            #expect(usage.newCardsStudied == 3)
-        }
-    }
-
     @Test("reviewed card IDs return cards reviewed during requested day")
     func reviewedCardIDsReturnCardsReviewedDuringRequestedDay() throws {
         try withIsolatedDatabase { database in
@@ -167,27 +92,15 @@ struct ContentDatabaseTests {
         }
     }
 
-    @Test("empty server daily usage snapshot clears synced local usage")
-    func emptyServerDailyUsageSnapshotClearsSyncedLocalUsage() throws {
+    @Test("derived daily usage rebuild clears stale local usage")
+    func derivedDailyUsageRebuildClearsStaleLocalUsage() throws {
         try withIsolatedDatabase { database in
-            let reviewID = UUID(uuidString: "55555555-5555-4555-8555-555555555555")!
-            try database.importServerBootstrap(
-                bootstrap(
-                    reviews: [
-                        reviewJSON(
-                            id: reviewID,
-                            outcome: "remembered",
-                            reviewedAt: "2026-06-02T12:00:00.000Z",
-                            wasNew: true
-                        ),
-                    ]
-                ),
-                selectedUserID: userID
-            )
-            #expect(try database.dailyUsage(deckID: deckID, dayKey: "2026-06-02")?.newCardsStudied == 1)
+            try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
+            try database.saveDailyUsage(deckID: deckID, usage: DeckDailyUsage(dayKey: "2026-06-02", newCardsStudied: 4))
+            #expect(try database.dailyUsage(deckID: deckID, dayKey: "2026-06-02")?.newCardsStudied == 4)
 
             try database.importServerBootstrap(
-                bootstrap(dailyUsage: []),
+                bootstrap(),
                 selectedUserID: userID
             )
 
@@ -1439,7 +1352,6 @@ struct ContentDatabaseTests {
         studyDataResets: [String] = [],
         matchingRecords: [String] = [],
         matchingAttempts: [String] = [],
-        dailyUsage: [String]? = nil,
         includeAssignment: Bool = true,
         assignmentStatus: String = "active",
         includeContent: Bool = true,
@@ -1549,17 +1461,18 @@ struct ContentDatabaseTests {
               "avatar_media_id": null
             }
           ],
-          "assignments": \(assignmentsJSON),
-          "content": \(contentJSON),
-          "media": [\(media.joined(separator: ","))],
-          "progress": [\(progress.joined(separator: ","))],
-          "reviews": [\(reviews.joined(separator: ","))],
-          "practice_reviews": [\(practiceReviews.joined(separator: ","))],
-          "study_data_resets": [\(studyDataResets.joined(separator: ","))],
-          "matching_attempts": [\(matchingAttempts.joined(separator: ","))],
-          \(dailyUsage.map { #""daily_usage": ["# + $0.joined(separator: ",") + #"],"# } ?? "")
-          \(serverRevision.map { #""serverRevision": ""# + $0 + #"","# } ?? "")
-          "matching_records": [\(matchingRecords.joined(separator: ","))]
+          \(serverRevision.map { #""revision": ""# + $0 + #"","# } ?? "")
+          "snapshot": {
+            "assignments": \(assignmentsJSON),
+            "content": \(contentJSON),
+            "media": [\(media.joined(separator: ","))],
+            "progress": [\(progress.joined(separator: ","))],
+            "reviews": [\(reviews.joined(separator: ","))],
+            "practice_reviews": [\(practiceReviews.joined(separator: ","))],
+            "study_data_resets": [\(studyDataResets.joined(separator: ","))],
+            "matching_attempts": [\(matchingAttempts.joined(separator: ","))],
+            "matching_records": [\(matchingRecords.joined(separator: ","))]
+          }
         }
         """
         let decoder = JSONDecoder()
@@ -1693,19 +1606,6 @@ struct ContentDatabaseTests {
           "due_at": "\(dueAt)",
           "state": "review",
           "updated_at": "\(updatedAt)"
-        }
-        """
-    }
-
-    private func dailyUsageJSON(
-        dayKey: String,
-        newCardsStudied: Int
-    ) -> String {
-        """
-        {
-          "deck_id": "\(deckID.databaseString)",
-          "day_key": "\(dayKey)",
-          "new_cards_studied": \(newCardsStudied)
         }
         """
     }

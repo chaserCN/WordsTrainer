@@ -4,7 +4,7 @@ import Testing
 
 @Suite(.serialized)
 struct ServerSyncClientTests {
-    @Test("bootstrap sends selected user, cached deck versions, timezone and auth headers")
+    @Test("bootstrap sends selected user, cached deck versions and auth headers")
     func bootstrapSendsSyncContractHeaders() async throws {
         let suiteName = "ServerSyncClientTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -33,17 +33,16 @@ struct ServerSyncClientTests {
         _ = try await client.bootstrap(
             selectedUserID: selectedUserID,
             cachedDeckVersionIDs: [cachedVersionA, cachedVersionB],
-            sinceRevision: "42",
             deviceID: deviceID
         )
 
         let request = try #require(captured.request)
-        #expect(request.url?.absoluteString == "https://example.test/root/v1/bootstrap?sinceRevision=42")
+        #expect(request.url?.absoluteString == "https://example.test/root/v1/bootstrap")
         #expect(request.httpMethod == "GET")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
         #expect(request.value(forHTTPHeaderField: "X-FlashGame-User-Id") == selectedUserID.databaseString)
         #expect(request.value(forHTTPHeaderField: "X-FlashGame-Device-Id") == deviceID.databaseString)
-        #expect(request.value(forHTTPHeaderField: "X-FlashGame-Time-Zone") == TimeZone.current.identifier)
+        #expect(request.value(forHTTPHeaderField: "X-FlashGame-Time-Zone") == nil)
         #expect(
             request.value(forHTTPHeaderField: "X-FlashGame-Cached-Deck-Version-Ids")
                 == "\(cachedVersionA.databaseString),\(cachedVersionB.databaseString)"
@@ -72,7 +71,7 @@ struct ServerSyncClientTests {
         defer { StubURLProtocol.handler = nil }
 
         let client = ServerSyncClient(session: Self.stubSession(), userDefaultsSuiteName: suiteName)
-        _ = try await client.bootstrap(selectedUserID: nil, sinceRevision: "0", deviceID: nil)
+        _ = try await client.bootstrap(selectedUserID: nil, deviceID: nil)
 
         let request = try #require(captured.request)
         #expect(request.value(forHTTPHeaderField: "X-FlashGame-User-Id") == nil)
@@ -101,7 +100,7 @@ struct ServerSyncClientTests {
 
         let client = ServerSyncClient(session: Self.stubSession(), userDefaultsSuiteName: suiteName)
         do {
-            _ = try await client.bootstrap(selectedUserID: nil, sinceRevision: "0", deviceID: nil)
+            _ = try await client.bootstrap(selectedUserID: nil, deviceID: nil)
             Issue.record("Expected bootstrap decode failure")
         } catch {
             #expect(error.localizedDescription.contains("bootstrap decode"))
@@ -134,16 +133,23 @@ struct ServerSyncClientTests {
             )!
             let json = """
             {
-              "acceptedReviewIds": [],
-              "duplicateReviewIds": [],
-              "progressCardIds": [],
-              "matchingRecordDeckIds": [],
-              "deckPreferenceDeckIds": [],
-              "rejectedReviewIds": ["\(rejectedReviewID.uuidString)"],
-              "rejectedProgressCardIds": ["\(cardID.uuidString)"],
-              "rejectedMatchingRecordDeckIds": ["\(rejectedMatchingDeckID.uuidString)"],
-              "rejectedDeckPreferenceDeckIds": ["\(rejectedPreferenceDeckID.uuidString)"],
-              "serverRevision": "42"
+              "mode": "events",
+              "accepted": {
+                "reviewIds": [],
+                "progressCardIds": [],
+                "matchingRecordDeckIds": [],
+                "deckPreferenceDeckIds": []
+              },
+              "duplicates": {
+                "reviewIds": []
+              },
+              "rejected": {
+                "reviewIds": ["\(rejectedReviewID.uuidString)"],
+                "progressCardIds": ["\(cardID.uuidString)"],
+                "matchingRecordDeckIds": ["\(rejectedMatchingDeckID.uuidString)"],
+                "deckPreferenceDeckIds": ["\(rejectedPreferenceDeckID.uuidString)"]
+              },
+              "toRevision": "42"
             }
             """
             return (response, Data(json.utf8))
@@ -190,19 +196,21 @@ struct ServerSyncClientTests {
     private static let bootstrapJSON = """
     {
       "user": null,
+      "revision": "0",
       "users": [],
-      "assignments": [],
-      "content": {
-        "cards": [],
-        "examples": [],
-        "forms": [],
-        "distractors": []
-      },
-      "media": [],
-      "progress": [],
-      "reviews": [],
-      "matching_records": [],
-      "daily_usage": []
+      "snapshot": {
+        "assignments": [],
+        "content": {
+          "cards": [],
+          "examples": [],
+          "forms": [],
+          "distractors": []
+        },
+        "media": [],
+        "progress": [],
+        "reviews": [],
+        "matching_records": []
+      }
     }
     """
 }

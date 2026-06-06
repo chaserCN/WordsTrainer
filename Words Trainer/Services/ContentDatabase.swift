@@ -240,13 +240,56 @@ nonisolated final class ContentDatabase {
             try upsertServerPracticeReviews(bootstrap.practiceReviews, selectedUserID: selectedUserID)
             try upsertServerMatchingRecords(bootstrap.matchingRecords, selectedUserID: selectedUserID)
             try upsertServerMatchingAttempts(bootstrap.matchingAttempts, selectedUserID: selectedUserID)
-            if bootstrap.hasDailyUsageSnapshot {
-                try replaceServerDailyUsage(bootstrap.dailyUsage, selectedUserID: selectedUserID)
-                try mergeUnsyncedDailyUsageFromLocalReviews(selectedUserID: selectedUserID)
-            } else {
-                try rebuildDerivedStats(selectedUserID: selectedUserID)
-            }
+            try rebuildDerivedStats(selectedUserID: selectedUserID)
             if let serverRevision = bootstrap.serverRevision {
+                try setServerRevision(serverRevision)
+            }
+            try commitTransaction()
+            try cleanupUnusedContentCache()
+        } catch {
+            try? rollbackTransaction()
+            throw error
+        }
+    }
+
+    func importServerChanges(_ changes: ServerSyncChanges, selectedUserID: UUID) throws {
+        let versionDeckIDs = Dictionary(
+            uniqueKeysWithValues: changes.assignments.compactMap { assignment -> (UUID, UUID)? in
+                let versionID = assignment.currentVersionId
+                guard let versionID else { return nil }
+                return (versionID, assignment.deckId)
+            }
+        )
+        let importedContentVersionIDs = Set(
+            changes.content.cards.map(\.deckVersionId)
+                + changes.content.examples.map(\.deckVersionId)
+                + changes.content.forms.map(\.deckVersionId)
+                + changes.content.distractors.map(\.deckVersionId)
+        )
+        let decksWithImportedContent = Set(importedContentVersionIDs.compactMap { versionDeckIDs[$0] })
+
+        try beginTransaction()
+        do {
+            try upsertAssignments(changes.assignments, selectedUserID: selectedUserID)
+            try upsertMediaObjects(changes.media)
+            for deckID in decksWithImportedContent {
+                try deleteDeckContent(deckID: deckID)
+            }
+            try upsertDecks(changes.assignments)
+            try upsertServerDeckPreferences(changes.assignments, selectedUserID: selectedUserID)
+            try upsertCards(changes.content.cards, versionDeckIDs: versionDeckIDs)
+            try upsertExamples(changes.content.examples)
+            try upsertForms(changes.content.forms)
+            try upsertDistractors(changes.content.distractors)
+            try markContentVersionsImported(importedContentVersionIDs, versionDeckIDs: versionDeckIDs)
+            try applyStudyDataResets(changes.studyDataResets, selectedUserID: selectedUserID)
+            try upsertServerProgress(changes.progress)
+            try upsertServerReviews(changes.reviews, selectedUserID: selectedUserID)
+            try upsertServerPracticeReviews(changes.practiceReviews, selectedUserID: selectedUserID)
+            try upsertServerMatchingRecords(changes.matchingRecords, selectedUserID: selectedUserID)
+            try upsertServerMatchingAttempts(changes.matchingAttempts, selectedUserID: selectedUserID)
+            try rebuildDerivedStats(selectedUserID: selectedUserID)
+            if let serverRevision = changes.serverRevision {
                 try setServerRevision(serverRevision)
             }
             try commitTransaction()
@@ -1494,6 +1537,10 @@ nonisolated final class ContentDatabase {
 
     private func replaceAssignments(_ assignments: [ServerDeckAssignment], selectedUserID: UUID) throws {
         try exec("DELETE FROM user_deck_assignments WHERE user_id = ?", uuid: selectedUserID)
+        try upsertAssignments(assignments, selectedUserID: selectedUserID)
+    }
+
+    private func upsertAssignments(_ assignments: [ServerDeckAssignment], selectedUserID: UUID) throws {
         for assignment in assignments where assignment.userId == selectedUserID {
             let sql = """
             INSERT INTO user_deck_assignments (user_id, deck_id, status)
@@ -2201,57 +2248,6 @@ nonisolated final class ContentDatabase {
         WHERE user_id = ?
         GROUP BY user_id, deck_id, day_key
         HAVING new_cards_studied > 0
-        """
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw ContentDatabaseError.queryFailed
-        }
-        defer { sqlite3_finalize(statement) }
-        try bind(statement, index: 1, uuid: selectedUserID)
-        guard sqlite3_step(statement) == SQLITE_DONE else {
-            throw ContentDatabaseError.queryFailed
-        }
-    }
-
-    private func replaceServerDailyUsage(_ dailyUsage: [ServerDailyUsagePayload], selectedUserID: UUID) throws {
-        try exec("DELETE FROM deck_daily_usage WHERE user_id = ?", uuid: selectedUserID)
-
-        for usage in dailyUsage {
-            let sql = """
-            INSERT INTO deck_daily_usage (user_id, deck_id, day_key, new_cards_studied)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(user_id, deck_id, day_key) DO UPDATE SET
-                new_cards_studied = excluded.new_cards_studied
-            """
-            var statement: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-                throw ContentDatabaseError.queryFailed
-            }
-            defer { sqlite3_finalize(statement) }
-            try bind(statement, index: 1, uuid: selectedUserID)
-            try bind(statement, index: 2, uuid: usage.deckId)
-            try bind(statement, index: 3, text: usage.dayKey)
-            guard sqlite3_bind_int(statement, 4, Int32(usage.newCardsStudied)) == SQLITE_OK,
-                  sqlite3_step(statement) == SQLITE_DONE else {
-                throw ContentDatabaseError.queryFailed
-            }
-        }
-    }
-
-    private func mergeUnsyncedDailyUsageFromLocalReviews(selectedUserID: UUID) throws {
-        let sql = """
-        INSERT INTO deck_daily_usage (user_id, deck_id, day_key, new_cards_studied)
-        SELECT
-            user_id,
-            deck_id,
-            strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime', '-4 hours') AS day_key,
-            SUM(CASE WHEN was_new = 1 AND outcome IN ('remembered', 'correct') THEN 1 ELSE 0 END) AS new_cards_studied
-        FROM study_reviews
-        WHERE user_id = ? AND synced_at IS NULL
-        GROUP BY user_id, deck_id, day_key
-        HAVING new_cards_studied > 0
-        ON CONFLICT(user_id, deck_id, day_key) DO UPDATE SET
-            new_cards_studied = deck_daily_usage.new_cards_studied + excluded.new_cards_studied
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {

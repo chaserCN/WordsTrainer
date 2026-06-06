@@ -153,18 +153,22 @@ final class AppUserStore {
         syncStatus = .syncing(userID: targetUserID, startedAt: startedAt)
         do {
             var cachedDeckVersionIDs: [UUID] = []
-            var bootstrapSinceRevision = "0"
             var bootstrapDeviceID: UUID?
             var preBootstrapUploadSucceeded = true
+            var localServerRevision = "0"
+            var canUseChanges = false
             if let targetUserID {
                 do {
                     let database = try ContentDatabase(userID: targetUserID)
                     let deviceID = try database.deviceID()
                     bootstrapDeviceID = deviceID
-                    bootstrapSinceRevision = try database.serverRevision()
+                    localServerRevision = try database.serverRevision()
+                    canUseChanges = try database.hasCompletedInitialSync()
+                        && localServerRevision != "0"
+                        && !users.isEmpty
                     cachedDeckVersionIDs = try database.cachedDeckVersionIDs()
                     Self.logger.info(
-                        "bootstrap state selectedUserID=\(targetUserID.uuidString, privacy: .public) sinceRevision=\(bootstrapSinceRevision, privacy: .public) cachedDeckVersions=\(cachedDeckVersionIDs.count, privacy: .public) deviceID=\(deviceID.databaseString, privacy: .public)"
+                        "sync state selectedUserID=\(targetUserID.uuidString, privacy: .public) revision=\(localServerRevision, privacy: .public) cachedDeckVersions=\(cachedDeckVersionIDs.count, privacy: .public) deviceID=\(deviceID.databaseString, privacy: .public)"
                     )
                     updateSyncProgress(.uploadingChanges, taskID: taskID)
                     try await uploadPendingEvents(
@@ -185,10 +189,34 @@ final class AppUserStore {
             }
 
             updateSyncProgress(.loadingData, taskID: taskID)
+            if let targetUserID, canUseChanges, let bootstrapDeviceID {
+                let changes = try await syncClient.changes(
+                    selectedUserID: targetUserID,
+                    sinceRevision: localServerRevision,
+                    cachedDeckVersionIDs: cachedDeckVersionIDs,
+                    deviceID: bootstrapDeviceID
+                )
+                Self.logger.info("changes response serverRevision=\(changes.serverRevision ?? "nil", privacy: .public)")
+                guard isCurrentRefreshTask(taskID) else { return .cancelled }
+                let database = try ContentDatabase(userID: targetUserID)
+                updateSyncProgress(.savingData, taskID: taskID)
+                try database.importServerChanges(changes, selectedUserID: targetUserID)
+                let importedServerRevision = try database.serverRevision()
+                Self.logger.info("changes imported localServerRevision=\(importedServerRevision, privacy: .public)")
+                guard isCurrentRefreshTask(taskID) else { return .cancelled }
+                bootstrapState = .loaded
+                let assignmentCount = changes.assignments.count
+                return finishSync(
+                    .loaded(userCount: users.count, assignmentCount: assignmentCount, activeAssignmentCount: assignmentCount),
+                    userID: targetUserID,
+                    startedAt: startedAt,
+                    taskID: taskID
+                )
+            }
+
             let bootstrap = try await syncClient.bootstrap(
                 selectedUserID: targetUserID,
                 cachedDeckVersionIDs: cachedDeckVersionIDs,
-                sinceRevision: bootstrapSinceRevision,
                 deviceID: bootstrapDeviceID
             )
             Self.logger.info("bootstrap response serverRevision=\(bootstrap.serverRevision ?? "nil", privacy: .public)")
@@ -216,7 +244,6 @@ final class AppUserStore {
                     selectedUserID: resolvedUserID,
                     progressSnapshotIsComplete: preBootstrapUploadSucceeded
                         && !hasCompletedInitialSync
-                        && bootstrapSinceRevision == "0"
                 )
                 try database.markInitialSyncCompleted()
                 let importedServerRevision = try database.serverRevision()

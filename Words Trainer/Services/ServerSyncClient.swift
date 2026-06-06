@@ -13,8 +13,6 @@ struct ServerBootstrap: Decodable, Sendable {
     let studyDataResets: [ServerStudyDataResetPayload]
     let matchingRecords: [ServerMatchingRecordPayload]
     let matchingAttempts: [ServerMatchingAttemptPayload]
-    let dailyUsage: [ServerDailyUsagePayload]
-    let hasDailyUsageSnapshot: Bool
     let serverRevision: String?
 
     init(
@@ -29,8 +27,6 @@ struct ServerBootstrap: Decodable, Sendable {
         studyDataResets: [ServerStudyDataResetPayload] = [],
         matchingRecords: [ServerMatchingRecordPayload],
         matchingAttempts: [ServerMatchingAttemptPayload] = [],
-        dailyUsage: [ServerDailyUsagePayload] = [],
-        hasDailyUsageSnapshot: Bool = true,
         serverRevision: String? = nil
     ) {
         self.user = user
@@ -44,14 +40,17 @@ struct ServerBootstrap: Decodable, Sendable {
         self.studyDataResets = studyDataResets
         self.matchingRecords = matchingRecords
         self.matchingAttempts = matchingAttempts
-        self.dailyUsage = dailyUsage
-        self.hasDailyUsageSnapshot = hasDailyUsageSnapshot
         self.serverRevision = serverRevision
     }
 
     private enum CodingKeys: String, CodingKey {
+        case revision
         case user
         case users
+        case snapshot
+    }
+
+    private enum SnapshotKeys: String, CodingKey {
         case assignments
         case content
         case media
@@ -61,26 +60,68 @@ struct ServerBootstrap: Decodable, Sendable {
         case studyDataResets
         case matchingRecords
         case matchingAttempts
-        case dailyUsage
-        case serverRevision
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let snapshot = try container.nestedContainer(keyedBy: SnapshotKeys.self, forKey: .snapshot)
         user = try container.decodeIfPresent(ServerUser.self, forKey: .user)
         users = try container.decodeIfPresent([ServerUser].self, forKey: .users) ?? []
-        assignments = try container.decodeIfPresent([ServerDeckAssignment].self, forKey: .assignments) ?? []
-        content = try container.decodeIfPresent(ServerContentPayload.self, forKey: .content) ?? .empty
-        media = try container.decodeIfPresent([ServerMediaObject].self, forKey: .media) ?? []
-        progress = try container.decodeIfPresent([ServerProgressPayload].self, forKey: .progress) ?? []
-        reviews = try container.decodeIfPresent([ServerReviewEventPayload].self, forKey: .reviews) ?? []
-        practiceReviews = try container.decodeIfPresent([ServerPracticeReviewPayload].self, forKey: .practiceReviews) ?? []
-        studyDataResets = try container.decodeIfPresent([ServerStudyDataResetPayload].self, forKey: .studyDataResets) ?? []
-        matchingRecords = try container.decodeIfPresent([ServerMatchingRecordPayload].self, forKey: .matchingRecords) ?? []
-        matchingAttempts = try container.decodeIfPresent([ServerMatchingAttemptPayload].self, forKey: .matchingAttempts) ?? []
-        dailyUsage = try container.decodeIfPresent([ServerDailyUsagePayload].self, forKey: .dailyUsage) ?? []
-        hasDailyUsageSnapshot = container.contains(.dailyUsage)
-        serverRevision = try container.decodeIfPresent(String.self, forKey: .serverRevision)
+        assignments = try snapshot.decodeIfPresent([ServerDeckAssignment].self, forKey: .assignments) ?? []
+        content = try snapshot.decodeIfPresent(ServerContentPayload.self, forKey: .content) ?? .empty
+        media = try snapshot.decodeIfPresent([ServerMediaObject].self, forKey: .media) ?? []
+        progress = try snapshot.decodeIfPresent([ServerProgressPayload].self, forKey: .progress) ?? []
+        reviews = try snapshot.decodeIfPresent([ServerReviewEventPayload].self, forKey: .reviews) ?? []
+        practiceReviews = try snapshot.decodeIfPresent([ServerPracticeReviewPayload].self, forKey: .practiceReviews) ?? []
+        studyDataResets = try snapshot.decodeIfPresent([ServerStudyDataResetPayload].self, forKey: .studyDataResets) ?? []
+        matchingRecords = try snapshot.decodeIfPresent([ServerMatchingRecordPayload].self, forKey: .matchingRecords) ?? []
+        matchingAttempts = try snapshot.decodeIfPresent([ServerMatchingAttemptPayload].self, forKey: .matchingAttempts) ?? []
+        serverRevision = try container.decodeIfPresent(String.self, forKey: .revision)
+    }
+}
+
+struct ServerSyncChanges: Decodable, Sendable {
+    let assignments: [ServerDeckAssignment]
+    let content: ServerContentPayload
+    let media: [ServerMediaObject]
+    let progress: [ServerProgressPayload]
+    let reviews: [ServerReviewEventPayload]
+    let practiceReviews: [ServerPracticeReviewPayload]
+    let studyDataResets: [ServerStudyDataResetPayload]
+    let matchingRecords: [ServerMatchingRecordPayload]
+    let matchingAttempts: [ServerMatchingAttemptPayload]
+    let serverRevision: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case changes
+        case toRevision
+    }
+
+    private enum ChangeKeys: String, CodingKey {
+        case assignments
+        case content
+        case media
+        case progress
+        case reviews
+        case practiceReviews
+        case studyDataResets
+        case matchingRecords
+        case matchingAttempts
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let changes = try container.nestedContainer(keyedBy: ChangeKeys.self, forKey: .changes)
+        assignments = try changes.decodeIfPresent([ServerDeckAssignment].self, forKey: .assignments) ?? []
+        content = try changes.decodeIfPresent(ServerContentPayload.self, forKey: .content) ?? .empty
+        media = try changes.decodeIfPresent([ServerMediaObject].self, forKey: .media) ?? []
+        progress = try changes.decodeIfPresent([ServerProgressPayload].self, forKey: .progress) ?? []
+        reviews = try changes.decodeIfPresent([ServerReviewEventPayload].self, forKey: .reviews) ?? []
+        practiceReviews = try changes.decodeIfPresent([ServerPracticeReviewPayload].self, forKey: .practiceReviews) ?? []
+        studyDataResets = try changes.decodeIfPresent([ServerStudyDataResetPayload].self, forKey: .studyDataResets) ?? []
+        matchingRecords = try changes.decodeIfPresent([ServerMatchingRecordPayload].self, forKey: .matchingRecords) ?? []
+        matchingAttempts = try changes.decodeIfPresent([ServerMatchingAttemptPayload].self, forKey: .matchingAttempts) ?? []
+        serverRevision = try container.decodeIfPresent(String.self, forKey: .toRevision)
     }
 }
 
@@ -336,12 +377,6 @@ struct ServerDeckPreferencePayload: Codable, Sendable {
     let updatedAt: String?
 }
 
-struct ServerDailyUsagePayload: Codable, Sendable {
-    let deckId: UUID
-    let dayKey: String
-    let newCardsStudied: Int
-}
-
 struct ServerStudyDataResetPayload: Codable, Sendable {
     let userId: UUID
     let deckId: UUID?
@@ -404,42 +439,42 @@ struct ServerSyncEventsResponse: Decodable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case acceptedReviewIds
-        case duplicateReviewIds
-        case acceptedPracticeReviewIds
-        case duplicatePracticeReviewIds
+        case accepted
+        case duplicates
+        case rejected
+        case toRevision
+    }
+
+    private enum GroupKeys: String, CodingKey {
+        case reviewIds
+        case practiceReviewIds
         case progressCardIds
         case matchingRecordDeckIds
-        case acceptedMatchingAttemptIds
-        case duplicateMatchingAttemptIds
+        case matchingAttemptIds
         case deckPreferenceDeckIds
-        case rejectedReviewIds
-        case rejectedPracticeReviewIds
-        case rejectedProgressCardIds
-        case rejectedMatchingRecordDeckIds
-        case rejectedMatchingAttemptIds
-        case rejectedDeckPreferenceDeckIds
-        case serverRevision
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        acceptedReviewIds = try container.decodeIfPresent([UUID].self, forKey: .acceptedReviewIds) ?? []
-        duplicateReviewIds = try container.decodeIfPresent([UUID].self, forKey: .duplicateReviewIds) ?? []
-        acceptedPracticeReviewIds = try container.decodeIfPresent([UUID].self, forKey: .acceptedPracticeReviewIds) ?? []
-        duplicatePracticeReviewIds = try container.decodeIfPresent([UUID].self, forKey: .duplicatePracticeReviewIds) ?? []
-        progressCardIds = try container.decodeIfPresent([UUID].self, forKey: .progressCardIds) ?? []
-        matchingRecordDeckIds = try container.decodeIfPresent([UUID].self, forKey: .matchingRecordDeckIds) ?? []
-        acceptedMatchingAttemptIds = try container.decodeIfPresent([UUID].self, forKey: .acceptedMatchingAttemptIds) ?? []
-        duplicateMatchingAttemptIds = try container.decodeIfPresent([UUID].self, forKey: .duplicateMatchingAttemptIds) ?? []
-        deckPreferenceDeckIds = try container.decodeIfPresent([UUID].self, forKey: .deckPreferenceDeckIds) ?? []
-        rejectedReviewIds = try container.decodeIfPresent([UUID].self, forKey: .rejectedReviewIds) ?? []
-        rejectedPracticeReviewIds = try container.decodeIfPresent([UUID].self, forKey: .rejectedPracticeReviewIds) ?? []
-        rejectedProgressCardIds = try container.decodeIfPresent([UUID].self, forKey: .rejectedProgressCardIds) ?? []
-        rejectedMatchingRecordDeckIds = try container.decodeIfPresent([UUID].self, forKey: .rejectedMatchingRecordDeckIds) ?? []
-        rejectedMatchingAttemptIds = try container.decodeIfPresent([UUID].self, forKey: .rejectedMatchingAttemptIds) ?? []
-        rejectedDeckPreferenceDeckIds = try container.decodeIfPresent([UUID].self, forKey: .rejectedDeckPreferenceDeckIds) ?? []
-        serverRevision = try container.decodeIfPresent(String.self, forKey: .serverRevision)
+        let accepted = try container.nestedContainer(keyedBy: GroupKeys.self, forKey: .accepted)
+        let duplicates = try container.nestedContainer(keyedBy: GroupKeys.self, forKey: .duplicates)
+        let rejected = try container.nestedContainer(keyedBy: GroupKeys.self, forKey: .rejected)
+        acceptedReviewIds = try accepted.decodeIfPresent([UUID].self, forKey: .reviewIds) ?? []
+        duplicateReviewIds = try duplicates.decodeIfPresent([UUID].self, forKey: .reviewIds) ?? []
+        acceptedPracticeReviewIds = try accepted.decodeIfPresent([UUID].self, forKey: .practiceReviewIds) ?? []
+        duplicatePracticeReviewIds = try duplicates.decodeIfPresent([UUID].self, forKey: .practiceReviewIds) ?? []
+        progressCardIds = try accepted.decodeIfPresent([UUID].self, forKey: .progressCardIds) ?? []
+        matchingRecordDeckIds = try accepted.decodeIfPresent([UUID].self, forKey: .matchingRecordDeckIds) ?? []
+        acceptedMatchingAttemptIds = try accepted.decodeIfPresent([UUID].self, forKey: .matchingAttemptIds) ?? []
+        duplicateMatchingAttemptIds = try duplicates.decodeIfPresent([UUID].self, forKey: .matchingAttemptIds) ?? []
+        deckPreferenceDeckIds = try accepted.decodeIfPresent([UUID].self, forKey: .deckPreferenceDeckIds) ?? []
+        rejectedReviewIds = try rejected.decodeIfPresent([UUID].self, forKey: .reviewIds) ?? []
+        rejectedPracticeReviewIds = try rejected.decodeIfPresent([UUID].self, forKey: .practiceReviewIds) ?? []
+        rejectedProgressCardIds = try rejected.decodeIfPresent([UUID].self, forKey: .progressCardIds) ?? []
+        rejectedMatchingRecordDeckIds = try rejected.decodeIfPresent([UUID].self, forKey: .matchingRecordDeckIds) ?? []
+        rejectedMatchingAttemptIds = try rejected.decodeIfPresent([UUID].self, forKey: .matchingAttemptIds) ?? []
+        rejectedDeckPreferenceDeckIds = try rejected.decodeIfPresent([UUID].self, forKey: .deckPreferenceDeckIds) ?? []
+        serverRevision = try container.decodeIfPresent(String.self, forKey: .toRevision)
     }
 }
 
@@ -640,19 +675,16 @@ struct ServerSyncClient: Sendable {
     func bootstrap(
         selectedUserID: UUID?,
         cachedDeckVersionIDs: [UUID] = [],
-        sinceRevision: String,
         deviceID: UUID?
     ) async throws -> ServerBootstrap {
-        var headers: [String: String] = [
-            "X-FlashGame-Time-Zone": TimeZone.current.identifier
-        ]
+        var headers: [String: String] = [:]
         if !cachedDeckVersionIDs.isEmpty {
             headers["X-FlashGame-Cached-Deck-Version-Ids"] = cachedDeckVersionIDs
                 .map { $0.uuidString.lowercased() }
                 .joined(separator: ",")
         }
         let data = try await data(
-            for: "bootstrap?sinceRevision=\(sinceRevision)",
+            for: "bootstrap",
             method: "GET",
             selectedUserID: selectedUserID,
             deviceID: deviceID,
@@ -665,6 +697,35 @@ struct ServerSyncClient: Sendable {
             return try decoder.decode(ServerBootstrap.self, from: data)
         } catch {
             throw ServerSyncError.invalidResponse("bootstrap decode: \(error.localizedDescription)")
+        }
+    }
+
+    func changes(
+        selectedUserID: UUID,
+        sinceRevision: String,
+        cachedDeckVersionIDs: [UUID] = [],
+        deviceID: UUID?
+    ) async throws -> ServerSyncChanges {
+        var headers: [String: String] = [:]
+        if !cachedDeckVersionIDs.isEmpty {
+            headers["X-FlashGame-Cached-Deck-Version-Ids"] = cachedDeckVersionIDs
+                .map { $0.uuidString.lowercased() }
+                .joined(separator: ",")
+        }
+        let data = try await data(
+            for: "sync/changes?sinceRevision=\(sinceRevision)",
+            method: "GET",
+            selectedUserID: selectedUserID,
+            deviceID: deviceID,
+            headers: headers
+        )
+
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        do {
+            return try decoder.decode(ServerSyncChanges.self, from: data)
+        } catch {
+            throw ServerSyncError.invalidResponse("sync/changes decode: \(error.localizedDescription)")
         }
     }
 
