@@ -1359,6 +1359,69 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("delta sync falls back to full bootstrap when delta revision is missing")
+    @MainActor
+    func deltaSyncFallsBackToFullBootstrapWhenDeltaRevisionIsMissing() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)
+        let suiteName = "AppUserStoreTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            AppDataPaths.dataDirectoryOverride = nil
+            StubAppUserStoreURLProtocol.handler = nil
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        AppDataPaths.dataDirectoryOverride = root
+        defaults.set("https://example.test", forKey: "server.baseURL")
+        defaults.set("test-token", forKey: "server.householdSyncToken")
+        let appUser = AppUser(id: userID, displayName: "Learner", avatarMediaID: nil, avatarImageURL: nil, accentHue: 42)
+        defaults.set(try JSONEncoder().encode([appUser]), forKey: "app.users")
+        defaults.set(userID.uuidString, forKey: "app.selectedUserID")
+
+        let database = try ContentDatabase(userID: userID)
+        try database.importServerBootstrap(bootstrap(serverRevision: "10"), selectedUserID: userID)
+        try database.markInitialSyncCompleted()
+
+        let captured = LockedRequests()
+        StubAppUserStoreURLProtocol.handler = { request in
+            captured.append(request)
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            switch request.url?.path {
+            case "/v1/sync/changes":
+                return (response, Data(Self.deltaWithoutRevisionJSON.utf8))
+            case "/v1/bootstrap":
+                return (response, Data(appUserStoreBootstrapJSON(revision: "11").utf8))
+            default:
+                Issue.record("Unexpected request path: \(request.url?.absoluteString ?? "nil")")
+                return (response, Data(Self.deltaWithoutRevisionJSON.utf8))
+            }
+        }
+
+        let store = AppUserStore(
+            defaults: defaults,
+            syncClient: ServerSyncClient(session: Self.stubAppUserStoreSession(), userDefaultsSuiteName: suiteName)
+        )
+        let result = await store.refreshFromServer()
+
+        #expect(result == .loaded(userCount: 1, assignmentCount: 0, activeAssignmentCount: 0))
+        let requests = captured.requests
+        #expect(requests.map(\.url?.path) == ["/v1/sync/changes", "/v1/bootstrap"])
+        let changesRequest = try #require(requests.first)
+        #expect(changesRequest.url?.query == "sinceRevision=10")
+        #expect(changesRequest.value(forHTTPHeaderField: "X-FlashGame-Cached-Deck-Version-Ids") == versionID.databaseString)
+        let bootstrapRequest = try #require(requests.last)
+        #expect(bootstrapRequest.value(forHTTPHeaderField: "X-FlashGame-Cached-Deck-Version-Ids") == nil)
+        #expect(try database.serverRevision() == "11")
+        #expect(try database.loadDecks().isEmpty)
+    }
+
     private func withIsolatedDatabase(_ operation: (ContentDatabase) throws -> Void) throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)
@@ -1381,6 +1444,71 @@ struct ContentDatabaseTests {
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
+    }
+
+    private func appUserStoreBootstrapJSON(revision: String) -> String {
+        return """
+        {
+          "user": {
+            "id": "\(userID.databaseString)",
+            "display_name": "Learner",
+            "avatar_media_id": null
+          },
+          "revision": "\(revision)",
+          "users": [
+            {
+              "id": "\(userID.databaseString)",
+              "display_name": "Learner",
+              "avatar_media_id": null
+            }
+          ],
+          "snapshot": {
+            "assignments": [],
+            "content": {
+              "cards": [],
+              "examples": [],
+              "forms": [],
+              "distractors": []
+            },
+            "media": [],
+            "progress": [],
+            "reviews": [],
+            "practice_reviews": [],
+            "study_data_resets": [],
+            "matching_records": [],
+            "matching_attempts": []
+          }
+        }
+        """
+    }
+
+    private static let deltaWithoutRevisionJSON = """
+    {
+      "mode": "delta",
+      "fromRevision": "10",
+      "changes": {
+        "assignments": [],
+        "content": {
+          "cards": [],
+          "examples": [],
+          "forms": [],
+          "distractors": []
+        },
+        "media": [],
+        "progress": [],
+        "reviews": [],
+        "practice_reviews": [],
+        "study_data_resets": [],
+        "matching_records": [],
+        "matching_attempts": []
+      }
+    }
+    """
+
+    private static func stubAppUserStoreSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubAppUserStoreURLProtocol.self]
+        return URLSession(configuration: configuration)
     }
 
     private func bootstrap(
@@ -1654,4 +1782,46 @@ struct ContentDatabaseTests {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.date(from: string)
     }
+}
+
+private final class LockedRequests: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedRequests: [URLRequest] = []
+
+    var requests: [URLRequest] {
+        lock.withLock { storedRequests }
+    }
+
+    func append(_ request: URLRequest) {
+        lock.withLock { storedRequests.append(request) }
+    }
+}
+
+private final class StubAppUserStoreURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let handler = Self.handler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }

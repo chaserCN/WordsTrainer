@@ -157,6 +157,9 @@ final class AppUserStore {
             var preBootstrapUploadSucceeded = true
             var localServerRevision = "0"
             var canUseChanges = false
+            var localDeckCountBeforeChanges = 0
+            var fullBootstrapReason: String?
+            var bootstrapCachedDeckVersionIDs: [UUID] = []
             if let targetUserID {
                 do {
                     let database = try ContentDatabase(userID: targetUserID)
@@ -167,6 +170,10 @@ final class AppUserStore {
                         && localServerRevision != "0"
                         && !users.isEmpty
                     cachedDeckVersionIDs = try database.cachedDeckVersionIDs()
+                    bootstrapCachedDeckVersionIDs = cachedDeckVersionIDs
+                    if canUseChanges {
+                        localDeckCountBeforeChanges = try database.loadDecks().count
+                    }
                     Self.logger.info(
                         "sync state selectedUserID=\(targetUserID.uuidString, privacy: .public) revision=\(localServerRevision, privacy: .public) cachedDeckVersions=\(cachedDeckVersionIDs.count, privacy: .public) deviceID=\(deviceID.databaseString, privacy: .public)"
                     )
@@ -190,39 +197,63 @@ final class AppUserStore {
 
             updateSyncProgress(.loadingData, taskID: taskID)
             if let targetUserID, canUseChanges, let bootstrapDeviceID {
-                let changes = try await syncClient.changes(
-                    selectedUserID: targetUserID,
-                    sinceRevision: localServerRevision,
-                    cachedDeckVersionIDs: cachedDeckVersionIDs,
-                    deviceID: bootstrapDeviceID
-                )
-                Self.logger.info("changes response serverRevision=\(changes.serverRevision ?? "nil", privacy: .public)")
-                guard isCurrentRefreshTask(taskID) else { return .cancelled }
-                let database = try ContentDatabase(userID: targetUserID)
-                updateSyncProgress(.savingData, taskID: taskID)
-                try database.importServerChanges(changes, selectedUserID: targetUserID)
-                let importedServerRevision = try database.serverRevision()
-                Self.logger.info("changes imported localServerRevision=\(importedServerRevision, privacy: .public)")
-                guard isCurrentRefreshTask(taskID) else { return .cancelled }
-                bootstrapState = .loaded
-                let decks = try database.loadDecks()
-                let assignmentCount = decks.count
-                let activeAssignmentCount = decks.filter(\.isActive).count
-                return finishSync(
-                    .loaded(
-                        userCount: users.count,
-                        assignmentCount: assignmentCount,
-                        activeAssignmentCount: activeAssignmentCount
-                    ),
-                    userID: targetUserID,
-                    startedAt: startedAt,
-                    taskID: taskID
-                )
+                do {
+                    let changes = try await syncClient.changes(
+                        selectedUserID: targetUserID,
+                        sinceRevision: localServerRevision,
+                        cachedDeckVersionIDs: cachedDeckVersionIDs,
+                        deviceID: bootstrapDeviceID
+                    )
+                    Self.logger.info("changes response serverRevision=\(changes.serverRevision ?? "nil", privacy: .public)")
+                    guard isCurrentRefreshTask(taskID) else { return .cancelled }
+                    let database = try ContentDatabase(userID: targetUserID)
+                    updateSyncProgress(.savingData, taskID: taskID)
+                    try database.importServerChanges(changes, selectedUserID: targetUserID)
+                    let importedServerRevision = try database.serverRevision()
+                    Self.logger.info("changes imported localServerRevision=\(importedServerRevision, privacy: .public)")
+                    guard isCurrentRefreshTask(taskID) else { return .cancelled }
+                    let decks = try database.loadDecks()
+                    if let reason = changesFullBootstrapFallbackReason(
+                        changes: changes,
+                        localServerRevision: localServerRevision,
+                        localDeckCountBeforeChanges: localDeckCountBeforeChanges,
+                        decksAfterChanges: decks
+                    ) {
+                        Self.logger.warning("changes discarded; falling back to full bootstrap reason=\(reason, privacy: .public)")
+                        fullBootstrapReason = reason
+                        bootstrapCachedDeckVersionIDs = []
+                    } else {
+                        bootstrapState = .loaded
+                        let assignmentCount = decks.count
+                        let activeAssignmentCount = decks.filter(\.isActive).count
+                        return finishSync(
+                            .loaded(
+                                userCount: users.count,
+                                assignmentCount: assignmentCount,
+                                activeAssignmentCount: activeAssignmentCount
+                            ),
+                            userID: targetUserID,
+                            startedAt: startedAt,
+                            taskID: taskID
+                        )
+                    }
+                } catch ServerSyncError.cancelled {
+                    throw ServerSyncError.cancelled
+                } catch let error as CancellationError {
+                    throw error
+                } catch {
+                    guard let reason = changesFullBootstrapFallbackReason(forDeltaError: error) else {
+                        throw error
+                    }
+                    Self.logger.warning("changes failed; falling back to full bootstrap reason=\(reason, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                    fullBootstrapReason = reason
+                    bootstrapCachedDeckVersionIDs = []
+                }
             }
 
             let bootstrap = try await syncClient.bootstrap(
                 selectedUserID: targetUserID,
-                cachedDeckVersionIDs: cachedDeckVersionIDs,
+                cachedDeckVersionIDs: bootstrapCachedDeckVersionIDs,
                 deviceID: bootstrapDeviceID
             )
             Self.logger.info("bootstrap response serverRevision=\(bootstrap.serverRevision ?? "nil", privacy: .public)")
@@ -249,7 +280,7 @@ final class AppUserStore {
                     bootstrap,
                     selectedUserID: resolvedUserID,
                     progressSnapshotIsComplete: preBootstrapUploadSucceeded
-                        && !hasCompletedInitialSync
+                        && (!hasCompletedInitialSync || fullBootstrapReason != nil)
                 )
                 try database.markInitialSyncCompleted()
                 let importedServerRevision = try database.serverRevision()
@@ -308,6 +339,40 @@ final class AppUserStore {
             bootstrapState = .failed(message)
             return finishSync(.failed(message), userID: targetUserID, startedAt: startedAt, taskID: taskID)
         }
+    }
+
+    private func changesFullBootstrapFallbackReason(
+        changes: ServerSyncChanges,
+        localServerRevision: String,
+        localDeckCountBeforeChanges: Int,
+        decksAfterChanges: [DeckContent]
+    ) -> String? {
+        guard let serverRevision = changes.serverRevision else {
+            return "missing_delta_revision"
+        }
+        if let local = Int(localServerRevision),
+           let server = Int(serverRevision),
+           server < local {
+            return "regressed_delta_revision"
+        }
+        if localDeckCountBeforeChanges > 0,
+           decksAfterChanges.isEmpty,
+           changes.assignments.isEmpty {
+            return "empty_decks_after_delta_without_assignment_changes"
+        }
+        return nil
+    }
+
+    private func changesFullBootstrapFallbackReason(forDeltaError error: Error) -> String? {
+        if case ServerSyncError.httpStatus(let statusCode) = error,
+           statusCode == 400 || statusCode == 409 {
+            return "server_rejected_delta_revision"
+        }
+        if case ServerSyncError.invalidResponse(let detail) = error,
+           detail?.contains("sync/changes decode") == true {
+            return "delta_decode_failed"
+        }
+        return nil
     }
 
     func select(_ user: AppUser) {
