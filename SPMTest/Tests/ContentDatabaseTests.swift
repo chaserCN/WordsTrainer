@@ -628,6 +628,57 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("study data reset removes synced local study data")
+    func studyDataResetRemovesSyncedLocalStudyData() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(
+                bootstrap(
+                    progress: [
+                        progressJSON(
+                            dueAt: "2026-06-04T12:00:00.000Z",
+                            updatedAt: "2026-06-02T12:00:00.000Z"
+                        ),
+                    ],
+                    matchingRecords: [matchingRecordJSON()]
+                ),
+                selectedUserID: userID
+            )
+            #expect(try database.progressMap(deckID: deckID)[cardID] != nil)
+            #expect(try database.matchingRecord(deckID: deckID) != nil)
+
+            try database.importServerBootstrap(
+                bootstrap(studyDataResets: [studyDataResetJSON()]),
+                selectedUserID: userID,
+                progressSnapshotIsComplete: false
+            )
+
+            #expect(try database.progressMap(deckID: deckID)[cardID] == nil)
+            #expect(try database.matchingRecord(deckID: deckID) == nil)
+        }
+    }
+
+    @Test("study data reset keeps unsynced local progress pending")
+    func studyDataResetKeepsUnsyncedLocalProgressPending() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
+            let localDate = try #require(Self.isoDate("2026-06-03T12:00:00.000Z"))
+            try database.saveProgress(
+                deckID: deckID,
+                progress: CardProgress.newCard(cardID: cardID, now: localDate)
+            )
+
+            try database.importServerBootstrap(
+                bootstrap(studyDataResets: [studyDataResetJSON()]),
+                selectedUserID: userID,
+                progressSnapshotIsComplete: false
+            )
+
+            let progress = try #require(database.progressMap(deckID: deckID)[cardID])
+            #expect(progress.updatedAt == localDate)
+            #expect(try database.pendingServerSyncBatch().progressCardIDs == [cardID])
+        }
+    }
+
     @Test("missing server progress keeps unsynced local progress")
     func missingServerProgressKeepsUnsyncedLocalProgress() throws {
         try withIsolatedDatabase { database in
@@ -1385,6 +1436,8 @@ struct ContentDatabaseTests {
         progress: [String] = [],
         reviews: [String] = [],
         practiceReviews: [String] = [],
+        studyDataResets: [String] = [],
+        matchingRecords: [String] = [],
         matchingAttempts: [String] = [],
         dailyUsage: [String]? = nil,
         includeAssignment: Bool = true,
@@ -1502,10 +1555,11 @@ struct ContentDatabaseTests {
           "progress": [\(progress.joined(separator: ","))],
           "reviews": [\(reviews.joined(separator: ","))],
           "practice_reviews": [\(practiceReviews.joined(separator: ","))],
+          "study_data_resets": [\(studyDataResets.joined(separator: ","))],
           "matching_attempts": [\(matchingAttempts.joined(separator: ","))],
           \(dailyUsage.map { #""daily_usage": ["# + $0.joined(separator: ",") + #"],"# } ?? "")
           \(serverRevision.map { #""serverRevision": ""# + $0 + #"","# } ?? "")
-          "matching_records": []
+          "matching_records": [\(matchingRecords.joined(separator: ","))]
         }
         """
         let decoder = JSONDecoder()
@@ -1579,6 +1633,30 @@ struct ContentDatabaseTests {
           "completed_at": "\(completedAt)",
           "duration_ms": 12000,
           "pair_count": 4
+        }
+        """
+    }
+
+    private func matchingRecordJSON() -> String {
+        """
+        {
+          "deck_id": "\(deckID.databaseString)",
+          "deck_version_id": "\(versionID.databaseString)",
+          "best_duration_seconds": 12.5,
+          "pair_count": 4,
+          "achieved_at": "2026-06-02T12:00:00.000Z"
+        }
+        """
+    }
+
+    private func studyDataResetJSON(deckID resetDeckID: UUID? = nil) -> String {
+        let deckIDValue = (resetDeckID ?? deckID).databaseString
+        return """
+        {
+          "user_id": "\(userID.databaseString)",
+          "deck_id": "\(deckIDValue)",
+          "reset_at": "2026-06-03T12:00:00.000Z",
+          "server_revision": "42"
         }
         """
     }

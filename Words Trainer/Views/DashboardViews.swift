@@ -95,7 +95,7 @@ struct TodayView: View {
             .animation(.snappy(duration: 0.22), value: toast)
         }
         .task {
-            await reload()
+            reloadImmediately()
         }
         .onAppear {
             isVisible = true
@@ -286,9 +286,10 @@ struct TodayView: View {
         return nil
     }
 
-    private func reload() async {
+    private func reload(generation: Int) async {
         do {
             guard let selectedUserID = userStore.selectedUserID else {
+                guard reloadGeneration == generation else { return }
                 decks = []
                 statsByDeckID = [:]
                 todayPracticeCount = 0
@@ -298,7 +299,8 @@ struct TodayView: View {
                 return
             }
             let snapshot = try await DeckStore.todayDashboardSnapshot(userID: selectedUserID)
-            guard userStore.selectedUserID == selectedUserID else { return }
+            guard reloadGeneration == generation,
+                  userStore.selectedUserID == selectedUserID else { return }
             if store == nil || storeUserID != selectedUserID {
                 store = try DeckStore(userID: selectedUserID)
                 storeUserID = selectedUserID
@@ -310,13 +312,15 @@ struct TodayView: View {
             streakDays = currentStreakDays(from: snapshot.activityDays)
             loadError = nil
         } catch {
+            guard reloadGeneration == generation else { return }
             loadError = error.localizedDescription
         }
     }
 
     private func reloadImmediately() {
         cancelScheduledReload()
-        Task { await reload() }
+        let generation = reloadGeneration
+        Task { await reload(generation: generation) }
     }
 
     private func scheduleLocalDataReload() {
@@ -330,7 +334,7 @@ struct TodayView: View {
         reloadTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled, reloadGeneration == generation else { return }
-            await reload()
+            await reload(generation: generation)
             guard reloadGeneration == generation else { return }
             reloadTask = nil
         }
@@ -350,7 +354,8 @@ struct TodayView: View {
         Self.syncLogger.info("syncNow invoked isSyncing=\(self.userStore.syncStatus.isSyncing, privacy: .public)")
         let result = await userStore.refreshFromServer()
         Self.syncLogger.info("syncNow refresh finished")
-        await reload()
+        let generation = reloadGeneration
+        await reload(generation: generation)
         presentToast(for: result)
     }
 
@@ -495,7 +500,7 @@ struct StatisticsView: View {
             }
         }
         .task {
-            await reload()
+            reloadImmediately()
         }
         .onAppear {
             isVisible = true
@@ -522,9 +527,10 @@ struct StatisticsView: View {
         }
     }
 
-    private func reload() async {
+    private func reload(generation: Int) async {
         do {
             guard let selectedUserID = userStore.selectedUserID else {
+                guard reloadGeneration == generation else { return }
                 todayUniqueCardCount = 0
                 todayMatchingAttemptCount = 0
                 weekUniqueCardCount = 0
@@ -540,7 +546,8 @@ struct StatisticsView: View {
                 return
             }
             let snapshot = try await DeckStore.statisticsSnapshot(userID: selectedUserID)
-            guard userStore.selectedUserID == selectedUserID else { return }
+            guard reloadGeneration == generation,
+                  userStore.selectedUserID == selectedUserID else { return }
             if store == nil || storeUserID != selectedUserID {
                 store = try DeckStore(userID: selectedUserID)
                 storeUserID = selectedUserID
@@ -559,13 +566,15 @@ struct StatisticsView: View {
             weakCardsPool = snapshot.weakCards
             loadError = nil
         } catch {
+            guard reloadGeneration == generation else { return }
             loadError = error.localizedDescription
         }
     }
 
     private func reloadImmediately() {
         cancelScheduledReload()
-        Task { await reload() }
+        let generation = reloadGeneration
+        Task { await reload(generation: generation) }
     }
 
     private func scheduleLocalDataReload() {
@@ -579,7 +588,7 @@ struct StatisticsView: View {
         reloadTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled, reloadGeneration == generation else { return }
-            await reload()
+            await reload(generation: generation)
             guard reloadGeneration == generation else { return }
             reloadTask = nil
         }
@@ -1608,7 +1617,8 @@ private struct TodayAllDecksModesView: View {
 
     private func reloadPracticeCountImmediately() {
         cancelScheduledReload()
-        Task { await reloadPracticeCount() }
+        let generation = reloadGeneration
+        Task { await reloadPracticeCount(generation: generation) }
     }
 
     private func scheduleLocalDataReload() {
@@ -1622,7 +1632,7 @@ private struct TodayAllDecksModesView: View {
         reloadTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled, reloadGeneration == generation else { return }
-            await reloadPracticeCount()
+            await reloadPracticeCount(generation: generation)
             guard reloadGeneration == generation else { return }
             reloadTask = nil
         }
@@ -1635,12 +1645,14 @@ private struct TodayAllDecksModesView: View {
         needsReloadWhenVisible = false
     }
 
-    private func reloadPracticeCount() async {
+    private func reloadPracticeCount(generation: Int) async {
         guard let snapshot = try? await DeckStore.todayDashboardSnapshot(userID: store.currentUserID) else {
+            guard reloadGeneration == generation else { return }
             practiceCount = 0
             wordListCards = []
             return
         }
+        guard reloadGeneration == generation else { return }
         practiceCount = snapshot.todayPracticeCount
         wordListCards = snapshot.todayStudyCards
     }

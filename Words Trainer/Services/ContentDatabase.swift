@@ -231,6 +231,7 @@ nonisolated final class ContentDatabase {
             try upsertForms(bootstrap.content.forms)
             try upsertDistractors(bootstrap.content.distractors)
             try markContentVersionsImported(importedContentVersionIDs, versionDeckIDs: versionDeckIDs)
+            try applyStudyDataResets(bootstrap.studyDataResets, selectedUserID: selectedUserID)
             try upsertServerProgress(bootstrap.progress)
             if progressSnapshotIsComplete {
                 try deleteSyncedProgressMissingFromServerSnapshot(bootstrap.progress)
@@ -1085,34 +1086,41 @@ nonisolated final class ContentDatabase {
         response: ServerSyncEventsResponse? = nil,
         syncedAt: Date = .now
     ) throws {
-        let timestamp = syncedAt.timeIntervalSince1970
-        let reviewIDs = response.map { Set($0.acceptedReviewIds + $0.duplicateReviewIds) }
-        let practiceReviewIDs = response.map { Set($0.acceptedPracticeReviewIds + $0.duplicatePracticeReviewIds) }
-        let rejectedProgressCardIDs = response.map { Set($0.rejectedProgressCardIds) }
-        let rejectedMatchingDeckIDs = response.map { Set($0.rejectedMatchingRecordDeckIds) }
-        let matchingAttemptIDs = response.map { Set($0.acceptedMatchingAttemptIds + $0.duplicateMatchingAttemptIds) }
-        let rejectedDeckPreferenceIDs = response.map { Set($0.rejectedDeckPreferenceDeckIds) }
+        try beginTransaction()
+        do {
+            let timestamp = syncedAt.timeIntervalSince1970
+            let reviewIDs = response.map { Set($0.acceptedReviewIds + $0.duplicateReviewIds) }
+            let practiceReviewIDs = response.map { Set($0.acceptedPracticeReviewIds + $0.duplicatePracticeReviewIds) }
+            let rejectedProgressCardIDs = response.map { Set($0.rejectedProgressCardIds) }
+            let rejectedMatchingDeckIDs = response.map { Set($0.rejectedMatchingRecordDeckIds) }
+            let matchingAttemptIDs = response.map { Set($0.acceptedMatchingAttemptIds + $0.duplicateMatchingAttemptIds) }
+            let rejectedDeckPreferenceIDs = response.map { Set($0.rejectedDeckPreferenceDeckIds) }
 
-        for reviewID in batch.reviewIDs where reviewIDs?.contains(reviewID) ?? true {
-            try markReviewSynced(reviewID: reviewID, syncedAt: timestamp)
-        }
-        for snapshot in batch.practiceReviewSnapshots where practiceReviewIDs?.contains(snapshot.id) ?? true {
-            try markPracticeReviewSynced(snapshot: snapshot, syncedAt: timestamp)
-        }
-        for snapshot in batch.progressSnapshots where !(rejectedProgressCardIDs?.contains(snapshot.cardID) ?? false) {
-            try markProgressSynced(snapshot: snapshot, syncedAt: timestamp)
-        }
-        for snapshot in batch.matchingSnapshots where !(rejectedMatchingDeckIDs?.contains(snapshot.deckID) ?? false) {
-            try markMatchingRecordSynced(snapshot: snapshot, syncedAt: timestamp)
-        }
-        for snapshot in batch.matchingAttemptSnapshots where matchingAttemptIDs?.contains(snapshot.id) ?? true {
-            try markMatchingAttemptSynced(snapshot: snapshot, syncedAt: timestamp)
-        }
-        for snapshot in batch.deckPreferenceSnapshots where !(rejectedDeckPreferenceIDs?.contains(snapshot.deckID) ?? false) {
-            try markDeckPreferenceSynced(snapshot: snapshot, syncedAt: timestamp)
-        }
-        if let serverRevision = response?.serverRevision {
-            try setServerRevision(serverRevision)
+            for reviewID in batch.reviewIDs where reviewIDs?.contains(reviewID) ?? true {
+                try markReviewSynced(reviewID: reviewID, syncedAt: timestamp)
+            }
+            for snapshot in batch.practiceReviewSnapshots where practiceReviewIDs?.contains(snapshot.id) ?? true {
+                try markPracticeReviewSynced(snapshot: snapshot, syncedAt: timestamp)
+            }
+            for snapshot in batch.progressSnapshots where !(rejectedProgressCardIDs?.contains(snapshot.cardID) ?? false) {
+                try markProgressSynced(snapshot: snapshot, syncedAt: timestamp)
+            }
+            for snapshot in batch.matchingSnapshots where !(rejectedMatchingDeckIDs?.contains(snapshot.deckID) ?? false) {
+                try markMatchingRecordSynced(snapshot: snapshot, syncedAt: timestamp)
+            }
+            for snapshot in batch.matchingAttemptSnapshots where matchingAttemptIDs?.contains(snapshot.id) ?? true {
+                try markMatchingAttemptSynced(snapshot: snapshot, syncedAt: timestamp)
+            }
+            for snapshot in batch.deckPreferenceSnapshots where !(rejectedDeckPreferenceIDs?.contains(snapshot.deckID) ?? false) {
+                try markDeckPreferenceSynced(snapshot: snapshot, syncedAt: timestamp)
+            }
+            if let serverRevision = response?.serverRevision {
+                try setServerRevision(serverRevision)
+            }
+            try commitTransaction()
+        } catch {
+            try? rollbackTransaction()
+            throw error
         }
     }
 
@@ -1916,6 +1924,41 @@ nonisolated final class ContentDatabase {
         try bind(statement, index: 1, uuid: userID)
         for (offset, cardID) in cardIDs.enumerated() {
             try bind(statement, index: Int32(offset + 2), uuid: cardID)
+        }
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
+        }
+    }
+
+    private func applyStudyDataResets(_ resets: [ServerStudyDataResetPayload], selectedUserID: UUID) throws {
+        for reset in resets where reset.userId == selectedUserID {
+            try deleteSyncedStudyData(deckID: reset.deckId)
+        }
+    }
+
+    private func deleteSyncedStudyData(deckID: UUID?) throws {
+        try deleteSyncedRows(table: "study_reviews", deckID: deckID)
+        try deleteSyncedRows(table: "practice_reviews", deckID: deckID)
+        try deleteSyncedRows(table: "card_progress", deckID: deckID)
+        try deleteSyncedRows(table: "deck_matching_records", deckID: deckID)
+        try deleteSyncedRows(table: "matching_attempts", deckID: deckID)
+    }
+
+    private func deleteSyncedRows(table: String, deckID: UUID?) throws {
+        let sql: String
+        if deckID == nil {
+            sql = "DELETE FROM \(table) WHERE user_id = ? AND synced_at IS NOT NULL"
+        } else {
+            sql = "DELETE FROM \(table) WHERE user_id = ? AND deck_id = ? AND synced_at IS NOT NULL"
+        }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        if let deckID {
+            try bind(statement, index: 2, uuid: deckID)
         }
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw ContentDatabaseError.queryFailed

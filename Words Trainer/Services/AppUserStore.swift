@@ -309,7 +309,6 @@ final class AppUserStore {
             let response = try await syncClient.uploadEvents(batch.payload, selectedUserID: selectedUserID, deviceID: deviceID)
             try database.markServerSyncBatchUploaded(batch, response: response)
             if let serverRevision = response.serverRevision {
-                try database.setServerRevision(serverRevision)
                 Self.logger.info("uploaded pending events serverRevision=\(serverRevision, privacy: .public)")
             }
         }
