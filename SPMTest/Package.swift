@@ -32,6 +32,7 @@ let package = Package(
                 "Models/AppUser.swift",
                 "Models/AppUserSyncStatus.swift",
                 "Models/DeckMatchingRecord.swift",
+                "Models/LocalizedCounts.swift",
                 "Models/StudyMode.swift",
                 "Models/StudyStats.swift",
                 "Models/UUID+Database.swift",

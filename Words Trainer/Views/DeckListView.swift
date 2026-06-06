@@ -6,7 +6,9 @@ struct DeckListView: View {
     @State private var store: DeckStore?
     @State private var storeUserID: UUID?
     @State private var loadError: String?
-    @State private var showsWordSearch = false
+    @State private var isSearching = false
+
+    static let searchTransition: Animation = .snappy(duration: 0.32, extraBounce: 0)
 
     var body: some View {
         NavigationStack {
@@ -53,38 +55,50 @@ struct DeckListView: View {
                 message: emptyDecksMessage
             )
         } else if let store {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    DeckListHeader(
-                        deckCount: activeDecks.count,
-                        cardCount: activeCardCount,
-                        isSearchEnabled: !searchItems.isEmpty
-                    ) {
-                        showsWordSearch = true
+            ZStack {
+                if isSearching {
+                    WordSearchPane(items: searchItems) {
+                        withAnimation(Self.searchTransition) { isSearching = false }
                     }
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                } else {
+                    deckList(store: store)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                }
+            }
+        }
+    }
 
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        ForEach(sortedDeckBindings) { $deck in
-                            NavigationLink {
-                                DeckDetailView(deck: $deck, store: store)
-                            } label: {
-                                LovableDeckCard(deck: deck)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .opacity(deck.isActive ? 1 : 0.45)
-                            }
-                            .buttonStyle(.plain)
+    @ViewBuilder
+    private func deckList(store: DeckStore) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                DeckListHeader(
+                    deckCount: activeDecks.count,
+                    cardCount: activeCardCount,
+                    isSearchEnabled: !searchItems.isEmpty
+                ) {
+                    withAnimation(Self.searchTransition) { isSearching = true }
+                }
+
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(sortedDeckBindings) { $deck in
+                        NavigationLink {
+                            DeckDetailView(deck: $deck, store: store)
+                        } label: {
+                            LovableDeckCard(deck: deck)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .opacity(deck.isActive ? 1 : 0.45)
                         }
+                        .buttonStyle(.plain)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.top, 28)
-                .padding(.bottom, 32)
             }
-            .sheet(isPresented: $showsWordSearch) {
-                WordSearchSheet(items: searchItems)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.top, 28)
+            .padding(.bottom, 32)
         }
     }
 
@@ -262,11 +276,11 @@ private struct DeckWordSearchItem: Identifiable, Hashable {
     var id: String { "\(deckID.databaseString)-\(card.id.databaseString)" }
 }
 
-private struct WordSearchSheet: View {
+private struct WordSearchPane: View {
     private let items: [DeckWordSearchItem]
     private let index: DeckWordSearchIndex
+    private let onCancel: () -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var debouncedQuery = ""
     @State private var visibleItems: [DeckWordSearchItem]
@@ -274,56 +288,35 @@ private struct WordSearchSheet: View {
 
     private static let searchDebounceNanoseconds: UInt64 = 180_000_000
 
-    init(items: [DeckWordSearchItem]) {
+    init(
+        items: [DeckWordSearchItem],
+        onCancel: @escaping () -> Void
+    ) {
         let index = DeckWordSearchIndex(items: items)
         self.items = items
         self.index = index
+        self.onCancel = onCancel
         _visibleItems = State(initialValue: index.sortedItems)
     }
 
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var body: some View {
-        ZStack {
-            // Мягкий светло-серый фон в духе iOS grouped-списка: белые карточки-строки
-            // на нём читаются естественно, без «цветного на цветном». Color/oklch как
-            // элемент ZStack гибкий и заполняет предложенный размер, поэтому (в отличие
-            // от LovableBackground с его орбами) не раздувает ZStack шире экрана.
-            oklch(0.95, 0.005, 240)
-                .ignoresSafeArea()
+        VStack(spacing: 22) {
+            searchHeader
 
-            VStack(spacing: 22) {
-                searchHeader
-
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        if items.isEmpty {
-                            DataPlaceholderView(
-                                title: "Нет слов",
-                                systemImage: "text.book.closed",
-                                message: "В колодах пока нет активных карточек."
-                            )
-                            .frame(minHeight: 360)
-                        } else if visibleItems.isEmpty {
-                            DataPlaceholderView(
-                                title: "Нет совпадений",
-                                systemImage: "magnifyingglass",
-                                message: "Попробуйте другое написание."
-                            )
-                            .frame(minHeight: 360)
-                        } else {
-                            ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
-                                DeckSearchWordRow(
-                                    item: item,
-                                    position: rowPosition(index: index, count: visibleItems.count)
-                                )
-                            }
-                        }
-                    }
+            ScrollView {
+                content
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
                     .padding(.bottom, 32)
-                }
             }
+            .scrollDismissesKeyboard(.interactively)
         }
+        .padding(.top, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task {
             try? await Task.sleep(nanoseconds: 120_000_000)
             isSearchFieldFocused = true
@@ -344,52 +337,41 @@ private struct WordSearchSheet: View {
         .onChange(of: items) {
             visibleItems = index.results(for: debouncedQuery)
         }
-        .presentationDetents([.large])
     }
 
-    private var searchHeader: some View {
-        HStack(spacing: 14) {
-            HStack(spacing: 12) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(.black)
-
-                TextField(L10n.text("Искать слово"), text: $query)
-                    .font(.system(size: 24, weight: .regular))
-                    .foregroundStyle(LovableSurface.foreground)
-                    .tint(LovableSurface.foreground)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .focused($isSearchFieldFocused)
-                    .submitLabel(.search)
-            }
-            .padding(.horizontal, 18)
-            .frame(height: 58)
-            .background(oklch(0.998, 0.002, 240), in: Capsule())
-            .overlay {
-                Capsule()
-                    .stroke(.black.opacity(0.06), lineWidth: 0.8)
-            }
-
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundStyle(.black)
-                    .frame(width: 58, height: 58)
-                    .background(oklch(0.998, 0.002, 240), in: Circle())
-                    .overlay {
-                        Circle()
-                            .stroke(.black.opacity(0.06), lineWidth: 0.8)
-                    }
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(L10n.text("Закрыть"))
+    @ViewBuilder
+    private var content: some View {
+        if items.isEmpty {
+            DataPlaceholderView(
+                title: "Нет слов",
+                systemImage: "text.book.closed",
+                message: "В колодах пока нет активных карточек."
+            )
+            .frame(minHeight: 360)
+        } else if trimmedQuery.isEmpty {
+            wordRows(index.sortedItems)
+        } else if visibleItems.isEmpty {
+            DataPlaceholderView(
+                title: "Нет совпадений",
+                systemImage: "magnifyingglass",
+                message: "Попробуйте другое написание."
+            )
+            .frame(minHeight: 360)
+        } else {
+            wordRows(visibleItems)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 20)
+    }
+
+    @ViewBuilder
+    private func wordRows(_ list: [DeckWordSearchItem]) -> some View {
+        LazyVStack(spacing: 0) {
+            ForEach(Array(list.enumerated()), id: \.element.id) { position, item in
+                DeckSearchWordRow(
+                    item: item,
+                    position: rowPosition(index: position, count: list.count)
+                )
+            }
+        }
     }
 
     private func rowPosition(index: Int, count: Int) -> DeckSearchWordRow.Position {
@@ -397,6 +379,57 @@ private struct WordSearchSheet: View {
         if index == 0 { return .top }
         if index == count - 1 { return .bottom }
         return .middle
+    }
+
+    private var searchHeader: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(LovableSurface.muted)
+
+                TextField(L10n.text("Поиск по колодам и словам"), text: $query)
+                    .font(.system(size: 19, weight: .regular))
+                    .foregroundStyle(LovableSurface.foreground)
+                    .tint(LovableSurface.primary)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($isSearchFieldFocused)
+                    .submitLabel(.search)
+
+                if !query.isEmpty {
+                    Button {
+                        query = ""
+                        isSearchFieldFocused = true
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(LovableSurface.muted.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.opacity)
+                    .accessibilityLabel(L10n.text("Очистить"))
+                }
+            }
+            .padding(.horizontal, 18)
+            .frame(height: 56)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(.white.opacity(0.58), lineWidth: 0.8)
+            }
+            .shadow(color: oklch(0.18, 0.05, 260, 0.12), radius: 16, x: 0, y: 8)
+
+            Button(action: onCancel) {
+                Text(L10n.text("Отмена"))
+                    .font(.system(size: 18, weight: .regular))
+                    .foregroundStyle(LovableSurface.foreground)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .animation(.easeInOut(duration: 0.15), value: query.isEmpty)
     }
 }
 
@@ -587,38 +620,45 @@ private struct DeckSearchWordRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(item.card.word)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(LovableSurface.foreground)
+                    .foregroundStyle(oklch(0.99, 0.01, 240))
                     .lineLimit(1)
 
                 Spacer(minLength: 8)
 
                 Text(item.deckTitle)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(LovableSurface.primary)
+                    .foregroundStyle(oklch(0.78, 0.13, 250))
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
 
             Text(item.card.translation)
                 .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(LovableSurface.muted)
+                .foregroundStyle(oklch(0.82, 0.03, 250, 0.65))
                 .lineLimit(2)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            oklch(0.998, 0.002, 240),
+            LinearGradient(
+                colors: [
+                    oklch(0.25, 0.04, 265),
+                    oklch(0.18, 0.04, 270)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
             in: UnevenRoundedRectangle(cornerRadii: position.cornerRadii, style: .continuous)
         )
         .overlay {
             UnevenRoundedRectangle(cornerRadii: position.cornerRadii, style: .continuous)
-                .stroke(.black.opacity(0.05), lineWidth: 0.5)
+                .stroke(.white.opacity(0.05), lineWidth: 0.5)
         }
         .overlay(alignment: .bottom) {
             if position.hasSeparator {
                 Rectangle()
-                    .fill(.black.opacity(0.08))
+                    .fill(.white.opacity(0.07))
                     .frame(height: 0.5)
                     .padding(.leading, 16)
             }

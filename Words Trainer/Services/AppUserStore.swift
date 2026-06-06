@@ -204,7 +204,11 @@ final class AppUserStore {
                 let database = try ContentDatabase(userID: resolvedUserID)
                 let deviceID = try database.deviceID()
                 updateSyncProgress(.savingData, taskID: taskID)
-                try database.importServerBootstrap(bootstrap, selectedUserID: resolvedUserID)
+                try database.importServerBootstrap(
+                    bootstrap,
+                    selectedUserID: resolvedUserID,
+                    progressSnapshotIsComplete: bootstrapDeviceID == nil && bootstrapSinceRevision == "0"
+                )
                 let mediaFailureCount = try await cacheMedia(from: bootstrap, database: database, taskID: taskID)
                 try applyCachedUserAvatarURLs(from: bootstrap)
                 guard isCurrentRefreshTask(taskID) else { return .cancelled }

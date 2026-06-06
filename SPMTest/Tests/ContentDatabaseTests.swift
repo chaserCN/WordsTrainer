@@ -601,6 +601,32 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("incremental bootstrap without progress preserves synced local progress")
+    func incrementalBootstrapWithoutProgressPreservesSyncedLocalProgress() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(
+                bootstrap(
+                    progress: [
+                        progressJSON(
+                            dueAt: "2026-06-04T12:00:00.000Z",
+                            updatedAt: "2026-06-02T12:00:00.000Z"
+                        ),
+                    ]
+                ),
+                selectedUserID: userID
+            )
+            #expect(try database.progressMap(deckID: deckID)[cardID] != nil)
+
+            try database.importServerBootstrap(
+                bootstrap(progress: []),
+                selectedUserID: userID,
+                progressSnapshotIsComplete: false
+            )
+
+            #expect(try database.progressMap(deckID: deckID)[cardID] != nil)
+        }
+    }
+
     @Test("missing server progress keeps unsynced local progress")
     func missingServerProgressKeepsUnsyncedLocalProgress() throws {
         try withIsolatedDatabase { database in

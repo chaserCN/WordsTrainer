@@ -115,7 +115,11 @@ final class ContentDatabase {
         }
     }
 
-    func importServerBootstrap(_ bootstrap: ServerBootstrap, selectedUserID: UUID) throws {
+    func importServerBootstrap(
+        _ bootstrap: ServerBootstrap,
+        selectedUserID: UUID,
+        progressSnapshotIsComplete: Bool = true
+    ) throws {
         let versionDeckIDs = Dictionary(
             uniqueKeysWithValues: bootstrap.assignments.compactMap { assignment -> (UUID, UUID)? in
                 let versionID = assignment.currentVersionId
@@ -146,7 +150,9 @@ final class ContentDatabase {
             try upsertDistractors(bootstrap.content.distractors)
             try markContentVersionsImported(importedContentVersionIDs, versionDeckIDs: versionDeckIDs)
             try upsertServerProgress(bootstrap.progress)
-            try deleteSyncedProgressMissingFromServerSnapshot(bootstrap.progress)
+            if progressSnapshotIsComplete {
+                try deleteSyncedProgressMissingFromServerSnapshot(bootstrap.progress)
+            }
             try upsertServerReviews(bootstrap.reviews, selectedUserID: selectedUserID)
             try upsertServerPracticeReviews(bootstrap.practiceReviews, selectedUserID: selectedUserID)
             try upsertServerMatchingRecords(bootstrap.matchingRecords, selectedUserID: selectedUserID)
