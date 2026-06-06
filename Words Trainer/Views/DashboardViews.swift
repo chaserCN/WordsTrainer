@@ -1041,7 +1041,7 @@ private struct UserAvatarButton: View {
                 .overlay(alignment: .bottomTrailing) {
                     if streakDays > 3 {
                         StreakBadge(days: streakDays)
-                            .offset(x: 7, y: 7)
+                            .offset(x: 4, y: 4)
                     }
                 }
         }
@@ -1148,35 +1148,50 @@ private enum UserAvatarImageCache {
 private struct StreakBadge: View {
     let days: Int
 
-    private var colors: [Color] {
-        if days > 7 {
-            [oklch(0.66, 0.24, 25), oklch(0.56, 0.24, 15)]
-        } else {
-            [oklch(0.74, 0.18, 42), oklch(0.64, 0.22, 25)]
-        }
+    private var horizontalPadding: CGFloat {
+        days >= 10 ? 5 : 0
+    }
+
+    private var intensity: Double {
+        min(1, max(0, Double(days - 1) / 13))
+    }
+
+    private var badgeFill: Color {
+        oklch(
+            0.72 - 0.08 * intensity,
+            0.17 + 0.06 * intensity,
+            66 - 38 * intensity
+        )
+    }
+
+    private var badgeShadow: Color {
+        oklch(
+            0.45 - 0.06 * intensity,
+            0.09 + 0.03 * intensity,
+            55 - 30 * intensity,
+            0.45
+        )
     }
 
     var body: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "flame.fill")
-                .font(.system(size: 9, weight: .black))
-            Text("\(days)")
-                .font(.system(size: 14, weight: .bold))
-                .monospacedDigit()
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 7)
-        .frame(height: 21)
-        .background(
-            LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing),
-            in: Capsule()
-        )
-        .overlay {
-            Capsule()
-                .stroke(.white, lineWidth: 2)
-        }
-        .shadow(color: colors.last?.opacity(0.35) ?? .clear, radius: 8, x: 0, y: 4)
-        .accessibilityLabel("Серия \(days) дней")
+        Text("\(days)")
+            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .padding(.horizontal, horizontalPadding)
+            .frame(minWidth: 22, minHeight: 22)
+            .foregroundStyle(.white)
+            .background(
+                badgeFill,
+                in: Capsule()
+            )
+            .overlay {
+                Capsule()
+                    .stroke(.white.opacity(0.96), lineWidth: 2)
+            }
+            .shadow(color: badgeShadow, radius: 4, x: 0, y: 3)
+            .accessibilityLabel("Серия \(days) дней")
     }
 }
 

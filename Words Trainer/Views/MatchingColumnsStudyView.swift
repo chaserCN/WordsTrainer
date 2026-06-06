@@ -2,8 +2,8 @@ import SwiftUI
 
 struct MatchingColumnsStudyView: View {
     /// Исчезновение = подтверждение правильного выбора (зелёным) + плавное гашение.
-    private static let confirmHighlightDuration: TimeInterval = 1.0
-    private static let fadeOutDuration: TimeInterval = 1.5
+    private static let confirmHighlightDuration: TimeInterval = 0.5
+    private static let fadeOutDuration: TimeInterval = 1.0
     /// Появление новой лексики.
     private static let fadeInDuration: TimeInterval = 0.5
     private static let partnerNextStepProbability = 0.75
@@ -303,7 +303,7 @@ struct MatchingColumnsStudyView: View {
         } else {
             let incorrectPairID = incorrectPairID(wordPairID: wordPairID, translationPairID: translationPairID)
             recordIncorrectSelection(pairID: incorrectPairID)
-            if let pair = pairCache[incorrectPairID] {
+            if let pair = pairCache[wordPairID] {
                 WordAudioPlayer.shared.playWord(from: pair.card, style: .wrong)
             }
             wrongWordSlot = wordSlotID
@@ -382,9 +382,8 @@ struct MatchingColumnsStudyView: View {
         correctWordSlots.insert(wordSlotID)
         correctTranslationSlots.insert(translationSlotID)
 
-        // 2. Резервируем замену из пула — чтобы её можно было подмешать к соседним матчам.
+        // 2. Резервируем замену из пула. Старые переходы не ускоряем: пусть гаснут своим темпом.
         reserveReplacement(for: matchedID)
-        finishPendingReplacementsNow()
 
         // 3. Подтверждение → гашение → подстановка, в отменяемой задаче.
         let id = UUID()
@@ -403,19 +402,6 @@ struct MatchingColumnsStudyView: View {
             }
             try? await Task.sleep(for: .seconds(Self.fadeOutDuration))
             guard !Task.isCancelled else { return }
-            finishTransition(id)
-        }
-    }
-
-    /// Новый правильный матч не ждёт старые гашения: предыдущие обычные переходы
-    /// сразу получают replacement и запускают проявление новой лексики.
-    private func finishPendingReplacementsNow() {
-        let ids = pendingTransitions
-            .filter { !$0.value.shuffle }
-            .map(\.key)
-        guard !ids.isEmpty else { return }
-        for id in ids {
-            transitionTasks.removeValue(forKey: id)?.cancel()
             finishTransition(id)
         }
     }
