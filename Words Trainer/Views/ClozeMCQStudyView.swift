@@ -269,9 +269,6 @@ private struct ClozeSentenceText: View {
 
     var body: some View {
         Text(styledSentence)
-            .transaction { transaction in
-                transaction.animation = nil
-            }
     }
 
     private var styledSentence: AttributedString {
