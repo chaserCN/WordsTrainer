@@ -2,13 +2,13 @@ import SwiftUI
 
 struct StudySessionView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppUserStore.self) private var userStore
 
     @Bindable var session: StudySession
     let store: DeckStore
     let deckTitle: String
 
-    /// Для matching завершаем не по scheduler (он пустеет раньше времени из-за резерва замены),
-    /// а когда доска реально опустела после анимации последнего гашения.
+    /// Matching завершаем сразу по scheduler, а не после анимации очистки доски.
     @State private var matchingFinished = false
     /// Поставлен ли на этом раунде новый рекорд — чтобы сыграть джингл в конце раунда.
     @State private var beatRecord = false
@@ -18,6 +18,8 @@ struct StudySessionView: View {
     @State private var finishedDuration: TimeInterval?
     @State private var isFlashcardSubmitEnabled = true
     @State private var didSaveMatchingAttempt = false
+    @State private var didPlayMatchingCompletionEffects = false
+    @State private var sessionError: String?
 
     private static let flashcardSubmitCooldown: TimeInterval = 1
 
@@ -37,12 +39,7 @@ struct StudySessionView: View {
                             session: session,
                             store: store,
                             onFinished: {
-                                matchingFinished = true
-                                // Поздравление только при новом рекорде.
-                                if session.mode == .matching, beatRecord {
-                                    confettiBurst += 1
-                                    WordAudioPlayer.shared.playEffect(named: "new_record")
-                                }
+                                finishMatchingSessionIfNeeded(playCompletionEffects: true)
                             }
                         )
                     }
@@ -105,27 +102,33 @@ struct StudySessionView: View {
                 }
             }
         }
-        .onChange(of: session.isFinished) { _, isFinished in
-            guard isFinished, session.mode.isMatching, !didSaveMatchingAttempt else { return }
-            didSaveMatchingAttempt = true
-            let duration = session.matchingElapsed
-            finishedDuration = duration
-            try? store.saveMatchingAttempt(
-                MatchingAttemptEvent(
-                    deckID: matchingAttemptDeckID,
-                    mode: session.mode,
-                    source: session.reviewSource,
-                    duration: duration,
-                    pairCount: session.matchingTotalPairCount
-                )
+        .alert(
+            L10n.text("Не удалось сохранить прогресс"),
+            isPresented: Binding(
+                get: { sessionError != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        sessionError = nil
+                    }
+                }
             )
-            if session.mode == .matching {
-                beatRecord = (try? store.saveMatchingRecordIfBest(
-                    scope: session.matchingRecordScope,
-                    duration: duration,
-                    pairCount: session.matchingTotalPairCount
-                )) ?? false
+        ) {
+            Button("ОК", role: .cancel) {}
+        } message: {
+            Text(sessionError ?? "")
+        }
+        .task {
+            if session.mode.isMatching, session.isFinished {
+                finishMatchingSessionIfNeeded(playCompletionEffects: false)
             }
+        }
+        .onChange(of: session.isFinished) { _, isFinished in
+            guard isFinished, session.mode.isMatching else { return }
+            finishMatchingSessionIfNeeded(playCompletionEffects: true)
+        }
+        .onChange(of: userStore.selectedUserID) { _, selectedUserID in
+            guard selectedUserID != store.currentUserID else { return }
+            dismiss()
         }
     }
 
@@ -211,9 +214,64 @@ struct StudySessionView: View {
         }
 
         do {
+            try validateCurrentUser()
             try session.advanceAfterReview(outcome: outcome, store: store)
         } catch {
-            // MVP: ignore scheduling errors in UI
+            sessionError = error.localizedDescription
+            isFlashcardSubmitEnabled = true
+        }
+    }
+
+    private func finishMatchingSessionIfNeeded(playCompletionEffects: Bool) {
+        guard session.mode.isMatching else { return }
+        do {
+            try validateCurrentUser()
+            if !didSaveMatchingAttempt {
+                let duration = session.matchingElapsed
+                finishedDuration = duration
+                try store.saveMatchingAttempt(
+                    MatchingAttemptEvent(
+                        deckID: matchingAttemptDeckID,
+                        mode: session.mode,
+                        source: session.reviewSource,
+                        duration: duration,
+                        pairCount: session.matchingTotalPairCount
+                    )
+                )
+                didSaveMatchingAttempt = true
+                if session.mode == .matching {
+                    beatRecord = try store.saveMatchingRecordIfBest(
+                        scope: session.matchingRecordScope,
+                        duration: duration,
+                        pairCount: session.matchingTotalPairCount
+                    )
+                }
+            }
+            matchingFinished = true
+            if playCompletionEffects, session.mode == .matching, beatRecord, !didPlayMatchingCompletionEffects {
+                didPlayMatchingCompletionEffects = true
+                confettiBurst += 1
+                WordAudioPlayer.shared.playEffect(named: "new_record")
+            }
+        } catch {
+            sessionError = error.localizedDescription
+        }
+    }
+
+    private func validateCurrentUser() throws {
+        guard userStore.selectedUserID == store.currentUserID else {
+            throw StudySessionViewError.userChanged
+        }
+    }
+}
+
+private enum StudySessionViewError: LocalizedError {
+    case userChanged
+
+    var errorDescription: String? {
+        switch self {
+        case .userChanged:
+            return L10n.text("Пользователь изменился. Откройте упражнение заново.")
         }
     }
 }

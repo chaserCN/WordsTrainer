@@ -22,17 +22,11 @@ struct MatchingColumnsStudyView: View {
         var pairID: String?
     }
 
-    private enum SelectionSide {
-        case word
-        case translation
-    }
-
     @State private var wordColumn: [Slot] = []
     @State private var translationColumn: [Slot] = []
 
     @State private var selectedWordSlot: UUID?
     @State private var selectedTranslationSlot: UUID?
-    @State private var firstSelectedSide: SelectionSide?
     @State private var wrongWordSlot: UUID?
     @State private var wrongTranslationSlot: UUID?
 
@@ -225,13 +219,7 @@ struct MatchingColumnsStudyView: View {
                 return
             }
             selectedWordSlot = nil
-            if selectedTranslationSlot == nil {
-                firstSelectedSide = nil
-            }
             return
-        }
-        if selectedTranslationSlot == nil {
-            firstSelectedSide = .word
         }
         selectedWordSlot = slot.id
         accelerateIfPartnerMissing(pairID: pairID, selectedWord: true)
@@ -245,13 +233,7 @@ struct MatchingColumnsStudyView: View {
         guard wrongWordSlot == nil, isTranslationTappable(slot.id) else { return }
         if selectedTranslationSlot == slot.id {
             selectedTranslationSlot = nil
-            if selectedWordSlot == nil {
-                firstSelectedSide = nil
-            }
             return
-        }
-        if selectedWordSlot == nil {
-            firstSelectedSide = .translation
         }
         selectedTranslationSlot = slot.id
         guard let pairID = slot.pairID else { return }
@@ -301,8 +283,6 @@ struct MatchingColumnsStudyView: View {
                 shuffle: shuffle
             )
         } else {
-            let incorrectPairID = incorrectPairID(wordPairID: wordPairID, translationPairID: translationPairID)
-            recordIncorrectSelection(pairID: incorrectPairID)
             if let pair = pairCache[wordPairID] {
                 WordAudioPlayer.shared.playWord(from: pair.card, style: .wrong)
             }
@@ -318,24 +298,9 @@ struct MatchingColumnsStudyView: View {
         }
     }
 
-    private func incorrectPairID(wordPairID: String, translationPairID: String) -> String {
-        firstSelectedSide == .translation ? translationPairID : wordPairID
-    }
-
     private func clearSelection() {
         selectedWordSlot = nil
         selectedTranslationSlot = nil
-        firstSelectedSide = nil
-    }
-
-    private func recordIncorrectSelection(pairID: String) {
-        do {
-            guard let result = try session.recordIncorrectMatchingPair(id: pairID) else { return }
-            try store.saveProgress(deckID: result.deckID, progress: result.progress, wasNew: false)
-            store.notifyLocalDataDidChange(deckID: result.deckID)
-        } catch {
-            assertionFailure("Failed to record matching incorrect answer: \(error)")
-        }
     }
 
     /// Перемешиваем всё поле, если три раза подряд тапнули одни и те же ячейки.

@@ -207,12 +207,14 @@ final class AppUserStore {
             if let resolvedUserID {
                 let database = try ContentDatabase(userID: resolvedUserID)
                 let deviceID = try database.deviceID()
+                let hasCompletedInitialSync = try database.hasCompletedInitialSync()
                 updateSyncProgress(.savingData, taskID: taskID)
                 try database.importServerBootstrap(
                     bootstrap,
                     selectedUserID: resolvedUserID,
-                    progressSnapshotIsComplete: bootstrapDeviceID == nil && bootstrapSinceRevision == "0"
+                    progressSnapshotIsComplete: !hasCompletedInitialSync && bootstrapSinceRevision == "0"
                 )
+                try database.markInitialSyncCompleted()
                 let importedServerRevision = try database.serverRevision()
                 Self.logger.info("bootstrap imported localServerRevision=\(importedServerRevision, privacy: .public)")
                 let mediaFailureCount = try await cacheMedia(from: bootstrap, database: database, taskID: taskID)

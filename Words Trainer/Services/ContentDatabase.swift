@@ -11,6 +11,7 @@ nonisolated private enum ContentDatabaseDefaults {
 nonisolated private enum SyncMetadataKey {
     static let serverRevision = "server_revision"
     static let deviceID = "device_id"
+    static let initialSyncCompleted = "initial_sync_completed"
 }
 
 nonisolated private let contentDatabaseSetupLock = NSLock()
@@ -270,6 +271,14 @@ nonisolated final class ContentDatabase {
         let id = UUID()
         try setSyncMetadata(SyncMetadataKey.deviceID, value: id.databaseString, selectedUserID: userID)
         return id
+    }
+
+    func hasCompletedInitialSync() throws -> Bool {
+        try syncMetadataValue(SyncMetadataKey.initialSyncCompleted) == "1"
+    }
+
+    func markInitialSyncCompleted() throws {
+        try setSyncMetadata(SyncMetadataKey.initialSyncCompleted, value: "1", selectedUserID: userID)
     }
 
     @discardableResult
@@ -1045,10 +1054,7 @@ nonisolated final class ContentDatabase {
                practice_reviews.practiced_at, practice_reviews.duration_ms
         FROM practice_reviews
         JOIN cards ON cards.id = practice_reviews.card_id AND cards.deck_id = practice_reviews.deck_id
-        JOIN user_deck_assignments ON user_deck_assignments.deck_id = practice_reviews.deck_id
         WHERE practice_reviews.user_id = ?
-          AND user_deck_assignments.user_id = practice_reviews.user_id
-          AND user_deck_assignments.status = 'active'
           AND cards.status = 'active'
           AND practice_reviews.synced_at IS NULL
         ORDER BY practice_reviews.practiced_at
@@ -1100,10 +1106,7 @@ nonisolated final class ContentDatabase {
         SELECT card_progress.card_id, card_progress.deck_id, card_progress.fsrs_data, card_progress.updated_at
         FROM card_progress
         JOIN cards ON cards.id = card_progress.card_id AND cards.deck_id = card_progress.deck_id
-        JOIN user_deck_assignments ON user_deck_assignments.deck_id = card_progress.deck_id
         WHERE card_progress.user_id = ?
-          AND user_deck_assignments.user_id = card_progress.user_id
-          AND user_deck_assignments.status = 'active'
           AND cards.status = 'active'
           AND card_progress.synced_at IS NULL
         ORDER BY card_progress.updated_at
@@ -1151,10 +1154,7 @@ nonisolated final class ContentDatabase {
         SELECT deck_matching_records.deck_id, deck_matching_records.best_duration_seconds,
                deck_matching_records.pair_count, deck_matching_records.achieved_at
         FROM deck_matching_records
-        JOIN user_deck_assignments ON user_deck_assignments.deck_id = deck_matching_records.deck_id
         WHERE deck_matching_records.user_id = ?
-          AND user_deck_assignments.user_id = deck_matching_records.user_id
-          AND user_deck_assignments.status = 'active'
           AND deck_matching_records.synced_at IS NULL
         ORDER BY deck_matching_records.achieved_at
         LIMIT ?
@@ -1195,14 +1195,8 @@ nonisolated final class ContentDatabase {
                matching_attempts.source, matching_attempts.completed_at,
                matching_attempts.duration_ms, matching_attempts.pair_count
         FROM matching_attempts
-        LEFT JOIN user_deck_assignments ON user_deck_assignments.user_id = matching_attempts.user_id
-            AND user_deck_assignments.deck_id = matching_attempts.deck_id
         WHERE matching_attempts.user_id = ?
           AND matching_attempts.synced_at IS NULL
-          AND (
-              matching_attempts.deck_id IS NULL
-              OR user_deck_assignments.status = 'active'
-          )
         ORDER BY matching_attempts.completed_at
         LIMIT ?
         """

@@ -386,29 +386,25 @@ struct StudySessionMatchingTests {
         #expect(session.remainingCount == 0)
     }
 
-    @Test("incorrect matching selection updates FSRS progress")
+    @Test("matching wrong selections do not mutate FSRS progress")
     @MainActor
-    func incorrectSelectionUpdatesProgress() throws {
+    func matchingWrongSelectionsDoNotMutateProgress() throws {
         let card = TestFixtures.card(word: "cast", translation: "бросать; кидать")
         let session = TestFixtures.matchingSession(cards: [card])
         let pair = try #require(session.matchingVisibleItems.first)
         let before = pair.progress.fsrsCard
 
-        let result = try #require(try session.recordIncorrectMatchingPair(id: pair.id))
+        session.removeMatchedPair(id: pair.id)
+        let nextPair = try #require(session.matchingVisibleItems.first)
 
-        #expect(result.deckID == session.deckID)
-        #expect(result.progress.cardID == card.id)
-        #expect(result.progress.fsrsCard.reps > before.reps)
-        #expect(result.progress.fsrsCard.lastReview != nil)
-        #expect(result.progress.fsrsCard.state != before.state)
-        #expect(session.matchingVisibleItems.first?.progress == result.progress)
+        #expect(nextPair.progress.fsrsCard == before)
     }
 
-    @Test("practice matching still updates FSRS progress for wrong pairs")
+    @Test("practice matching does not mutate FSRS progress")
     @MainActor
-    func practiceMatchingUpdatesProgressForWrongPairs() throws {
+    func practiceMatchingDoesNotMutateProgress() throws {
         let deckID = UUID()
-        let card = TestFixtures.card(word: "cast", translation: "бросать")
+        let card = TestFixtures.card(word: "cast", translation: "бросать; кидать")
         let progress = CardProgress.newCard(cardID: card.id)
         let session = StudySession(
             deckID: UUID(),
@@ -420,11 +416,10 @@ struct StudySessionMatchingTests {
         )
         let pair = try #require(session.matchingVisibleItems.first)
 
-        let result = try #require(try session.recordIncorrectMatchingPair(id: pair.id))
+        session.removeMatchedPair(id: pair.id)
+        let nextPair = try #require(session.matchingVisibleItems.first)
 
-        #expect(result.deckID == deckID)
-        #expect(result.progress.fsrsCard.reps > progress.fsrsCard.reps)
-        #expect(session.matchingVisibleItems.first?.progress == result.progress)
+        #expect(nextPair.progress.fsrsCard == progress.fsrsCard)
     }
 
     @Test("non-matching mode uses queue for remaining count")

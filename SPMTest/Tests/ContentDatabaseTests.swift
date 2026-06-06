@@ -762,6 +762,67 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("pending non-review events are exported after assignment becomes inactive")
+    func pendingNonReviewEventsAreExportedAfterAssignmentBecomesInactive() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
+            let date = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
+            let practiceReviewID = UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-cccccccccccc")!
+            let matchingAttemptID = UUID(uuidString: "99999999-9999-4999-8999-999999999999")!
+
+            try database.saveProgress(
+                deckID: deckID,
+                progress: CardProgress.newCard(cardID: cardID, now: date)
+            )
+            try database.savePracticeReview(
+                PracticeReviewEvent(
+                    id: practiceReviewID,
+                    cardID: cardID,
+                    deckID: deckID,
+                    mode: .clozeMultipleChoice,
+                    outcome: .correct,
+                    source: .todayPractice,
+                    practicedAt: date,
+                    durationMS: 900
+                )
+            )
+            try database.saveMatchingRecord(
+                DeckMatchingRecord(
+                    deckID: deckID,
+                    bestDuration: 12.5,
+                    pairCount: 4,
+                    achievedAt: date
+                )
+            )
+            try database.saveMatchingAttempt(
+                MatchingAttemptEvent(
+                    id: matchingAttemptID,
+                    deckID: deckID,
+                    mode: .matching,
+                    source: .deckSession,
+                    completedAt: date,
+                    duration: 14.25,
+                    pairCount: 4
+                )
+            )
+
+            try database.importServerBootstrap(
+                bootstrap(assignmentStatus: "inactive", includeContent: false),
+                selectedUserID: userID
+            )
+
+            let batch = try database.pendingServerSyncBatch()
+            #expect(batch.progressCardIDs == [cardID])
+            #expect(batch.practiceReviewIDs == [practiceReviewID])
+            #expect(batch.matchingDeckIDs == [deckID])
+            #expect(batch.matchingAttemptIDs == [matchingAttemptID])
+            #expect(batch.payload.progress.map(\.cardId) == [cardID])
+            #expect(batch.payload.practiceReviews.map(\.clientEventId) == [practiceReviewID])
+            #expect(batch.payload.matchingRecords.map(\.deckId) == [deckID])
+            #expect(batch.payload.matchingAttempts.map(\.clientEventId) == [matchingAttemptID])
+        }
+    }
+
     @Test("mark uploaded keeps newer progress pending when it changed after batch snapshot")
     func markUploadedKeepsNewerProgressPending() throws {
         try withIsolatedDatabase { database in
@@ -1090,6 +1151,26 @@ struct ContentDatabaseTests {
 
         let reopenedDatabase = try ContentDatabase(userID: userID)
         #expect(try reopenedDatabase.serverRevision() == "123")
+    }
+
+    @Test("initial sync completion marker is readable after reopening database")
+    func initialSyncCompletionMarkerIsReadableAfterReopeningDatabase() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            AppDataPaths.dataDirectoryOverride = nil
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        AppDataPaths.dataDirectoryOverride = root
+        let database = try ContentDatabase(userID: userID)
+        #expect(try database.hasCompletedInitialSync() == false)
+
+        try database.markInitialSyncCompleted()
+        #expect(try database.hasCompletedInitialSync())
+
+        let reopenedDatabase = try ContentDatabase(userID: userID)
+        #expect(try reopenedDatabase.hasCompletedInitialSync())
     }
 
     @Test("database opens in WAL mode and supports read-only connections")
