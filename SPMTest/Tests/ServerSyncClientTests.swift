@@ -80,6 +80,34 @@ struct ServerSyncClientTests {
         #expect(request.value(forHTTPHeaderField: "X-FlashGame-Cached-Deck-Version-Ids") == nil)
     }
 
+    @Test("bootstrap decode errors include endpoint context")
+    func bootstrapDecodeErrorsIncludeEndpointContext() async throws {
+        let suiteName = "ServerSyncClientTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("https://example.test", forKey: "server.baseURL")
+        defaults.set("test-token", forKey: "server.householdSyncToken")
+
+        StubURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, Data(#"{"content": true}"#.utf8))
+        }
+        defer { StubURLProtocol.handler = nil }
+
+        let client = ServerSyncClient(session: Self.stubSession(), userDefaultsSuiteName: suiteName)
+        do {
+            _ = try await client.bootstrap(selectedUserID: nil, sinceRevision: "0", deviceID: nil)
+            Issue.record("Expected bootstrap decode failure")
+        } catch {
+            #expect(error.localizedDescription.contains("bootstrap decode"))
+        }
+    }
+
     @Test("uploadEvents sends selected user and decodes rejected ids")
     func uploadEventsDecodesRejectedIds() async throws {
         let suiteName = "ServerSyncClientTests-\(UUID().uuidString)"

@@ -120,6 +120,9 @@ struct MatchingColumnsStudyView: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: previewPair?.id)
+        .onDisappear {
+            cancelTransitionTasks()
+        }
     }
 
     @ViewBuilder
@@ -400,6 +403,14 @@ struct MatchingColumnsStudyView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) {
             for id in ids { finishTransition(id) }
         }
+    }
+
+    private func cancelTransitionTasks() {
+        for task in transitionTasks.values {
+            task.cancel()
+        }
+        transitionTasks.removeAll()
+        pendingTransitions.removeAll()
     }
 
     /// Убираем матченную пару из колоды и кладём её замену в общий пул подстановки.

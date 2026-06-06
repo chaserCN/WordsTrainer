@@ -594,9 +594,16 @@ struct StatisticsView: View {
 
     private func startWeakGame() {
         guard let store else { return }
-        guard let session = try? store.weakCardsMatchingSession(from: weakCardsPool) else { return }
-        weakGameSession = session
-        showWeakGame = true
+        do {
+            guard let session = try store.weakCardsMatchingSession(from: weakCardsPool) else {
+                loadError = "Нет забытых слов для упражнения."
+                return
+            }
+            weakGameSession = session
+            showWeakGame = true
+        } catch {
+            loadError = error.localizedDescription
+        }
     }
 
     private static func studyDaysCount(from activity: [StudyActivityDay]) -> Int {
@@ -1650,6 +1657,7 @@ private struct TodayDeckModesView: View {
     @State private var wordListCards: [WordCardContent] = []
     @State private var session: StudySession?
     @State private var showStudy = false
+    @State private var loadError: String?
 
     var body: some View {
         TodayStudyModesView(
@@ -1668,10 +1676,26 @@ private struct TodayDeckModesView: View {
             }
         }
         .task { await reload() }
+        .alert("Не удалось начать упражнение", isPresented: loadErrorBinding) {
+            Button("ОК", role: .cancel) {
+                loadError = nil
+            }
+        } message: {
+            Text(loadError ?? "")
+        }
         .onChange(of: showStudy) { _, isShowing in
             guard !isShowing else { return }
             Task { await reload() }
         }
+    }
+
+    private var loadErrorBinding: Binding<Bool> {
+        Binding(
+            get: { loadError != nil },
+            set: { isPresented in
+                if !isPresented { loadError = nil }
+            }
+        )
     }
 
     private func reload() async {
@@ -1688,12 +1712,20 @@ private struct TodayDeckModesView: View {
     }
 
     private func start(_ mode: StudyMode) {
-        if stats.studyTotal > 0 {
-            session = try? store.startTodaySession(deck: deck, mode: mode)
-        } else {
-            session = try? store.startTodayPracticeSession(deck: deck, mode: mode)
+        do {
+            if stats.studyTotal > 0 {
+                session = try store.startTodaySession(deck: deck, mode: mode)
+            } else {
+                session = try store.startTodayPracticeSession(deck: deck, mode: mode)
+            }
+            guard session != nil else {
+                loadError = "Нет карточек для этого упражнения."
+                return
+            }
+            showStudy = true
+        } catch {
+            loadError = error.localizedDescription
         }
-        showStudy = session != nil
     }
 }
 

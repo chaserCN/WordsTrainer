@@ -1,22 +1,38 @@
 import Foundation
 
 /// Best matching-columns time for a deck (same `pair_count` as when the record was set).
-struct DeckMatchingRecord: Sendable, Equatable {
+nonisolated struct DeckMatchingRecord: Sendable, Equatable {
     let deckID: UUID
+    let deckVersionID: UUID?
+    let bestDuration: TimeInterval
+    let pairCount: Int
+    let achievedAt: Date
+
+    init(
+        deckID: UUID,
+        deckVersionID: UUID? = nil,
+        bestDuration: TimeInterval,
+        pairCount: Int,
+        achievedAt: Date
+    ) {
+        self.deckID = deckID
+        self.deckVersionID = deckVersionID
+        self.bestDuration = bestDuration
+        self.pairCount = pairCount
+        self.achievedAt = achievedAt
+    }
+}
+
+nonisolated struct MatchingRecordSummary: Sendable, Equatable {
     let bestDuration: TimeInterval
     let pairCount: Int
     let achievedAt: Date
 }
 
-struct MatchingRecordSummary: Sendable, Equatable {
-    let bestDuration: TimeInterval
-    let pairCount: Int
-    let achievedAt: Date
-}
-
-struct MatchingAttemptEvent: Sendable, Equatable {
+nonisolated struct MatchingAttemptEvent: Sendable, Equatable {
     let id: UUID
     let deckID: UUID?
+    let deckVersionID: UUID?
     let mode: StudyMode
     let source: StudyReviewSource
     let completedAt: Date
@@ -26,6 +42,7 @@ struct MatchingAttemptEvent: Sendable, Equatable {
     init(
         id: UUID = UUID(),
         deckID: UUID?,
+        deckVersionID: UUID? = nil,
         mode: StudyMode,
         source: StudyReviewSource,
         completedAt: Date = .now,
@@ -34,6 +51,7 @@ struct MatchingAttemptEvent: Sendable, Equatable {
     ) {
         self.id = id
         self.deckID = deckID
+        self.deckVersionID = deckVersionID
         self.mode = mode
         self.source = source
         self.completedAt = completedAt
@@ -42,7 +60,7 @@ struct MatchingAttemptEvent: Sendable, Equatable {
     }
 }
 
-enum MatchingRecordScope: Sendable, Hashable {
+nonisolated enum MatchingRecordScope: Sendable, Hashable {
     case none
     case deck(UUID)
 }

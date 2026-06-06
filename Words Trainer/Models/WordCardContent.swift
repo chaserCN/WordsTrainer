@@ -385,6 +385,7 @@ nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
 
 nonisolated struct DeckContent: Identifiable, Hashable, Sendable {
     let id: UUID
+    let contentVersionID: UUID?
     var status: ContentStatus
     var title: String
     var avatarSystemName: String?
@@ -399,6 +400,7 @@ nonisolated struct DeckContent: Identifiable, Hashable, Sendable {
 
     init(
         id: UUID,
+        contentVersionID: UUID? = nil,
         status: ContentStatus = .active,
         title: String,
         avatarSystemName: String?,
@@ -409,6 +411,7 @@ nonisolated struct DeckContent: Identifiable, Hashable, Sendable {
         cards: [WordCardContent]
     ) {
         self.id = id
+        self.contentVersionID = contentVersionID
         self.status = status
         self.title = title
         self.avatarSystemName = avatarSystemName

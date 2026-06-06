@@ -155,6 +155,7 @@ final class AppUserStore {
             var cachedDeckVersionIDs: [UUID] = []
             var bootstrapSinceRevision = "0"
             var bootstrapDeviceID: UUID?
+            var preBootstrapUploadSucceeded = true
             if let targetUserID {
                 do {
                     let database = try ContentDatabase(userID: targetUserID)
@@ -179,6 +180,7 @@ final class AppUserStore {
                     Self.logger.warning(
                         "pre-bootstrap pending upload failed; bootstrap will continue: \(error.localizedDescription, privacy: .public)"
                     )
+                    preBootstrapUploadSucceeded = false
                 }
             }
 
@@ -212,7 +214,9 @@ final class AppUserStore {
                 try database.importServerBootstrap(
                     bootstrap,
                     selectedUserID: resolvedUserID,
-                    progressSnapshotIsComplete: !hasCompletedInitialSync && bootstrapSinceRevision == "0"
+                    progressSnapshotIsComplete: preBootstrapUploadSucceeded
+                        && !hasCompletedInitialSync
+                        && bootstrapSinceRevision == "0"
                 )
                 try database.markInitialSyncCompleted()
                 let importedServerRevision = try database.serverRevision()
@@ -303,7 +307,7 @@ final class AppUserStore {
             let batch = try database.pendingServerSyncBatch()
             guard !batch.isEmpty else { return }
             let response = try await syncClient.uploadEvents(batch.payload, selectedUserID: selectedUserID, deviceID: deviceID)
-            try database.markServerSyncBatchUploaded(batch)
+            try database.markServerSyncBatchUploaded(batch, response: response)
             if let serverRevision = response.serverRevision {
                 try database.setServerRevision(serverRevision)
                 Self.logger.info("uploaded pending events serverRevision=\(serverRevision, privacy: .public)")
@@ -478,7 +482,7 @@ final class AppUserStore {
                         let data = try await syncClient.downloadMedia(id: candidate.media.id)
                         if let expectedHash = candidate.media.sha256,
                            Self.sha256Hex(for: data) != expectedHash {
-                            return .failure(candidate, .failed(ServerSyncError.invalidResponse.localizedDescription))
+                            return .failure(candidate, .failed(ServerSyncError.invalidResponse("media checksum mismatch").localizedDescription))
                         }
                         return .success(MediaDownloadResult(candidate: candidate, data: data))
                     } catch ServerSyncError.cancelled {
@@ -517,7 +521,7 @@ final class AppUserStore {
         let relativePath = candidate.relativePath
         let data = result.data
         if let expectedHash = media.sha256, Self.sha256Hex(for: data) != expectedHash {
-            throw ServerSyncError.invalidResponse
+            throw ServerSyncError.invalidResponse("media checksum mismatch")
         }
         let rootURL = try mediaRootURL(scope: candidate.scope)
         let mediaDirectory = rootURL.appendingPathComponent(AppDataPaths.deckMediaFolderName, isDirectory: true)

@@ -955,6 +955,7 @@ struct DeckDetailView: View {
     @State private var session: StudySession?
     @State private var showStudy = false
     @State private var statusError: String?
+    @State private var startError: String?
     @State private var exerciseScope: DeckExerciseScope = .all
     @State private var weakCardIDs: Set<UUID> = []
     @State private var matchingRecord: DeckMatchingRecord?
@@ -1088,17 +1089,32 @@ struct DeckDetailView: View {
         } message: {
             Text(statusError ?? "")
         }
+        .alert("Не удалось начать упражнение", isPresented: startErrorBinding) {
+            Button("ОК", role: .cancel) {
+                startError = nil
+            }
+        } message: {
+            Text(startError ?? "")
+        }
     }
 
     private func start(_ mode: StudyMode) {
         guard deck.isActive else { return }
-        switch exerciseScope {
-        case .all:
-            session = try? store.startAllCardsSession(deck: deck, mode: mode)
-        case .weak:
-            session = try? store.startWeakCardsSession(deck: deck, mode: mode)
+        do {
+            switch exerciseScope {
+            case .all:
+                session = try store.startAllCardsSession(deck: deck, mode: mode)
+            case .weak:
+                session = try store.startWeakCardsSession(deck: deck, mode: mode)
+            }
+            guard session != nil else {
+                startError = "Нет карточек для этого упражнения."
+                return
+            }
+            showStudy = true
+        } catch {
+            startError = error.localizedDescription
         }
-        showStudy = session != nil
     }
 
     private var deckFootnote: String {
@@ -1148,6 +1164,15 @@ struct DeckDetailView: View {
             get: { statusError != nil },
             set: { isPresented in
                 if !isPresented { statusError = nil }
+            }
+        )
+    }
+
+    private var startErrorBinding: Binding<Bool> {
+        Binding(
+            get: { startError != nil },
+            set: { isPresented in
+                if !isPresented { startError = nil }
             }
         )
     }

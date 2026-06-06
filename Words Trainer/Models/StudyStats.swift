@@ -11,6 +11,7 @@ nonisolated struct StudyReviewEvent: Sendable, Hashable {
     let id: UUID
     let cardID: UUID
     let deckID: UUID
+    let deckVersionID: UUID?
     let mode: StudyMode
     let outcome: ReviewOutcome
     let source: StudyReviewSource
@@ -24,6 +25,7 @@ nonisolated struct StudyReviewEvent: Sendable, Hashable {
         id: UUID = UUID(),
         cardID: UUID,
         deckID: UUID,
+        deckVersionID: UUID? = nil,
         mode: StudyMode,
         outcome: ReviewOutcome,
         source: StudyReviewSource = .deckSession,
@@ -36,6 +38,7 @@ nonisolated struct StudyReviewEvent: Sendable, Hashable {
         self.id = id
         self.cardID = cardID
         self.deckID = deckID
+        self.deckVersionID = deckVersionID
         self.mode = mode
         self.outcome = outcome
         self.source = source
@@ -51,6 +54,7 @@ nonisolated struct PracticeReviewEvent: Sendable, Hashable {
     let id: UUID
     let cardID: UUID
     let deckID: UUID
+    let deckVersionID: UUID?
     let mode: StudyMode
     let outcome: ReviewOutcome
     let source: StudyReviewSource
@@ -61,6 +65,7 @@ nonisolated struct PracticeReviewEvent: Sendable, Hashable {
         id: UUID = UUID(),
         cardID: UUID,
         deckID: UUID,
+        deckVersionID: UUID? = nil,
         mode: StudyMode,
         outcome: ReviewOutcome,
         source: StudyReviewSource,
@@ -70,6 +75,7 @@ nonisolated struct PracticeReviewEvent: Sendable, Hashable {
         self.id = id
         self.cardID = cardID
         self.deckID = deckID
+        self.deckVersionID = deckVersionID
         self.mode = mode
         self.outcome = outcome
         self.source = source

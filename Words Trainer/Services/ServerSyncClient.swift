@@ -317,6 +317,7 @@ struct ServerMatchingRecordPayload: Codable, Sendable {
 struct ServerMatchingAttemptPayload: Codable, Sendable {
     let clientEventId: UUID
     let deckId: UUID?
+    let deckVersionId: UUID?
     let mode: String
     let source: String
     let completedAt: String
@@ -551,7 +552,7 @@ private struct DynamicCodingKey: CodingKey {
 enum ServerSyncError: LocalizedError {
     case missingConfiguration
     case invalidBaseURL(String)
-    case invalidResponse
+    case invalidResponse(String? = nil)
     case networkUnavailable
     case timedOut
     case cannotConnect
@@ -566,8 +567,12 @@ enum ServerSyncError: LocalizedError {
             L10n.text("SERVER_BASE_URL и HOUSEHOLD_SYNC_TOKEN не настроены.")
         case .invalidBaseURL(let value):
             L10n.format("SERVER_BASE_URL некорректный: %@.", value)
-        case .invalidResponse:
-            L10n.text("Сервер вернул некорректный ответ.")
+        case .invalidResponse(let detail):
+            if let detail, !detail.isEmpty {
+                L10n.format("Сервер вернул некорректный ответ: %@.", detail)
+            } else {
+                L10n.text("Сервер вернул некорректный ответ.")
+            }
         case .networkUnavailable:
             L10n.text("Нет подключения к интернету. Проверьте сеть и попробуйте снова.")
         case .timedOut:
@@ -647,7 +652,7 @@ struct ServerSyncClient: Sendable {
         do {
             return try decoder.decode(ServerBootstrap.self, from: data)
         } catch {
-            throw ServerSyncError.invalidResponse
+            throw ServerSyncError.invalidResponse("bootstrap decode: \(error.localizedDescription)")
         }
     }
 
@@ -686,7 +691,7 @@ struct ServerSyncClient: Sendable {
         do {
             return try decoder.decode(ServerSyncEventsResponse.self, from: responseData)
         } catch {
-            throw ServerSyncError.invalidResponse
+            throw ServerSyncError.invalidResponse("sync/events decode: \(error.localizedDescription)")
         }
     }
 
@@ -752,7 +757,7 @@ struct ServerSyncClient: Sendable {
         }
         guard let http = response as? HTTPURLResponse else {
             Self.logger.error("HTTP \(method, privacy: .public) \(endpoint.absoluteString, privacy: .public) invalid non-HTTP response")
-            throw ServerSyncError.invalidResponse
+            throw ServerSyncError.invalidResponse("non-HTTP response")
         }
         guard (200..<300).contains(http.statusCode) else {
             Self.logger.error("HTTP \(method, privacy: .public) \(endpoint.absoluteString, privacy: .public) status=\(http.statusCode, privacy: .public)")

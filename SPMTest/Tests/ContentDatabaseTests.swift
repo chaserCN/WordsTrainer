@@ -1,5 +1,6 @@
 import Foundation
 import FSRS
+import SQLite3
 import Testing
 @testable import WordsTrainerLogic
 
@@ -714,14 +715,18 @@ struct ContentDatabaseTests {
             #expect(batch.payload.practiceReviews.map(\.clientEventId) == [practiceReviewID])
             #expect(batch.payload.practiceReviews[0].mode == "clozeMultipleChoice")
             #expect(batch.payload.practiceReviews[0].source == "today_practice")
+            #expect(batch.payload.practiceReviews[0].deckVersionId == versionID)
             #expect(batch.payload.progress.map(\.cardId) == [cardID])
             #expect(batch.payload.matchingRecords.map(\.deckId) == [deckID])
+            #expect(batch.payload.matchingRecords[0].deckVersionId == versionID)
             #expect(batch.payload.matchingAttempts.map(\.clientEventId) == [matchingAttemptID])
+            #expect(batch.payload.matchingAttempts[0].deckVersionId == versionID)
             #expect(batch.payload.matchingAttempts[0].mode == "matching")
             #expect(batch.payload.matchingAttempts[0].durationMs == 14250)
             #expect(batch.payload.deckPreferences.isEmpty)
             #expect(batch.payload.reviews[0].mode == "flashcards")
             #expect(batch.payload.reviews[0].outcome == "remembered")
+            #expect(batch.payload.reviews[0].deckVersionId == versionID)
 
             try database.markServerSyncBatchUploaded(batch, syncedAt: reviewedAt)
 
@@ -759,6 +764,95 @@ struct ContentDatabaseTests {
             let batch = try database.pendingServerSyncBatch()
             #expect(batch.reviewIDs == [reviewID])
             #expect(batch.payload.reviews.map(\.clientEventId) == [reviewID])
+        }
+    }
+
+    @Test("mark uploaded with response keeps rejected events pending")
+    func markUploadedWithResponseKeepsRejectedEventsPending() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
+            let reviewedAt = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
+            let acceptedReviewID = UUID(uuidString: "77777777-7777-4777-8777-777777777777")!
+            let rejectedReviewID = UUID(uuidString: "88888888-8888-4888-8888-888888888888")!
+            let duplicatePracticeID = UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-cccccccccccc")!
+            let acceptedAttemptID = UUID(uuidString: "99999999-9999-4999-8999-999999999999")!
+
+            try database.saveStudyReview(
+                StudyReviewEvent(
+                    id: acceptedReviewID,
+                    cardID: cardID,
+                    deckID: deckID,
+                    mode: .flashcards,
+                    outcome: .remembered,
+                    reviewedAt: reviewedAt,
+                    durationMS: 1200,
+                    wasNew: true,
+                    previousState: "new",
+                    newState: "review"
+                )
+            )
+            try database.saveStudyReview(
+                StudyReviewEvent(
+                    id: rejectedReviewID,
+                    cardID: cardID,
+                    deckID: deckID,
+                    mode: .flashcards,
+                    outcome: .forgot,
+                    reviewedAt: reviewedAt,
+                    durationMS: 1300,
+                    wasNew: false,
+                    previousState: "review",
+                    newState: "review"
+                )
+            )
+            try database.savePracticeReview(
+                PracticeReviewEvent(
+                    id: duplicatePracticeID,
+                    cardID: cardID,
+                    deckID: deckID,
+                    mode: .clozeMultipleChoice,
+                    outcome: .correct,
+                    source: .todayPractice,
+                    practicedAt: reviewedAt,
+                    durationMS: 900
+                )
+            )
+            try database.saveMatchingAttempt(
+                MatchingAttemptEvent(
+                    id: acceptedAttemptID,
+                    deckID: deckID,
+                    mode: .matching,
+                    source: .deckSession,
+                    completedAt: reviewedAt,
+                    duration: 14.25,
+                    pairCount: 4
+                )
+            )
+
+            let batch = try database.pendingServerSyncBatch()
+            try database.markServerSyncBatchUploaded(
+                batch,
+                response: ServerSyncEventsResponse(
+                    acceptedReviewIds: [acceptedReviewID],
+                    duplicateReviewIds: [],
+                    acceptedPracticeReviewIds: [],
+                    duplicatePracticeReviewIds: [duplicatePracticeID],
+                    progressCardIds: [],
+                    matchingRecordDeckIds: [],
+                    acceptedMatchingAttemptIds: [acceptedAttemptID],
+                    duplicateMatchingAttemptIds: [],
+                    deckPreferenceDeckIds: [],
+                    rejectedReviewIds: [rejectedReviewID],
+                    serverRevision: "42"
+                ),
+                syncedAt: reviewedAt
+            )
+
+            let nextBatch = try database.pendingServerSyncBatch()
+            #expect(nextBatch.reviewIDs == [rejectedReviewID])
+            #expect(nextBatch.practiceReviewIDs.isEmpty)
+            #expect(nextBatch.matchingAttemptIDs.isEmpty)
+            #expect(try database.serverRevision() == "42")
         }
     }
 
@@ -955,10 +1049,55 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("corrupt FSRS progress is repaired instead of breaking deck reads")
+    func corruptFSRSProgressIsRepairedInsteadOfBreakingDeckReads() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
+            let date = try #require(Self.isoDate("2026-06-05T12:00:00.000Z"))
+            try database.saveProgress(
+                deckID: deckID,
+                progress: CardProgress.newCard(cardID: cardID, now: date)
+            )
+            try executeRawSQL(
+                """
+                UPDATE card_progress
+                SET fsrs_data = X'7b'
+                WHERE user_id = '\(userID.databaseString)' AND card_id = '\(cardID.databaseString)'
+                """
+            )
+
+            let progress = try #require(database.progressMap(deckID: deckID)[cardID])
+            #expect(progress.cardID == cardID)
+
+            let batch = try database.pendingServerSyncBatch()
+            #expect(batch.progressCardIDs == [cardID])
+        }
+    }
+
     @Test("import marks deck version cached after content commit")
     func importMarksDeckVersionCachedAfterContentCommit() throws {
         try withIsolatedDatabase { database in
             try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
+
+            #expect(try database.cachedDeckVersionIDs() == [versionID])
+        }
+    }
+
+    @Test("cached deck versions exclude decks with missing media files")
+    func cachedDeckVersionsExcludeDecksWithMissingMediaFiles() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(
+                bootstrap(cardImageMediaID: mediaID, media: [mediaJSON()]),
+                selectedUserID: userID
+            )
+            #expect(try database.cachedDeckVersionIDs().isEmpty)
+
+            let mediaFolderURL = try AppDataPaths.deckFolderURL(deckID: deckID)
+                .appendingPathComponent(AppDataPaths.deckMediaFolderName, isDirectory: true)
+            try FileManager.default.createDirectory(at: mediaFolderURL, withIntermediateDirectories: true)
+            let mediaFileURL = mediaFolderURL.appendingPathComponent("\(mediaID.databaseString).png")
+            try Data([1, 2, 3]).write(to: mediaFileURL)
+            try database.updateMediaLocalPath(mediaID: mediaID, localPath: "media/\(mediaID.databaseString).png")
 
             #expect(try database.cachedDeckVersionIDs() == [versionID])
         }
@@ -1000,7 +1139,6 @@ struct ContentDatabaseTests {
         try withIsolatedDatabase { database in
             try database.importServerBootstrap(bootstrap(cardImageMediaID: mediaID, media: [mediaJSON()]), selectedUserID: userID)
             #expect(try database.loadDecks().map(\.id) == [deckID])
-            #expect(try database.cachedDeckVersionIDs() == [versionID])
             #expect(try database.mediaObjects(ids: [mediaID]).map(\.id) == [mediaID])
 
             let deckFolderURL = try AppDataPaths.deckFolderURL(deckID: deckID)
@@ -1009,6 +1147,7 @@ struct ContentDatabaseTests {
             let mediaFileURL = mediaFolderURL.appendingPathComponent("\(mediaID.databaseString).png")
             try Data([1, 2, 3]).write(to: mediaFileURL)
             #expect(FileManager.default.fileExists(atPath: mediaFileURL.path))
+            #expect(try database.cachedDeckVersionIDs() == [versionID])
 
             let failedAt = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
             try database.saveStudyReview(
@@ -1229,6 +1368,17 @@ struct ContentDatabaseTests {
         AppDataPaths.dataDirectoryOverride = root
         let database = try ContentDatabase(userID: userID)
         try operation(database)
+    }
+
+    private func executeRawSQL(_ sql: String) throws {
+        var db: OpaquePointer?
+        guard sqlite3_open(try AppDataPaths.databaseURL().path, &db) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_close(db) }
+        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
     }
 
     private func bootstrap(
