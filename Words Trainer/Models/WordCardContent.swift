@@ -1,16 +1,16 @@
 import Foundation
 
-struct WordForm: Codable, Hashable {
+nonisolated struct WordForm: Codable, Hashable, Sendable {
     let formKey: String
     let text: String
 }
 
-struct ClozeSentenceParts: Equatable, Hashable {
+nonisolated struct ClozeSentenceParts: Equatable, Hashable, Sendable {
     let prefix: String
     let suffix: String
 }
 
-enum ContentStatus: String, Codable, Hashable, Sendable {
+nonisolated enum ContentStatus: String, Codable, Hashable, Sendable {
     case active
     case inactive
 
@@ -18,7 +18,7 @@ enum ContentStatus: String, Codable, Hashable, Sendable {
 }
 
 /// Card content from server or local seed (no SRS state).
-struct WordCardContent: Codable, Identifiable, Hashable {
+nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
     static let blankToken = "{{blank}}"
 
     let id: UUID
@@ -383,7 +383,7 @@ struct WordCardContent: Codable, Identifiable, Hashable {
     }
 }
 
-struct DeckContent: Identifiable, Hashable {
+nonisolated struct DeckContent: Identifiable, Hashable, Sendable {
     let id: UUID
     var status: ContentStatus
     var title: String

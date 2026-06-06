@@ -540,31 +540,24 @@ struct StatisticsView: View {
                 loadError = nil
                 return
             }
-            let deckStore: DeckStore
-            if let store, storeUserID == selectedUserID {
-                deckStore = store
-            } else {
-                deckStore = try DeckStore(userID: selectedUserID)
-                store = deckStore
+            let snapshot = try await DeckStore.statisticsSnapshot(userID: selectedUserID)
+            guard userStore.selectedUserID == selectedUserID else { return }
+            if store == nil || storeUserID != selectedUserID {
+                store = try DeckStore(userID: selectedUserID)
                 storeUserID = selectedUserID
             }
-            let calendar = Calendar.current
-            let todayStart = StudyDay.start(for: .now, calendar: calendar)
-            let weekStart = calendar.date(byAdding: .day, value: -6, to: todayStart) ?? todayStart
-            let monthStart = calendar.date(byAdding: .day, value: -29, to: todayStart) ?? todayStart
-            let activityDays = try deckStore.studyActivity(days: 120)
-            todayUniqueCardCount = try deckStore.uniqueStudyCardCount(since: todayStart)
-            todayMatchingAttemptCount = try deckStore.matchingAttemptCount(since: todayStart)
-            weekUniqueCardCount = try deckStore.uniqueStudyCardCount(since: weekStart)
-            weekMatchingAttemptCount = try deckStore.matchingAttemptCount(since: weekStart)
-            monthUniqueCardCount = try deckStore.uniqueStudyCardCount(since: monthStart)
-            monthMatchingAttemptCount = try deckStore.matchingAttemptCount(since: monthStart)
-            todayStudyTimeBreakdown = try deckStore.studyTimeBreakdown(since: todayStart)
-            studyDaysCount = Self.studyDaysCount(from: activityDays)
-            let maxActivityCount = max(activityDays.map(\.reviewedCount).max() ?? 0, 1)
-            activityMonths = ActivityCalendarBuilder.months(from: activityDays, maxCount: maxActivityCount)
-            scheduledDays = try deckStore.scheduledReviewDays(days: 7)
-            weakCardsPool = try deckStore.weakCards(limit: WeakCardsPractice.fetchLimit)
+            todayUniqueCardCount = snapshot.todayUniqueCardCount
+            todayMatchingAttemptCount = snapshot.todayMatchingAttemptCount
+            weekUniqueCardCount = snapshot.weekUniqueCardCount
+            weekMatchingAttemptCount = snapshot.weekMatchingAttemptCount
+            monthUniqueCardCount = snapshot.monthUniqueCardCount
+            monthMatchingAttemptCount = snapshot.monthMatchingAttemptCount
+            todayStudyTimeBreakdown = snapshot.todayStudyTimeBreakdown
+            studyDaysCount = Self.studyDaysCount(from: snapshot.activityDays)
+            let maxActivityCount = max(snapshot.activityDays.map(\.reviewedCount).max() ?? 0, 1)
+            activityMonths = ActivityCalendarBuilder.months(from: snapshot.activityDays, maxCount: maxActivityCount)
+            scheduledDays = snapshot.scheduledDays
+            weakCardsPool = snapshot.weakCards
             loadError = nil
         } catch {
             loadError = error.localizedDescription
@@ -1856,7 +1849,7 @@ private struct DashboardMetric: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            Text(detail.map(L10n.text) ?? " ")
+            Text(detail.map { L10n.text($0) } ?? " ")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(oklch(0.82, 0.03, 250, detail == nil ? 0 : 0.72))
                 .lineLimit(1)

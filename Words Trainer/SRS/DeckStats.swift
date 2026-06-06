@@ -1,7 +1,7 @@
 import Foundation
 import FSRS
 
-struct DeckStats: Equatable {
+nonisolated struct DeckStats: Equatable, Sendable {
     let newAvailable: Int
     let learningDue: Int
     let reviewDue: Int
@@ -19,7 +19,7 @@ struct DeckStats: Equatable {
     static let zero = DeckStats(newAvailable: 0, learningDue: 0, reviewDue: 0, dueLaterToday: 0)
 }
 
-enum DeckStatsCalculator {
+nonisolated enum DeckStatsCalculator {
     static func compute(
         deck: DeckContent,
         progressByCardID: [UUID: CardProgress],
@@ -74,7 +74,7 @@ enum DeckStatsCalculator {
     }
 }
 
-enum StudyPlanForecastCalculator {
+nonisolated enum StudyPlanForecastCalculator {
     static func compute(
         days: Int,
         decks: [DeckContent],

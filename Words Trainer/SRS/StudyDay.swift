@@ -1,6 +1,6 @@
 import Foundation
 
-enum StudyDay {
+nonisolated enum StudyDay {
     static let rolloverHour = 4
 
     static func start(for date: Date, calendar: Calendar = .current) -> Date {
@@ -24,4 +24,3 @@ enum StudyDay {
         key(for: date, calendar: calendar) == key(for: other, calendar: calendar)
     }
 }
-

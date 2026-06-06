@@ -530,7 +530,7 @@ private struct DeckWordSearchIndex {
             .map(\.entry.item)
     }
 
-    private static func sortItems(_ lhs: DeckWordSearchItem, _ rhs: DeckWordSearchItem) -> Bool {
+    nonisolated private static func sortItems(_ lhs: DeckWordSearchItem, _ rhs: DeckWordSearchItem) -> Bool {
         let lemmaOrder = lhs.card.lemma.localizedCaseInsensitiveCompare(rhs.card.lemma)
         if lemmaOrder != .orderedSame {
             return lemmaOrder == .orderedAscending

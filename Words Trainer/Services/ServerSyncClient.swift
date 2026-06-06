@@ -184,7 +184,7 @@ struct ServerDistractorContent: Decodable, Sendable {
     let priority: Int?
 }
 
-struct ServerMediaObject: Decodable, Sendable {
+nonisolated struct ServerMediaObject: Decodable, Sendable {
     let id: UUID
     let storageKey: String?
     let sha256: String?
@@ -234,7 +234,7 @@ struct ServerMediaObject: Decodable, Sendable {
 }
 
 private extension KeyedDecodingContainer {
-    func decodeFlexibleIntIfPresent(forKey key: Key) throws -> Int? {
+    nonisolated func decodeFlexibleIntIfPresent(forKey key: Key) throws -> Int? {
         if let value = try decodeIfPresent(Int.self, forKey: key) {
             return value
         }
@@ -430,7 +430,7 @@ struct ServerSyncEventsResponse: Decodable, Sendable {
     }
 }
 
-enum JSONValue: Codable, Sendable {
+nonisolated enum JSONValue: Codable, Sendable {
     case object([String: JSONValue])
     case array([JSONValue])
     case string(String)

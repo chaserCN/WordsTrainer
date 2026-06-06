@@ -907,7 +907,7 @@ private struct MatchingCell: View {
             .shadow(color: secondaryShadow.color, radius: secondaryShadow.radius, x: 0, y: secondaryShadow.y)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel.map(L10n.text) ?? label)
+        .accessibilityLabel(accessibilityLabel.map { L10n.text($0) } ?? label)
         .frame(maxWidth: .infinity)
         .modifier(ShakeEffect(animatableData: isWrong ? 1 : 0))
         .animation(.linear(duration: 0.4), value: isWrong)

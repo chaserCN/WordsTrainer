@@ -1,6 +1,6 @@
 import Foundation
 
-enum StudyMode: String, Codable, CaseIterable, Identifiable {
+enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case recall
     case flashcards
     case clozeMultipleChoice
@@ -42,7 +42,7 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum ReviewOutcome: Sendable, Hashable {
+nonisolated enum ReviewOutcome: Sendable, Hashable {
     case remembered
     case forgot
     case correct

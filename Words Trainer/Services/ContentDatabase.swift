@@ -2,18 +2,18 @@ import Foundation
 import FSRS
 import SQLite3
 
-private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+nonisolated(unsafe) private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-private enum ContentDatabaseDefaults {
+nonisolated private enum ContentDatabaseDefaults {
     static let userID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 }
 
-private enum SyncMetadataKey {
+nonisolated private enum SyncMetadataKey {
     static let serverRevision = "server_revision"
     static let deviceID = "device_id"
 }
 
-private enum WeakCardFilter {
+nonisolated private enum WeakCardFilter {
     static let minimumFailureRate = 0.25
 }
 
@@ -70,7 +70,7 @@ struct PendingServerSyncBatch {
 }
 
 /// Read/write access to `Documents/Data/flashgame.db` (content + study progress).
-final class ContentDatabase {
+nonisolated final class ContentDatabase {
     private var db: OpaquePointer?
     private let userID: UUID
     var currentUserID: UUID { userID }

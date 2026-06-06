@@ -9,7 +9,7 @@ import Foundation
 ///   <deck-uuid>/
 ///     media/
 /// ```
-enum AppDataPaths {
+nonisolated enum AppDataPaths {
     static let dataDirectoryName = "Data"
     static let databaseFileName = "flashgame.db"
     static let deckMediaFolderName = "media"

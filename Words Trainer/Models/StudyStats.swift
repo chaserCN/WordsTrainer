@@ -1,13 +1,13 @@
 import Foundation
 
-enum StudyReviewSource: String, Codable, Sendable, Hashable {
+nonisolated enum StudyReviewSource: String, Codable, Sendable, Hashable {
     case todayQueue = "today_queue"
     case deckSession = "deck_session"
     case weakCards = "weak_cards"
     case todayPractice = "today_practice"
 }
 
-struct StudyReviewEvent: Sendable, Hashable {
+nonisolated struct StudyReviewEvent: Sendable, Hashable {
     let id: UUID
     let cardID: UUID
     let deckID: UUID
@@ -47,7 +47,7 @@ struct StudyReviewEvent: Sendable, Hashable {
     }
 }
 
-struct PracticeReviewEvent: Sendable, Hashable {
+nonisolated struct PracticeReviewEvent: Sendable, Hashable {
     let id: UUID
     let cardID: UUID
     let deckID: UUID
@@ -78,7 +78,7 @@ struct PracticeReviewEvent: Sendable, Hashable {
     }
 }
 
-struct StudyActivityDay: Identifiable, Hashable {
+nonisolated struct StudyActivityDay: Identifiable, Hashable, Sendable {
     let dayKey: String
     let reviewedCount: Int
     let passedCount: Int
@@ -90,7 +90,7 @@ struct StudyActivityDay: Identifiable, Hashable {
     }
 }
 
-struct StudyReviewCount: Hashable {
+nonisolated struct StudyReviewCount: Hashable, Sendable {
     let total: Int
     let passed: Int
 
@@ -102,7 +102,7 @@ struct StudyReviewCount: Hashable {
     }
 }
 
-struct StudyTimeBreakdown: Hashable {
+nonisolated struct StudyTimeBreakdown: Hashable, Sendable {
     var flashcardsMilliseconds: Int
     var sentenceMilliseconds: Int
     var matchingMilliseconds: Int
@@ -120,7 +120,7 @@ struct StudyTimeBreakdown: Hashable {
     }
 }
 
-struct WeakCardStat: Identifiable, Hashable {
+nonisolated struct WeakCardStat: Identifiable, Hashable, Sendable {
     let cardID: UUID
     let deckID: UUID
     let word: String
@@ -135,7 +135,7 @@ struct WeakCardStat: Identifiable, Hashable {
     }
 }
 
-struct ScheduledReviewDay: Identifiable, Hashable {
+nonisolated struct ScheduledReviewDay: Identifiable, Hashable, Sendable {
     let dayKey: String
     let dueCount: Int
 
