@@ -491,6 +491,7 @@ private struct DeckWordSearchIndex {
     private struct Candidate {
         let original: String
         let normalized: String
+        let normalizedCharacters: [Character]
     }
 
     let sortedItems: [DeckWordSearchItem]
@@ -513,12 +514,14 @@ private struct DeckWordSearchIndex {
         let normalizedQuery = trimmedQuery.normalizedForWordSearch
         guard !normalizedQuery.isEmpty else { return sortedItems }
         guard normalizedQuery.count >= 2 else { return [] }
+        let normalizedQueryCharacters = Array(normalizedQuery)
 
         return entries
             .compactMap { entry -> (entry: Entry, score: Int)? in
                 guard let score = Self.searchScore(
                     query: trimmedQuery,
                     normalizedQuery: normalizedQuery,
+                    normalizedQueryCharacters: normalizedQueryCharacters,
                     entry: entry
                 ) else { return nil }
                 return (entry, score)
@@ -553,12 +556,22 @@ private struct DeckWordSearchIndex {
         [item.card.word, item.card.lemma]
             .flatMap { text in [text] + text.split(separator: " ").map(String.init) }
             .map { text in
-                Candidate(original: text, normalized: text.normalizedForWordSearch)
+                let normalized = text.normalizedForWordSearch
+                return Candidate(
+                    original: text,
+                    normalized: normalized,
+                    normalizedCharacters: Array(normalized)
+                )
             }
             .filter { !$0.normalized.isEmpty }
     }
 
-    private static func searchScore(query: String, normalizedQuery: String, entry: Entry) -> Int? {
+    private static func searchScore(
+        query: String,
+        normalizedQuery: String,
+        normalizedQueryCharacters: [Character],
+        entry: Entry
+    ) -> Int? {
         var bestScore: Int?
         for candidate in entry.candidates {
             let score: Int?
@@ -569,7 +582,7 @@ private struct DeckWordSearchIndex {
             } else if candidate.normalized.contains(normalizedQuery) || candidate.original.localizedStandardRange(of: query) != nil {
                 score = 2
             } else {
-                score = fuzzyScore(query: normalizedQuery, candidate: candidate.normalized)
+                score = fuzzyScore(query: normalizedQueryCharacters, candidate: candidate)
             }
 
             if let score, bestScore == nil || score < bestScore! {
@@ -579,12 +592,16 @@ private struct DeckWordSearchIndex {
         return bestScore
     }
 
-    private static func fuzzyScore(query: String, candidate: String) -> Int? {
+    private static func fuzzyScore(query: [Character], candidate: Candidate) -> Int? {
         guard query.count >= 3 else { return nil }
         let maxDistance = allowedTypoDistance(for: query.count)
-        guard abs(candidate.count - query.count) <= maxDistance + 1 else { return nil }
+        guard abs(candidate.normalizedCharacters.count - query.count) <= maxDistance + 1 else { return nil }
 
-        let distance = levenshteinDistance(query, candidate, maximumDistance: maxDistance)
+        let distance = levenshteinDistance(
+            query,
+            candidate.normalizedCharacters,
+            maximumDistance: maxDistance
+        )
         guard distance <= maxDistance else { return nil }
         return 10 + distance
     }
@@ -595,9 +612,11 @@ private struct DeckWordSearchIndex {
         return 3
     }
 
-    private static func levenshteinDistance(_ lhs: String, _ rhs: String, maximumDistance: Int) -> Int {
-        let lhsCharacters = Array(lhs)
-        let rhsCharacters = Array(rhs)
+    private static func levenshteinDistance(
+        _ lhsCharacters: [Character],
+        _ rhsCharacters: [Character],
+        maximumDistance: Int
+    ) -> Int {
         guard !lhsCharacters.isEmpty else { return rhsCharacters.count }
         guard !rhsCharacters.isEmpty else { return lhsCharacters.count }
 
