@@ -1,0 +1,7 @@
+"count.cards.in_queue" = "%@ в очереди";
+"count.cards.in_weak" = "%@ в сложных";
+"count.cards.today" = "%@ на сегодня";
+"count.cards.for_practice" = "%@ для практики";
+"count.days.period" = "за %@";
+"count.days.streak" = "Серия %@";
+"duration.less_than" = "<%@";

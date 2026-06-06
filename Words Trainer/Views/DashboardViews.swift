@@ -696,16 +696,16 @@ private struct StatisticsMetricsGrid: View {
                 DashboardMetric(
                     title: "Сегодня",
                     value: "\(todayCount)",
-                    subtitle: wordsLabel(todayCount),
+                    subtitle: LocalizedCounts.wordWord(for: todayCount),
                     secondaryValue: "\(todayMatchingAttemptCount)",
-                    secondarySubtitle: gamesLabel(todayMatchingAttemptCount)
+                    secondarySubtitle: LocalizedCounts.gameWord(for: todayMatchingAttemptCount)
                 )
                 DashboardMetric(
                     title: "7 дней",
                     value: "\(weekCount)",
-                    subtitle: wordsLabel(weekCount),
+                    subtitle: LocalizedCounts.wordWord(for: weekCount),
                     secondaryValue: "\(weekMatchingAttemptCount)",
-                    secondarySubtitle: gamesLabel(weekMatchingAttemptCount)
+                    secondarySubtitle: LocalizedCounts.gameWord(for: weekMatchingAttemptCount)
                 )
             }
 
@@ -713,11 +713,11 @@ private struct StatisticsMetricsGrid: View {
                 DashboardMetric(
                     title: "30 дней",
                     value: "\(monthCount)",
-                    subtitle: wordsLabel(monthCount),
+                    subtitle: LocalizedCounts.wordWord(for: monthCount),
                     secondaryValue: "\(monthMatchingAttemptCount)",
-                    secondarySubtitle: gamesLabel(monthMatchingAttemptCount)
+                    secondarySubtitle: LocalizedCounts.gameWord(for: monthMatchingAttemptCount)
                 )
-                DashboardMetric(title: "Дни занятий", value: "\(studyDaysCount)", subtitle: "за 30 дней")
+                DashboardMetric(title: "Дни занятий", value: "\(studyDaysCount)", subtitle: LocalizedCounts.daysPeriod(30))
             }
         }
     }
@@ -1192,7 +1192,7 @@ private struct StreakBadge: View {
                     .stroke(.white.opacity(0.96), lineWidth: 2)
             }
             .shadow(color: badgeShadow, radius: 4, x: 0, y: 3)
-            .accessibilityLabel("Серия \(days) дней")
+            .accessibilityLabel(LocalizedCounts.dayStreak(days))
     }
 }
 
@@ -1291,10 +1291,10 @@ private struct StudyTodayCard: View {
 
     private var subtitle: String {
         if stats.studyTotal > 0 {
-            return "\(stats.studyTotal) карточек в очереди"
+            return LocalizedCounts.cardsInQueue(stats.studyTotal)
         }
         if practiceCount > 0 {
-            return "Пока всё · можно повторить \(practiceCount)"
+            return "Пока всё · можно повторить \(LocalizedCounts.cardsForPractice(practiceCount))"
         }
         return "Пока всё"
     }
@@ -1643,9 +1643,9 @@ private struct QueueSummaryCard: View {
 
     private var summaryText: String {
         if queueCount == 0, practiceCount > 0 {
-            return "Очередь закончена · \(practiceCount) для практики"
+            return "Очередь закончена · \(LocalizedCounts.cardsForPractice(practiceCount))"
         }
-        return "\(queueCount) \(cardsLabel(queueCount))"
+        return LocalizedCounts.cardPhrase(queueCount)
     }
 }
 
@@ -1948,7 +1948,7 @@ private enum ActivityCalendarBuilder {
                 reviewedCount: reviewedCount,
                 isToday: key == todayKey,
                 level: level(for: reviewedCount, maxCount: maxCount),
-                accessibilityLabel: "\(key): \(reviewedCount) карточек"
+                accessibilityLabel: "\(key): \(LocalizedCounts.cardPhrase(reviewedCount))"
             )
             cells.append(ActivityCalendarCell(id: key, day: day))
         }
@@ -2073,7 +2073,7 @@ private struct TodayDeckCard: View {
                             .font(.system(size: 18, weight: .bold))
                             .foregroundStyle(.white)
                             .lineLimit(1)
-                        Text("\(stats.studyTotal) на сегодня")
+                        Text(LocalizedCounts.cardsToday(stats.studyTotal))
                             .font(.system(size: 13, weight: .regular))
                             .foregroundStyle(.white.opacity(0.55))
                     }
@@ -2377,67 +2377,22 @@ private func currentStreakDays(from activity: [StudyActivityDay]) -> Int {
     return streak
 }
 
-private func wordsLabel(_ count: Int) -> String {
-    let mod10 = count % 10
-    let mod100 = count % 100
-    if mod100 >= 11 && mod100 <= 14 {
-        return "слов"
-    }
-    if mod10 == 1 {
-        return "слово"
-    }
-    if mod10 >= 2 && mod10 <= 4 {
-        return "слова"
-    }
-    return "слов"
-}
-
-private func cardsLabel(_ count: Int) -> String {
-    let mod10 = count % 10
-    let mod100 = count % 100
-    if mod100 >= 11 && mod100 <= 14 {
-        return "карточек"
-    }
-    if mod10 == 1 {
-        return "карточка"
-    }
-    if mod10 >= 2 && mod10 <= 4 {
-        return "карточки"
-    }
-    return "карточек"
-}
-
-private func gamesLabel(_ count: Int) -> String {
-    let mod10 = count % 10
-    let mod100 = count % 100
-    if mod100 >= 11 && mod100 <= 14 {
-        return "игр"
-    }
-    if mod10 == 1 {
-        return "игра"
-    }
-    if mod10 >= 2 && mod10 <= 4 {
-        return "игры"
-    }
-    return "игр"
-}
-
 private func studyDurationLabel(milliseconds: Int) -> String {
     let totalSeconds = max(0, milliseconds) / 1000
     if totalSeconds == 0 {
-        return "0 мин"
+        return LocalizedCounts.minutePhrase(0)
     }
     if totalSeconds < 60 {
-        return "<1 мин"
+        return LocalizedCounts.lessThanMinute()
     }
     let totalMinutes = totalSeconds / 60
     if totalMinutes < 60 {
-        return "\(totalMinutes) мин"
+        return LocalizedCounts.minutePhrase(totalMinutes)
     }
     let hours = totalMinutes / 60
     let minutes = totalMinutes % 60
     if minutes == 0 {
-        return "\(hours) ч"
+        return LocalizedCounts.hourPhrase(hours)
     }
-    return "\(hours) ч \(minutes) мин"
+    return "\(LocalizedCounts.hourPhrase(hours)) \(LocalizedCounts.minutePhrase(minutes))"
 }

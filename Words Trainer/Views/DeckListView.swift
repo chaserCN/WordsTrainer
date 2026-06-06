@@ -195,14 +195,14 @@ private struct DeckListHeader: View {
                 Image(systemName: "books.vertical.fill")
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(MatchPalette.primary)
-                Text(RussianPluralization.deckPhrase(deckCount))
+                Text(LocalizedCounts.deckPhrase(deckCount))
                     .font(.system(size: 13, weight: .regular))
                     .monospacedDigit()
                     .foregroundStyle(LovableSurface.muted)
                 Text("·")
                     .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(LovableSurface.muted.opacity(0.7))
-                Text(RussianPluralization.cardPhrase(cardCount))
+                Text(LocalizedCounts.cardPhrase(cardCount))
                     .font(.system(size: 13, weight: .regular))
                     .monospacedDigit()
                     .foregroundStyle(LovableSurface.muted)
@@ -246,7 +246,7 @@ struct LovableDeckCard: View {
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    Text("\(RussianPluralization.cardPhrase(deck.activeCards.count)) · \(deck.languageCode.uppercased())")
+                    Text("\(LocalizedCounts.cardPhrase(deck.activeCards.count)) · \(deck.languageCode.uppercased())")
                         .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(.white.opacity(0.55))
                         .lineLimit(1)
@@ -359,7 +359,7 @@ struct DeckCardView: View {
                         .foregroundStyle(Color(red: 0.08, green: 0.08, blue: 0.13))
 
                     HStack(spacing: 8) {
-                        Text("\(RussianPluralization.cardPhrase(activeCardCount)) · \(deck.languageCode.uppercased())")
+                        Text("\(LocalizedCounts.cardPhrase(activeCardCount)) · \(deck.languageCode.uppercased())")
                             .font(.subheadline)
                             .foregroundStyle(Color(red: 0.45, green: 0.46, blue: 0.55))
 
@@ -567,7 +567,7 @@ struct DeckDetailView: View {
         case .all:
             return "Учим все карты в колоде"
         case .weak:
-            return "\(RussianPluralization.cardPhrase(weakCardIDs.count)) в сложных"
+            return LocalizedCounts.cardsInWeak(weakCardIDs.count)
         }
     }
 
@@ -1024,7 +1024,7 @@ private struct DeckQueueSummary: View {
         if stats.studyTotal == 0 {
             return "На сегодня всё готово"
         }
-        return "\(RussianPluralization.cardPhrase(stats.studyTotal)) в очереди"
+        return LocalizedCounts.cardsInQueue(stats.studyTotal)
     }
 
     private var summaryColor: Color {
