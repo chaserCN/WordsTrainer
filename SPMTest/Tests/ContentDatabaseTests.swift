@@ -1273,8 +1273,8 @@ struct ContentDatabaseTests {
         }
     }
 
-    @Test("bootstrap server revision is readable after reopening database")
-    func bootstrapServerRevisionIsReadableAfterReopeningDatabase() throws {
+    @Test("server revision marker is readable after reopening database")
+    func serverRevisionMarkerIsReadableAfterReopeningDatabase() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)
         defer {
@@ -1284,10 +1284,7 @@ struct ContentDatabaseTests {
 
         AppDataPaths.dataDirectoryOverride = root
         let database = try ContentDatabase(userID: userID)
-        try database.importServerBootstrap(
-            bootstrap(serverRevision: "123"),
-            selectedUserID: userID
-        )
+        try database.setServerRevision("123")
         #expect(try database.serverRevision() == "123")
 
         let reopenedDatabase = try ContentDatabase(userID: userID)
@@ -1326,6 +1323,7 @@ struct ContentDatabaseTests {
         AppDataPaths.dataDirectoryOverride = root
         let database = try ContentDatabase(userID: userID)
         try database.importServerBootstrap(bootstrap(serverRevision: "321"), selectedUserID: userID)
+        try database.setServerRevision("321")
         #expect(try database.journalMode().lowercased() == "wal")
 
         let readOnlyDatabase = try ContentDatabase(userID: userID, mode: .readOnly)
@@ -1382,6 +1380,7 @@ struct ContentDatabaseTests {
 
         let database = try ContentDatabase(userID: userID)
         try database.importServerBootstrap(bootstrap(serverRevision: "10"), selectedUserID: userID)
+        try database.setServerRevision("10")
         try database.markInitialSyncCompleted()
 
         let captured = LockedRequests()
@@ -1445,6 +1444,7 @@ struct ContentDatabaseTests {
 
         let database = try ContentDatabase(userID: userID)
         try database.importServerBootstrap(bootstrap(serverRevision: "10"), selectedUserID: userID)
+        try database.setServerRevision("10")
         try database.markInitialSyncCompleted()
 
         let captured = LockedRequests()
@@ -1481,6 +1481,316 @@ struct ContentDatabaseTests {
         #expect(bootstrapRequest.value(forHTTPHeaderField: "X-FlashGame-Cached-Deck-Version-Ids") == nil)
         #expect(try database.serverRevision() == "11")
         #expect(try database.loadDecks().isEmpty)
+    }
+
+    @Test("bootstrap does not commit revision when required media fails")
+    @MainActor
+    func bootstrapDoesNotCommitRevisionWhenRequiredMediaFails() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)
+        let suiteName = "AppUserStoreTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            AppDataPaths.dataDirectoryOverride = nil
+            StubAppUserStoreURLProtocol.handler = nil
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        AppDataPaths.dataDirectoryOverride = root
+        defaults.set("https://example.test", forKey: "server.baseURL")
+        defaults.set("test-token", forKey: "server.householdSyncToken")
+
+        let captured = LockedRequests()
+        StubAppUserStoreURLProtocol.handler = { request in
+            captured.append(request)
+            if request.url?.path == "/v1/media/\(self.audioWordMediaID.uuidString.lowercased())" {
+                throw URLError(.timedOut)
+            }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            switch request.url?.path {
+            case "/v1/bootstrap":
+                return (response, Data(appUserStoreDeckBootstrapJSON(revision: "42", audioMediaID: audioWordMediaID).utf8))
+            default:
+                Issue.record("Unexpected request path: \(request.url?.absoluteString ?? "nil")")
+                return (response, Data(appUserStoreDeckBootstrapJSON(revision: "42", audioMediaID: audioWordMediaID).utf8))
+            }
+        }
+
+        let store = AppUserStore(
+            defaults: defaults,
+            syncClient: ServerSyncClient(session: Self.stubAppUserStoreSession(), userDefaultsSuiteName: suiteName)
+        )
+        let result = await store.refreshFromServer()
+
+        #expect(result == .loadedWithMediaWarnings(userCount: 1, assignmentCount: 1, activeAssignmentCount: 1, failedMediaCount: 1))
+        #expect(captured.requests.map(\.url?.path) == ["/v1/bootstrap", "/v1/media/\(audioWordMediaID.uuidString.lowercased())"])
+        let database = try ContentDatabase(userID: userID)
+        #expect(try database.serverRevision() == "0")
+        #expect(try database.hasCompletedInitialSync() == false)
+        #expect(try database.cachedDeckVersionIDs().isEmpty)
+    }
+
+    @Test("delta sync repairs incomplete media cache with full bootstrap")
+    @MainActor
+    func deltaSyncRepairsIncompleteMediaCacheWithFullBootstrap() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)
+        let suiteName = "AppUserStoreTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let audioData = Data([1, 2, 3])
+        defer {
+            AppDataPaths.dataDirectoryOverride = nil
+            StubAppUserStoreURLProtocol.handler = nil
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        AppDataPaths.dataDirectoryOverride = root
+        defaults.set("https://example.test", forKey: "server.baseURL")
+        defaults.set("test-token", forKey: "server.householdSyncToken")
+        let appUser = AppUser(id: userID, displayName: "Learner", avatarMediaID: nil, avatarImageURL: nil, accentHue: 42)
+        defaults.set(try JSONEncoder().encode([appUser]), forKey: "app.users")
+        defaults.set(userID.uuidString, forKey: "app.selectedUserID")
+
+        let database = try ContentDatabase(userID: userID)
+        try database.importServerBootstrap(
+            bootstrap(audioWordMediaID: audioWordMediaID, media: [audioMediaJSON(id: audioWordMediaID)]),
+            selectedUserID: userID
+        )
+        try database.setServerRevision("10")
+        try database.markInitialSyncCompleted()
+        #expect(try database.cachedDeckVersionIDs().isEmpty)
+
+        let captured = LockedRequests()
+        let emptyDeltaJSON = """
+        {
+          "mode": "delta",
+          "fromRevision": "10",
+          "toRevision": "10",
+          "changes": {
+            "assignments": [],
+            "content": {
+              "cards": [],
+              "examples": [],
+              "forms": [],
+              "distractors": []
+            },
+            "media": [],
+            "progress": [],
+            "reviews": [],
+            "practice_reviews": [],
+            "study_data_resets": [],
+            "matching_records": [],
+            "matching_attempts": []
+          }
+        }
+        """
+        StubAppUserStoreURLProtocol.handler = { request in
+            captured.append(request)
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": request.url?.path.hasPrefix("/v1/media/") == true ? "audio/mpeg" : "application/json"]
+            )!
+            switch request.url?.path {
+            case "/v1/sync/changes":
+                return (response, Data(emptyDeltaJSON.utf8))
+            case "/v1/bootstrap":
+                return (response, Data(appUserStoreDeckBootstrapJSON(revision: "11", audioMediaID: audioWordMediaID).utf8))
+            case "/v1/media/\(audioWordMediaID.uuidString.lowercased())":
+                return (response, audioData)
+            default:
+                Issue.record("Unexpected request path: \(request.url?.absoluteString ?? "nil")")
+                return (response, Data(emptyDeltaJSON.utf8))
+            }
+        }
+
+        let store = AppUserStore(
+            defaults: defaults,
+            syncClient: ServerSyncClient(session: Self.stubAppUserStoreSession(), userDefaultsSuiteName: suiteName)
+        )
+        let result = await store.refreshFromServer()
+
+        #expect(result == .loaded(userCount: 1, assignmentCount: 1, activeAssignmentCount: 1))
+        #expect(captured.requests.map(\.url?.path) == [
+            "/v1/sync/changes",
+            "/v1/bootstrap",
+            "/v1/media/\(audioWordMediaID.uuidString.lowercased())",
+        ])
+        let changesRequest = try #require(captured.requests.first)
+        #expect(changesRequest.url?.query == "sinceRevision=10")
+        #expect(changesRequest.value(forHTTPHeaderField: "X-FlashGame-Cached-Deck-Version-Ids") == nil)
+        let bootstrapRequest = try #require(captured.requests.dropFirst().first)
+        #expect(bootstrapRequest.value(forHTTPHeaderField: "X-FlashGame-Cached-Deck-Version-Ids") == nil)
+        let repairedDatabase = try ContentDatabase(userID: userID)
+        #expect(try repairedDatabase.serverRevision() == "11")
+        #expect(try repairedDatabase.hasCompletedInitialSync())
+        #expect(try repairedDatabase.cachedDeckVersionIDs() == [versionID])
+        let deck = try #require(repairedDatabase.loadDecks().first)
+        let card = try #require(deck.cards.first)
+        let audioURL = try #require(card.audioWordURL)
+        #expect(FileManager.default.fileExists(atPath: audioURL.path))
+        #expect(try Data(contentsOf: audioURL) == audioData)
+    }
+
+    @Test("initial bootstrap caches user avatar media")
+    @MainActor
+    func initialBootstrapCachesUserAvatarMedia() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)
+        let suiteName = "AppUserStoreTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let avatarData = Data([0xff, 0xd8, 0xff, 0xd9])
+        defer {
+            AppDataPaths.dataDirectoryOverride = nil
+            StubAppUserStoreURLProtocol.handler = nil
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        AppDataPaths.dataDirectoryOverride = root
+        defaults.set("https://example.test", forKey: "server.baseURL")
+        defaults.set("test-token", forKey: "server.householdSyncToken")
+
+        let avatarID = mediaID
+        let bootstrapJSON = """
+        {
+          "user": {
+            "id": "\(userID.databaseString)",
+            "display_name": "Dasha",
+            "avatar_media_id": "\(avatarID.databaseString)"
+          },
+          "revision": "42",
+          "users": [
+            {
+              "id": "\(userID.databaseString)",
+              "display_name": "Dasha",
+              "avatar_media_id": "\(avatarID.databaseString)"
+            }
+          ],
+          "snapshot": {
+            "assignments": [],
+            "content": {
+              "cards": [],
+              "examples": [],
+              "forms": [],
+              "distractors": []
+            },
+            "media": [
+              {
+                "id": "\(avatarID.databaseString)",
+                "storage_key": "media/2026/06/avatar.jpg",
+                "sha256": null,
+                "mime_type": "image/jpeg",
+                "byte_size": \(avatarData.count),
+                "width": 120,
+                "height": 120
+              }
+            ],
+            "progress": [],
+            "reviews": [],
+            "practice_reviews": [],
+            "study_data_resets": [],
+            "matching_records": [],
+            "matching_attempts": []
+          }
+        }
+        """
+
+        let captured = LockedRequests()
+        StubAppUserStoreURLProtocol.handler = { request in
+            captured.append(request)
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": request.url?.path.hasPrefix("/v1/media/") == true ? "image/jpeg" : "application/json"]
+            )!
+            switch request.url?.path {
+            case "/v1/bootstrap":
+                return (response, Data(bootstrapJSON.utf8))
+            case "/v1/media/\(avatarID.uuidString.lowercased())":
+                return (response, avatarData)
+            default:
+                Issue.record("Unexpected request path: \(request.url?.absoluteString ?? "nil")")
+                return (response, Data(bootstrapJSON.utf8))
+            }
+        }
+
+        let store = AppUserStore(
+            defaults: defaults,
+            syncClient: ServerSyncClient(session: Self.stubAppUserStoreSession(), userDefaultsSuiteName: suiteName)
+        )
+        let result = await store.refreshFromServer()
+
+        #expect(result == .loaded(userCount: 1, assignmentCount: 0, activeAssignmentCount: 0))
+        #expect(captured.requests.map(\.url?.path) == ["/v1/bootstrap", "/v1/media/\(avatarID.uuidString.lowercased())"])
+        let user = try #require(store.users.first)
+        #expect(user.displayName == "Dasha")
+        #expect(user.avatarMediaID == avatarID)
+        let avatarURL = try #require(user.avatarImageURL)
+        #expect(FileManager.default.fileExists(atPath: avatarURL.path))
+        #expect(try Data(contentsOf: avatarURL) == avatarData)
+
+        store.users = store.users.map { user in
+            var updated = user
+            updated.avatarImageURL = nil
+            return updated
+        }
+        #expect(store.users.first?.avatarImageURL == nil)
+
+        let deltaJSON = """
+        {
+          "mode": "delta",
+          "fromRevision": "42",
+          "toRevision": "42",
+          "changes": {
+            "assignments": [],
+            "content": {
+              "cards": [],
+              "examples": [],
+              "forms": [],
+              "distractors": []
+            },
+            "media": [],
+            "progress": [],
+            "reviews": [],
+            "practice_reviews": [],
+            "study_data_resets": [],
+            "matching_records": [],
+            "matching_attempts": []
+          }
+        }
+        """
+        StubAppUserStoreURLProtocol.handler = { request in
+            captured.append(request)
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            switch request.url?.path {
+            case "/v1/sync/changes":
+                return (response, Data(deltaJSON.utf8))
+            default:
+                Issue.record("Unexpected request path: \(request.url?.absoluteString ?? "nil")")
+                return (response, Data(deltaJSON.utf8))
+            }
+        }
+
+        let deltaResult = await store.refreshFromServer()
+        #expect(deltaResult == .loaded(userCount: 1, assignmentCount: 0, activeAssignmentCount: 0))
+        let restoredUser = try #require(store.users.first)
+        #expect(restoredUser.avatarImageURL?.standardizedFileURL == avatarURL.standardizedFileURL)
+        #expect(try Data(contentsOf: #require(restoredUser.avatarImageURL)) == avatarData)
     }
 
     private func withIsolatedDatabase(_ operation: (ContentDatabase) throws -> Void) throws {
@@ -1532,6 +1842,106 @@ struct ContentDatabaseTests {
               "distractors": []
             },
             "media": [],
+            "progress": [],
+            "reviews": [],
+            "practice_reviews": [],
+            "study_data_resets": [],
+            "matching_records": [],
+            "matching_attempts": []
+          }
+        }
+        """
+    }
+
+    private func appUserStoreDeckBootstrapJSON(revision: String, audioMediaID: UUID) -> String {
+        return """
+        {
+          "user": {
+            "id": "\(userID.databaseString)",
+            "display_name": "Learner",
+            "avatar_media_id": null
+          },
+          "revision": "\(revision)",
+          "users": [
+            {
+              "id": "\(userID.databaseString)",
+              "display_name": "Learner",
+              "avatar_media_id": null
+            }
+          ],
+          "snapshot": {
+            "assignments": [
+              {
+                "user_id": "\(userID.databaseString)",
+                "deck_id": "\(deckID.databaseString)",
+                "deck_version_id": null,
+                "assignment_status": "active",
+                "title": "Test Deck",
+                "avatar_system_name": "book",
+                "avatar_media_id": null,
+                "language_code": "en",
+                "current_version_id": "\(versionID.databaseString)",
+                "version_number": 1,
+                "version_status": "published",
+                "user_enabled": true,
+                "preference_updated_at": null,
+                "manifest": {
+                  "new_cards_per_day": 10,
+                  "review_cards_per_day": 100
+                }
+              }
+            ],
+            "content": {
+              "cards": [
+                {
+                  "deck_version_id": "\(versionID.databaseString)",
+                  "card_id": "\(cardID.databaseString)",
+                  "status": "active",
+                  "lemma": "test",
+                  "display_word": "test",
+                  "part_of_speech": "noun",
+                  "translation": "test translation",
+                  "short_definition": null,
+                  "memory_hint": null,
+                  "etymology": null,
+                  "usage_note": null,
+                  "synonym_note": null,
+                  "grammar_note": null,
+                  "notes": null,
+                  "image_media_id": null,
+                  "audio_word_media_id": "\(audioMediaID.databaseString)",
+                  "sort_order": 1
+                }
+              ],
+              "examples": [
+                {
+                  "deck_version_id": "\(versionID.databaseString)",
+                  "example_id": "\(exampleID.databaseString)",
+                  "card_id": "\(cardID.databaseString)",
+                  "template": "This is a {{blank}}.",
+                  "answer": "test",
+                  "answer_form_key": null,
+                  "translation": "Это тест.",
+                  "note": null,
+                  "image_media_id": null,
+                  "audio_example_media_id": null,
+                  "sort_order": 1
+                }
+              ],
+              "forms": [],
+              "distractors": []
+            },
+            "media": [
+              {
+                "id": "\(audioMediaID.databaseString)",
+                "storage_key": "media/\(audioMediaID.databaseString).mp3",
+                "sha256": null,
+                "mime_type": "audio/mpeg",
+                "byte_size": 3,
+                "width": null,
+                "height": null
+              }
+            ],
             "progress": [],
             "reviews": [],
             "practice_reviews": [],
@@ -1813,6 +2223,21 @@ struct ContentDatabaseTests {
           "byte_size": 3,
           "width": 1,
           "height": 1
+        }
+        """
+    }
+
+    private func audioMediaJSON(id: UUID? = nil) -> String {
+        let id = id ?? audioWordMediaID
+        return """
+        {
+          "id": "\(id.databaseString)",
+          "storage_key": "media/\(id.databaseString).mp3",
+          "sha256": null,
+          "mime_type": "audio/mpeg",
+          "byte_size": 3,
+          "width": null,
+          "height": null
         }
         """
     }

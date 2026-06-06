@@ -241,9 +241,6 @@ nonisolated final class ContentDatabase {
             try upsertServerMatchingRecords(bootstrap.matchingRecords, selectedUserID: selectedUserID)
             try upsertServerMatchingAttempts(bootstrap.matchingAttempts, selectedUserID: selectedUserID)
             try rebuildDerivedStats(selectedUserID: selectedUserID)
-            if let serverRevision = bootstrap.serverRevision {
-                try setServerRevision(serverRevision)
-            }
             try commitTransaction()
             try cleanupUnusedContentCache()
         } catch {
@@ -289,9 +286,6 @@ nonisolated final class ContentDatabase {
             try upsertServerMatchingRecords(changes.matchingRecords, selectedUserID: selectedUserID)
             try upsertServerMatchingAttempts(changes.matchingAttempts, selectedUserID: selectedUserID)
             try rebuildDerivedStats(selectedUserID: selectedUserID)
-            if let serverRevision = changes.serverRevision {
-                try setServerRevision(serverRevision)
-            }
             try commitTransaction()
             try cleanupUnusedContentCache()
         } catch {

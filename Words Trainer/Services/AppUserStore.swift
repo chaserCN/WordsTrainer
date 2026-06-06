@@ -209,29 +209,53 @@ final class AppUserStore {
                     let database = try ContentDatabase(userID: targetUserID)
                     updateSyncProgress(.savingData, taskID: taskID)
                     try database.importServerChanges(changes, selectedUserID: targetUserID)
-                    let importedServerRevision = try database.serverRevision()
-                    Self.logger.info("changes imported localServerRevision=\(importedServerRevision, privacy: .public)")
+                    guard isCurrentRefreshTask(taskID) else { return .cancelled }
+                    let mediaFailureCount = try await cacheMedia(from: changes, database: database, taskID: taskID)
                     guard isCurrentRefreshTask(taskID) else { return .cancelled }
                     let decks = try database.loadDecks()
+                    let cachedDeckVersionIDsAfterChanges = try database.cachedDeckVersionIDs()
                     if let reason = changesFullBootstrapFallbackReason(
                         changes: changes,
                         localServerRevision: localServerRevision,
                         localDeckCountBeforeChanges: localDeckCountBeforeChanges,
-                        decksAfterChanges: decks
+                        decksAfterChanges: decks,
+                        cachedDeckVersionIDsAfterChanges: cachedDeckVersionIDsAfterChanges
                     ) {
                         Self.logger.warning("changes discarded; falling back to full bootstrap reason=\(reason, privacy: .public)")
                         fullBootstrapReason = reason
-                        bootstrapCachedDeckVersionIDs = []
+                        bootstrapCachedDeckVersionIDs = reason == "incomplete_media_cache_after_delta"
+                            ? cachedDeckVersionIDsAfterChanges
+                            : []
                     } else {
+                        if mediaFailureCount == 0 {
+                            if let serverRevision = changes.serverRevision {
+                                try database.setServerRevision(serverRevision)
+                            }
+                            try database.markInitialSyncCompleted()
+                            let importedServerRevision = try database.serverRevision()
+                            Self.logger.info("changes committed localServerRevision=\(importedServerRevision, privacy: .public)")
+                        } else {
+                            Self.logger.warning("changes media incomplete; keeping previous localServerRevision=\(localServerRevision, privacy: .public)")
+                        }
+                        try applyCachedUserAvatarURLsFromExistingFiles()
+                        guard isCurrentRefreshTask(taskID) else { return .cancelled }
                         bootstrapState = .loaded
                         let assignmentCount = decks.count
                         let activeAssignmentCount = decks.filter(\.isActive).count
-                        return finishSync(
-                            .loaded(
+                        let result: AppUserRefreshResult = mediaFailureCount > 0
+                            ? .loadedWithMediaWarnings(
+                                userCount: users.count,
+                                assignmentCount: assignmentCount,
+                                activeAssignmentCount: activeAssignmentCount,
+                                failedMediaCount: mediaFailureCount
+                            )
+                            : .loaded(
                                 userCount: users.count,
                                 assignmentCount: assignmentCount,
                                 activeAssignmentCount: activeAssignmentCount
-                            ),
+                            )
+                        return finishSync(
+                            result,
                             userID: targetUserID,
                             startedAt: startedAt,
                             taskID: taskID
@@ -260,7 +284,7 @@ final class AppUserStore {
             guard isCurrentRefreshTask(taskID) else { return .cancelled }
             let serverUsers = bootstrap.users.map(\.appUser)
             Self.logger.info("bootstrap loaded users=\(serverUsers.count, privacy: .public) assignments=\(bootstrap.assignments.count, privacy: .public)")
-            users = serverUsers
+            users = try usersWithCachedUserAvatarURLs(serverUsers, mediaObjects: [:])
             let preferredID = bootstrap.user?.id ?? targetUserID
             let resolvedUserID: UUID?
             if let preferredID, serverUsers.contains(where: { $0.id == preferredID }) {
@@ -282,11 +306,18 @@ final class AppUserStore {
                     progressSnapshotIsComplete: preBootstrapUploadSucceeded
                         && (!hasCompletedInitialSync || fullBootstrapReason != nil)
                 )
-                try database.markInitialSyncCompleted()
-                let importedServerRevision = try database.serverRevision()
-                Self.logger.info("bootstrap imported localServerRevision=\(importedServerRevision, privacy: .public)")
                 let mediaFailureCount = try await cacheMedia(from: bootstrap, database: database, taskID: taskID)
                 try applyCachedUserAvatarURLs(from: bootstrap)
+                if mediaFailureCount == 0 {
+                    if let serverRevision = bootstrap.serverRevision {
+                        try database.setServerRevision(serverRevision)
+                    }
+                    try database.markInitialSyncCompleted()
+                    let importedServerRevision = try database.serverRevision()
+                    Self.logger.info("bootstrap committed localServerRevision=\(importedServerRevision, privacy: .public)")
+                } else {
+                    Self.logger.warning("bootstrap media incomplete; server revision was not committed")
+                }
                 guard isCurrentRefreshTask(taskID) else { return .cancelled }
                 do {
                     updateSyncProgress(.uploadingChanges, taskID: taskID)
@@ -345,7 +376,8 @@ final class AppUserStore {
         changes: ServerSyncChanges,
         localServerRevision: String,
         localDeckCountBeforeChanges: Int,
-        decksAfterChanges: [DeckContent]
+        decksAfterChanges: [DeckContent],
+        cachedDeckVersionIDsAfterChanges: [UUID]
     ) -> String? {
         guard let serverRevision = changes.serverRevision else {
             return "missing_delta_revision"
@@ -359,6 +391,14 @@ final class AppUserStore {
            decksAfterChanges.isEmpty,
            changes.assignments.isEmpty {
             return "empty_decks_after_delta_without_assignment_changes"
+        }
+        let cachedVersionIDs = Set(cachedDeckVersionIDsAfterChanges)
+        let hasIncompleteAssignedDeck = decksAfterChanges.contains { deck in
+            guard let contentVersionID = deck.contentVersionID else { return false }
+            return !cachedVersionIDs.contains(contentVersionID)
+        }
+        if hasIncompleteAssignedDeck {
+            return "incomplete_media_cache_after_delta"
         }
         return nil
     }
@@ -436,26 +476,55 @@ final class AppUserStore {
     }
 
     private func cacheMedia(from bootstrap: ServerBootstrap, database: ContentDatabase, taskID: UUID) async throws -> Int {
+        try await cacheMedia(
+            users: bootstrap.users,
+            assignments: bootstrap.assignments,
+            content: bootstrap.content,
+            media: bootstrap.media,
+            database: database,
+            taskID: taskID
+        )
+    }
+
+    private func cacheMedia(from changes: ServerSyncChanges, database: ContentDatabase, taskID: UUID) async throws -> Int {
+        try await cacheMedia(
+            users: [],
+            assignments: changes.assignments,
+            content: changes.content,
+            media: changes.media,
+            database: database,
+            taskID: taskID
+        )
+    }
+
+    private func cacheMedia(
+        users: [ServerUser],
+        assignments: [ServerDeckAssignment],
+        content: ServerContentPayload,
+        media: [ServerMediaObject],
+        database: ContentDatabase,
+        taskID: UUID
+    ) async throws -> Int {
         updateSyncProgress(.preparingMedia, taskID: taskID)
         let versionDeckIDs = Dictionary(
-            uniqueKeysWithValues: bootstrap.assignments.compactMap { assignment -> (UUID, UUID)? in
+            uniqueKeysWithValues: assignments.compactMap { assignment -> (UUID, UUID)? in
                 let versionID = assignment.currentVersionId
                 guard let versionID else { return nil }
                 return (versionID, assignment.deckId)
             }
         )
         var mediaScopes: [UUID: Set<MediaCacheScope>] = [:]
-        for user in bootstrap.users {
+        for user in users {
             if let mediaID = user.avatarMediaId {
                 mediaScopes[mediaID, default: []].insert(.userAvatar)
             }
         }
-        for assignment in bootstrap.assignments {
+        for assignment in assignments {
             if let mediaID = assignment.avatarMediaId {
                 mediaScopes[mediaID, default: []].insert(.deck(assignment.deckId))
             }
         }
-        for card in bootstrap.content.cards {
+        for card in content.cards {
             guard let deckID = versionDeckIDs[card.deckVersionId] else { continue }
             if let mediaID = card.imageMediaId {
                 mediaScopes[mediaID, default: []].insert(.deck(deckID))
@@ -464,7 +533,7 @@ final class AppUserStore {
                 mediaScopes[mediaID, default: []].insert(.deck(deckID))
             }
         }
-        for example in bootstrap.content.examples {
+        for example in content.examples {
             guard let deckID = versionDeckIDs[example.deckVersionId] else { continue }
             if let mediaID = example.imageMediaId {
                 mediaScopes[mediaID, default: []].insert(.deck(deckID))
@@ -475,7 +544,7 @@ final class AppUserStore {
         }
 
         let mediaObjects = Dictionary(
-            uniqueKeysWithValues: bootstrap.media.map { ($0.id, $0) }
+            uniqueKeysWithValues: media.map { ($0.id, $0) }
         )
         var failureCount = 0
         var downloadCandidates: [MediaCacheCandidate] = []
@@ -540,7 +609,7 @@ final class AppUserStore {
         scope: MediaCacheScope,
         database: ContentDatabase
     ) throws -> MediaCacheCandidate? {
-        let relativePath = "media/\(media.id.uuidString.lowercased()).\(fileExtension(for: media))"
+        let relativePath = mediaRelativePath(for: media)
         if let existingURL = try existingMediaFileURL(scope: scope, relativePath: relativePath) {
             if media.sha256 == nil {
                 let fileSize = try? existingURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
@@ -640,17 +709,66 @@ final class AppUserStore {
         let mediaObjects = Dictionary(
             uniqueKeysWithValues: bootstrap.media.map { ($0.id, $0) }
         )
-        users = try users.map { user in
+        users = try usersWithCachedUserAvatarURLs(users, mediaObjects: mediaObjects)
+    }
+
+    private func applyCachedUserAvatarURLsFromExistingFiles() throws {
+        users = try usersWithCachedUserAvatarURLs(users, mediaObjects: [:])
+    }
+
+    private func usersWithCachedUserAvatarURLs(
+        _ sourceUsers: [AppUser],
+        mediaObjects: [UUID: ServerMediaObject]
+    ) throws -> [AppUser] {
+        let previousUsersByID = Dictionary(uniqueKeysWithValues: users.map { ($0.id, $0) })
+        return try sourceUsers.map { user in
             var updated = user
-            guard let mediaID = user.avatarMediaID,
-                  let media = mediaObjects[mediaID] else {
+            guard let mediaID = user.avatarMediaID else {
                 updated.avatarImageURL = nil
                 return updated
             }
-            let relativePath = "media/\(media.id.uuidString.lowercased()).\(fileExtension(for: media))"
-            updated.avatarImageURL = try AppDataPaths.appMediaFileURL(relativePath: relativePath)
+            let previousURL = previousUsersByID[user.id]?.avatarImageURL
+            updated.avatarImageURL = try cachedUserAvatarFileURL(
+                mediaID: mediaID,
+                media: mediaObjects[mediaID],
+                previousURL: previousURL
+            )
             return updated
         }
+    }
+
+    private func cachedUserAvatarFileURL(
+        mediaID: UUID,
+        media: ServerMediaObject?,
+        previousURL: URL?
+    ) throws -> URL? {
+        if let media,
+           let url = try AppDataPaths.appMediaFileURL(relativePath: mediaRelativePath(for: media)) {
+            return url
+        }
+        if let previousURL,
+           previousURL.isFileURL,
+           FileManager.default.fileExists(atPath: previousURL.path) {
+            return previousURL
+        }
+        let mediaDirectory = try AppDataPaths.appMediaRootURL()
+            .appendingPathComponent(AppDataPaths.deckMediaFolderName, isDirectory: true)
+        let mediaIDPrefix = "\(mediaID.uuidString.lowercased())."
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: mediaDirectory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+        return files
+            .filter { $0.lastPathComponent.hasPrefix(mediaIDPrefix) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .first
+    }
+
+    private func mediaRelativePath(for media: ServerMediaObject) -> String {
+        "media/\(media.id.uuidString.lowercased()).\(fileExtension(for: media))"
     }
 
     private func existingMediaFileURL(scope: MediaCacheScope, relativePath: String) throws -> URL? {
