@@ -122,6 +122,26 @@
             <string>мин</string>
         </dict>
     </dict>
+    <key>count.months.short</key>
+    <dict>
+        <key>NSStringLocalizedFormatKey</key>
+        <string>%d %#@months@</string>
+        <key>months</key>
+        <dict>
+            <key>NSStringFormatSpecTypeKey</key>
+            <string>NSStringPluralRuleType</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>d</string>
+            <key>one</key>
+            <string>мес.</string>
+            <key>few</key>
+            <string>мес.</string>
+            <key>many</key>
+            <string>мес.</string>
+            <key>other</key>
+            <string>мес.</string>
+        </dict>
+    </dict>
     <key>count.words.word</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>

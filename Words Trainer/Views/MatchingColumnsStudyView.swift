@@ -81,7 +81,7 @@ struct MatchingColumnsStudyView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(usesAudioPrompts ? "Послушай и соедини" : "Соедини пары")
+            Text(L10n.text(usesAudioPrompts ? "Послушай и соедини" : "Соедини пары"))
                 .font(.largeTitle.bold())
                 .foregroundStyle(MatchPalette.foreground)
                 .padding(.top, 12)
@@ -907,7 +907,7 @@ private struct MatchingCell: View {
             .shadow(color: secondaryShadow.color, radius: secondaryShadow.radius, x: 0, y: secondaryShadow.y)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel ?? label)
+        .accessibilityLabel(accessibilityLabel.map(L10n.text) ?? label)
         .frame(maxWidth: .infinity)
         .modifier(ShakeEffect(animatableData: isWrong ? 1 : 0))
         .animation(.linear(duration: 0.4), value: isWrong)

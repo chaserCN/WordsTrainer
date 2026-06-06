@@ -529,7 +529,7 @@ private struct AppVersionFooter: View {
             ?? "1.0"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
             ?? "-"
-        return "Версия \(version) (\(build))"
+        return L10n.format("Версия %@ (%@)", version, build)
     }
 
     var body: some View {
@@ -616,7 +616,7 @@ private struct TodayHeader: View {
             .buttonStyle(.plain)
             .disabled(isSyncing)
             .opacity(isSyncing ? 0.72 : 1)
-            .accessibilityLabel(isSyncing ? "Синхронизация выполняется" : "Синхронизировать")
+            .accessibilityLabel(L10n.text(isSyncing ? "Синхронизация выполняется" : "Синхронизировать"))
             .accessibilityValue(syncStatus.progress?.title ?? "")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -849,10 +849,10 @@ private struct TodayServerConnectionCard: View {
                 .background(.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(title)
+                Text(L10n.text(title))
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(LovableSurface.foreground)
-                Text(message ?? "Загружаем профиль с сервера.")
+                Text(L10n.text(message ?? "Загружаем профиль с сервера."))
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(LovableSurface.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1011,10 +1011,10 @@ private struct TodaySyncStatusCard: View {
                 .background(status.tint, in: Circle())
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(status.title)
+                Text(L10n.text(status.title))
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(LovableSurface.foreground)
-                Text(status.message)
+                Text(L10n.text(status.message))
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(LovableSurface.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1207,7 +1207,7 @@ private struct UserSwitcherSheet: View {
                     ContentUnavailableView(
                         "Пользователи не загружены",
                         systemImage: "person.2.slash",
-                        description: Text(userStore.bootstrapState.message ?? "Выполните синхронизацию с сервером.")
+                        description: Text(L10n.text(userStore.bootstrapState.message ?? "Выполните синхронизацию с сервером."))
                     )
                 } else {
                     Section {
@@ -1259,7 +1259,7 @@ private struct StudyTodayCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Учить по плану")
                         .font(.system(size: 24, weight: .bold))
-                    Text(subtitle)
+                    Text(L10n.text(subtitle))
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(.white.opacity(isPrimary ? 0.72 : 0.6))
                 }
@@ -1294,9 +1294,9 @@ private struct StudyTodayCard: View {
             return LocalizedCounts.cardsInQueue(stats.studyTotal)
         }
         if practiceCount > 0 {
-            return "Пока всё · можно повторить \(LocalizedCounts.cardsForPractice(practiceCount))"
+            return L10n.format("Пока всё · можно повторить %@", LocalizedCounts.cardsForPractice(practiceCount))
         }
-        return "Пока всё"
+        return L10n.text("Пока всё")
     }
 }
 
@@ -1405,7 +1405,7 @@ private struct TodayStudyModesView: View {
             .padding(.bottom, 32)
         }
         .background { LovableBackground(variant: .today) }
-        .navigationTitle(deck?.title ?? "Сегодня")
+        .navigationTitle(deck?.title ?? L10n.text("Сегодня"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.light, for: .navigationBar)
         .tint(LovableSurface.foreground)
@@ -1562,7 +1562,7 @@ private struct QueueSummaryCard: View {
 
     private var todayMonthShort: String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.locale = .current
         formatter.setLocalizedDateFormatFromTemplate("LLL")
         return formatter.string(from: .now)
     }
@@ -1601,7 +1601,7 @@ private struct QueueSummaryCard: View {
                 deckOrDateAvatar
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(deck?.title ?? "Дневная очередь")
+                    Text(deck?.title ?? L10n.text("Дневная очередь"))
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(.white.opacity(isPrimary ? 1 : 0.72))
                         .lineLimit(1)
@@ -1643,7 +1643,7 @@ private struct QueueSummaryCard: View {
 
     private var summaryText: String {
         if queueCount == 0, practiceCount > 0 {
-            return "Очередь закончена · \(LocalizedCounts.cardsForPractice(practiceCount))"
+            return L10n.format("Очередь закончена · %@", LocalizedCounts.cardsForPractice(practiceCount))
         }
         return LocalizedCounts.cardPhrase(queueCount)
     }
@@ -1668,9 +1668,9 @@ private struct TodayModeButton: View {
                     .shadow(color: accent.opacity(isEnabled ? 0.35 : 0), radius: 12, x: 0, y: 8)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
+                    Text(L10n.text(title))
                         .font(.system(size: 16, weight: .bold))
-                    Text(subtitle)
+                    Text(L10n.text(subtitle))
                         .font(.system(size: 12.5, weight: .regular))
                         .foregroundStyle(.white.opacity(0.55))
                         .lineLimit(2)
@@ -1702,7 +1702,7 @@ private struct DashboardMetric: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title)
+            Text(L10n.text(title))
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(oklch(0.82, 0.03, 250, 0.7))
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -1719,7 +1719,7 @@ private struct DashboardMetric: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            Text(detail ?? " ")
+            Text(detail.map(L10n.text) ?? " ")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(oklch(0.82, 0.03, 250, detail == nil ? 0 : 0.72))
                 .lineLimit(1)
@@ -1745,7 +1745,7 @@ private struct DashboardMetricValue: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.64)
                 .multilineTextAlignment(isCentered ? .center : .leading)
-            Text(subtitle)
+            Text(L10n.text(subtitle))
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(oklch(0.82, 0.03, 250, 0.65))
                 .lineLimit(1)
@@ -1764,7 +1764,7 @@ private struct ActivityHeatmap: View {
                 Text("Активность")
                     .font(.system(size: 17, weight: .semibold))
                 Spacer()
-                Text("\(months.count) мес.")
+                Text(LocalizedCounts.monthPhraseShort(months.count))
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white.opacity(0.55))
             }
@@ -1967,11 +1967,10 @@ private enum ActivityCalendarBuilder {
         )
     }
 
-    private static let ruLocale = Locale(identifier: "ru_RU")
     private static let weekdaySymbolsByFirstWeekday: [Int: [String]] = {
         let formatter = DateFormatter()
-        formatter.locale = ruLocale
-        let symbols = formatter.veryShortStandaloneWeekdaySymbols ?? ["В", "П", "В", "С", "Ч", "П", "С"]
+        formatter.locale = .current
+        let symbols = formatter.veryShortStandaloneWeekdaySymbols ?? ["S", "M", "T", "W", "T", "F", "S"]
         return Dictionary(uniqueKeysWithValues: (1...7).map { firstWeekday in
             let start = firstWeekday - 1
             return (firstWeekday, Array(symbols[start...] + symbols[..<start]))
@@ -1979,7 +1978,7 @@ private enum ActivityCalendarBuilder {
     }()
     private static let monthTitleFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = ruLocale
+        formatter.locale = .current
         formatter.setLocalizedDateFormatFromTemplate("LLLL yyyy")
         return formatter
     }()
@@ -2147,7 +2146,7 @@ private struct LovableStat: View {
                 .font(.system(size: 13, weight: .semibold))
                 .monospacedDigit()
                 .foregroundStyle(.white)
-            Text(label)
+            Text(L10n.text(label))
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(.white.opacity(0.55))
         }

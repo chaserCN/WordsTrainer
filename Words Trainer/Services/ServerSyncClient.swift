@@ -563,23 +563,23 @@ enum ServerSyncError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingConfiguration:
-            "SERVER_BASE_URL и HOUSEHOLD_SYNC_TOKEN не настроены."
+            L10n.text("SERVER_BASE_URL и HOUSEHOLD_SYNC_TOKEN не настроены.")
         case .invalidBaseURL(let value):
-            "SERVER_BASE_URL некорректный: \(value)."
+            L10n.format("SERVER_BASE_URL некорректный: %@.", value)
         case .invalidResponse:
-            "Сервер вернул некорректный ответ."
+            L10n.text("Сервер вернул некорректный ответ.")
         case .networkUnavailable:
-            "Нет подключения к интернету. Проверьте сеть и попробуйте снова."
+            L10n.text("Нет подключения к интернету. Проверьте сеть и попробуйте снова.")
         case .timedOut:
-            "Сервер не ответил вовремя. Попробуйте ещё раз."
+            L10n.text("Сервер не ответил вовремя. Попробуйте ещё раз.")
         case .cannotConnect:
-            "Не удалось подключиться к серверу. Проверьте адрес сервера и сеть."
+            L10n.text("Не удалось подключиться к серверу. Проверьте адрес сервера и сеть.")
         case .cannotFindHost:
-            "Не удалось найти сервер. Проверьте SERVER_BASE_URL."
+            L10n.text("Не удалось найти сервер. Проверьте SERVER_BASE_URL.")
         case .secureConnectionFailed:
-            "Не удалось установить защищённое соединение с сервером."
+            L10n.text("Не удалось установить защищённое соединение с сервером.")
         case .cancelled:
-            "Синхронизация отменена."
+            L10n.text("Синхронизация отменена.")
         case .httpStatus(let code):
             Self.httpStatusMessage(code)
         }
@@ -588,13 +588,13 @@ enum ServerSyncError: LocalizedError {
     private static func httpStatusMessage(_ code: Int) -> String {
         switch code {
         case 401, 403:
-            "Сервер отклонил HOUSEHOLD_SYNC_TOKEN. Проверьте семейный sync token."
+            L10n.text("Сервер отклонил HOUSEHOLD_SYNC_TOKEN. Проверьте семейный sync token.")
         case 404:
-            "Сервер доступен, но endpoint /v1/bootstrap не найден."
+            L10n.text("Сервер доступен, но endpoint /v1/bootstrap не найден.")
         case 500..<600:
-            "На сервере ошибка HTTP \(code). Попробуйте позже."
+            L10n.format("На сервере ошибка HTTP %d. Попробуйте позже.", code)
         default:
-            "Сервер вернул HTTP \(code)."
+            L10n.format("Сервер вернул HTTP %d.", code)
         }
     }
 }

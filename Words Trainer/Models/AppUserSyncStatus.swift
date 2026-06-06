@@ -19,20 +19,20 @@ enum AppUserRefreshResult: Equatable, Sendable {
             if userCount == 0 {
                 nil
             } else if assignmentCount == 0 {
-                "Пользователи загружены, но выбранному пользователю пока не назначены колоды."
+                L10n.text("Пользователи загружены, но выбранному пользователю пока не назначены колоды.")
             } else if activeAssignmentCount == 0 {
-                "Колоды загружены, но все назначения сейчас неактивны."
+                L10n.text("Колоды загружены, но все назначения сейчас неактивны.")
             } else {
-                "Синхронизация выполнена."
+                L10n.text("Синхронизация выполнена.")
             }
         case .loadedWithMediaWarnings(_, _, _, let failedMediaCount):
-            "Данные загружены, но не удалось скачать медиа: \(failedMediaCount). Повторите синхронизацию позже."
+            L10n.format("Данные загружены, но не удалось скачать медиа: %d. Повторите синхронизацию позже.", failedMediaCount)
         case .missingConfiguration:
-            "Нужно настроить SERVER_BASE_URL и HOUSEHOLD_SYNC_TOKEN."
+            L10n.text("Нужно настроить SERVER_BASE_URL и HOUSEHOLD_SYNC_TOKEN.")
         case .emptyServer:
-            "Сервер доступен, но пользователей пока нет."
+            L10n.text("Сервер доступен, но пользователей пока нет.")
         case .cancelled:
-            "Синхронизация была прервана. Попробуйте ещё раз."
+            L10n.text("Синхронизация была прервана. Попробуйте ещё раз.")
         case .failed(let message):
             message
         }
@@ -61,16 +61,16 @@ struct AppUserSyncProgress: Equatable, Sendable {
         return min(max(Double(completedUnitCount) / Double(totalUnitCount), 0), 1)
     }
 
-    static let starting = AppUserSyncProgress(title: "Готовим синхронизацию", completedUnitCount: nil, totalUnitCount: nil)
-    static let uploadingChanges = AppUserSyncProgress(title: "Отправляем изменения", completedUnitCount: nil, totalUnitCount: nil)
-    static let loadingData = AppUserSyncProgress(title: "Загружаем данные", completedUnitCount: nil, totalUnitCount: nil)
-    static let savingData = AppUserSyncProgress(title: "Сохраняем данные", completedUnitCount: nil, totalUnitCount: nil)
-    static let preparingMedia = AppUserSyncProgress(title: "Проверяем медиа", completedUnitCount: nil, totalUnitCount: nil)
-    static let finishing = AppUserSyncProgress(title: "Завершаем синхронизацию", completedUnitCount: nil, totalUnitCount: nil)
+    static let starting = AppUserSyncProgress(title: L10n.text("Готовим синхронизацию"), completedUnitCount: nil, totalUnitCount: nil)
+    static let uploadingChanges = AppUserSyncProgress(title: L10n.text("Отправляем изменения"), completedUnitCount: nil, totalUnitCount: nil)
+    static let loadingData = AppUserSyncProgress(title: L10n.text("Загружаем данные"), completedUnitCount: nil, totalUnitCount: nil)
+    static let savingData = AppUserSyncProgress(title: L10n.text("Сохраняем данные"), completedUnitCount: nil, totalUnitCount: nil)
+    static let preparingMedia = AppUserSyncProgress(title: L10n.text("Проверяем медиа"), completedUnitCount: nil, totalUnitCount: nil)
+    static let finishing = AppUserSyncProgress(title: L10n.text("Завершаем синхронизацию"), completedUnitCount: nil, totalUnitCount: nil)
 
     static func downloadingMedia(completed: Int, total: Int) -> AppUserSyncProgress {
         AppUserSyncProgress(
-            title: "Скачиваем медиа \(completed) из \(total)",
+            title: L10n.format("Скачиваем медиа %d из %d", completed, total),
             completedUnitCount: completed,
             totalUnitCount: total
         )

@@ -122,6 +122,26 @@
             <string>хв</string>
         </dict>
     </dict>
+    <key>count.months.short</key>
+    <dict>
+        <key>NSStringLocalizedFormatKey</key>
+        <string>%d %#@months@</string>
+        <key>months</key>
+        <dict>
+            <key>NSStringFormatSpecTypeKey</key>
+            <string>NSStringPluralRuleType</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>d</string>
+            <key>one</key>
+            <string>міс.</string>
+            <key>few</key>
+            <string>міс.</string>
+            <key>many</key>
+            <string>міс.</string>
+            <key>other</key>
+            <string>міс.</string>
+        </dict>
+    </dict>
     <key>count.words.word</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>

@@ -98,6 +98,22 @@
             <string>min</string>
         </dict>
     </dict>
+    <key>count.months.short</key>
+    <dict>
+        <key>NSStringLocalizedFormatKey</key>
+        <string>%d %#@months@</string>
+        <key>months</key>
+        <dict>
+            <key>NSStringFormatSpecTypeKey</key>
+            <string>NSStringPluralRuleType</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>d</string>
+            <key>one</key>
+            <string>mo.</string>
+            <key>other</key>
+            <string>mo.</string>
+        </dict>
+    </dict>
     <key>count.words.word</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>

@@ -133,16 +133,16 @@ struct StudySessionView: View {
         let isNewRecord = session.mode == .matching && beatRecord
         return ContentUnavailableView {
             Label(
-                isNewRecord ? newRecordTitle : "Готово",
+                L10n.text(isNewRecord ? newRecordTitle : "Готово"),
                 systemImage: isNewRecord ? "trophy.fill" : "checkmark.circle"
             )
             .foregroundStyle(finishedTint)
         } description: {
             if isNewRecord, let finishedDuration {
-                Text("Лучшее время: \(StudyDurationFormat.string(finishedDuration))")
+                Text(L10n.format("Лучшее время: %@", StudyDurationFormat.string(finishedDuration)))
                     .foregroundStyle(finishedTint)
             } else {
-                Text("Сессия по колоде «\(deckTitle)» завершена.")
+                Text(L10n.format("Сессия по колоде «%@» завершена.", deckTitle))
                     .foregroundStyle(finishedTint)
             }
         } actions: {
@@ -158,9 +158,9 @@ struct StudySessionView: View {
     private var newRecordTitle: String {
         switch session.matchingRecordScope {
         case .deck:
-            return "Новый рекорд для колоды"
+            return L10n.text("Новый рекорд для колоды")
         case .none:
-            return "Новый рекорд"
+            return L10n.text("Новый рекорд")
         }
     }
 

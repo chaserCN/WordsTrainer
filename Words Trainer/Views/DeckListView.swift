@@ -167,11 +167,11 @@ struct DataPlaceholderView: View {
                 .font(.system(size: 48, weight: .light))
                 .foregroundStyle(LovableSurface.muted)
 
-            Text(title)
+            Text(L10n.text(title))
                 .font(.title2.bold())
                 .foregroundStyle(LovableSurface.foreground)
 
-            Text(message)
+            Text(L10n.text(message))
                 .font(.body)
                 .foregroundStyle(LovableSurface.muted)
                 .multilineTextAlignment(.center)
@@ -260,7 +260,7 @@ struct LovableDeckCard: View {
                     Image(systemName: "square.stack.3d.up.fill")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(oklch(0.75, 0.16, 240))
-                    Text(footnote)
+                    Text(L10n.text(footnote))
                         .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(.white.opacity(0.6))
                 }
@@ -403,8 +403,15 @@ struct DeckCardView: View {
     }
 
     private var accessibilityLabel: String {
-        let statusText = deck.isActive ? "включена" : "отключена"
-        return "\(deck.title), \(statusText), новых \(stats.newAvailable), повторить \(stats.dueTotal), всего \(activeCardCount)"
+        let statusText = L10n.text(deck.isActive ? "включена" : "отключена")
+        return L10n.format(
+            "%@, %@, новых %d, повторить %d, всего %d",
+            deck.title,
+            statusText,
+            stats.newAvailable,
+            stats.dueTotal,
+            activeCardCount
+        )
     }
 }
 
@@ -577,7 +584,7 @@ struct DeckDetailView: View {
               matchingRecord.pairCount == fullDeckMatchingPairCount else {
             return "Соедини слово и перевод"
         }
-        return "Рекорд: \(StudyDurationFormat.string(matchingRecord.bestDuration))"
+        return L10n.format("Рекорд: %@", StudyDurationFormat.string(matchingRecord.bestDuration))
     }
 
     private var fullDeckMatchingPairCount: Int {
@@ -680,7 +687,7 @@ struct WordListView: View {
             .padding(.bottom, 32)
         }
         .background { LovableBackground(variant: backgroundVariant) }
-        .navigationTitle(title)
+        .navigationTitle(L10n.text(title))
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.light, for: .navigationBar)
         .tint(LovableSurface.foreground)
@@ -802,7 +809,7 @@ private struct DeckExerciseScopePicker: View {
     var body: some View {
         Picker("Карточки", selection: $selection) {
             ForEach(DeckExerciseScope.allCases) { scope in
-                Text(scope.title).tag(scope)
+                Text(L10n.text(scope.title)).tag(scope)
             }
         }
         .pickerStyle(.segmented)
@@ -833,11 +840,11 @@ private struct StudySection<Content: View>: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
+                    Text(L10n.text(title))
                         .font(.system(size: 26, weight: .bold))
                         .foregroundStyle(LovableSurface.foreground)
                     if let remaining {
-                        Text(remaining)
+                        Text(L10n.text(remaining))
                             .font(.system(size: 13, weight: .regular))
                             .foregroundStyle(LovableSurface.muted)
                     }
@@ -878,7 +885,7 @@ private struct StudyActionButton: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
-                        Text(title)
+                        Text(L10n.text(title))
                             .font(.system(size: 16, weight: .bold))
                         if let badge {
                             Text(badge)
@@ -888,7 +895,7 @@ private struct StudyActionButton: View {
                                 .background(.white.opacity(0.12), in: Capsule())
                         }
                     }
-                    Text(subtitle)
+                    Text(L10n.text(subtitle))
                         .font(.system(size: 12.5, weight: .regular))
                         .foregroundStyle(.white.opacity(0.55))
                         .lineLimit(2)
@@ -986,7 +993,7 @@ private struct DeckMetricPill: View {
             Text("\(value)")
                 .font(.headline.bold())
                 .foregroundStyle(Color(red: 0.06, green: 0.07, blue: 0.12))
-            Text(title)
+            Text(L10n.text(title))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color(red: 0.18, green: 0.19, blue: 0.27))
                 .lineLimit(1)
@@ -1022,7 +1029,7 @@ private struct DeckQueueSummary: View {
 
     private var summaryText: String {
         if stats.studyTotal == 0 {
-            return "На сегодня всё готово"
+            return L10n.text("На сегодня всё готово")
         }
         return LocalizedCounts.cardsInQueue(stats.studyTotal)
     }

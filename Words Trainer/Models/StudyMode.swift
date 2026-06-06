@@ -12,12 +12,12 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .recall: "Оставить / Сбросить"
-        case .flashcards: "Карточки"
-        case .clozeMultipleChoice: "Предложения"
-        case .clozeTyping: "Пропуск — ввод"
-        case .matching: "Колонки"
-        case .matchingAudio: "Колонки аудио"
+        case .recall: L10n.text("Оставить / Сбросить")
+        case .flashcards: L10n.text("Карточки")
+        case .clozeMultipleChoice: L10n.text("Предложения")
+        case .clozeTyping: L10n.text("Пропуск — ввод")
+        case .matching: L10n.text("Колонки")
+        case .matchingAudio: L10n.text("Колонки аудио")
         }
     }
 

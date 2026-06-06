@@ -25,7 +25,7 @@ struct RecallOutcomeButton: View {
                     .frame(width: 28, height: 28)
                     .background(Circle().fill(iconBackground))
 
-                Text(title)
+                Text(L10n.text(title))
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(titleColor)
             }

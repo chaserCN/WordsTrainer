@@ -1,5 +1,15 @@
 import Foundation
 
+enum L10n {
+    static func text(_ key: String) -> String {
+        NSLocalizedString(key, comment: "")
+    }
+
+    static func format(_ key: String, _ arguments: CVarArg...) -> String {
+        String(format: text(key), locale: .current, arguments: arguments)
+    }
+}
+
 enum LocalizedCounts {
     static func deckPhrase(_ count: Int) -> String {
         localizedPlural("count.decks", count)
@@ -43,6 +53,10 @@ enum LocalizedCounts {
 
     static func minutePhrase(_ count: Int) -> String {
         localizedPlural("count.minutes.short", count)
+    }
+
+    static func monthPhraseShort(_ count: Int) -> String {
+        localizedPlural("count.months.short", count)
     }
 
     static func lessThanMinute() -> String {

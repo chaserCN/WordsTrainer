@@ -21,8 +21,8 @@ struct TodayStudyDeckSnapshot: Sendable {
 
 enum TodayStudySessionBuilder {
     static let deckID = UUID(uuidString: "00000000-0000-0000-0000-0000DA17DA7A")!
-    static let title = "Сегодня"
-    static let practiceTitle = "Практика сегодня"
+    static var title: String { L10n.text("Сегодня") }
+    static var practiceTitle: String { L10n.text("Практика сегодня") }
 
     @MainActor
     static func todaySession(

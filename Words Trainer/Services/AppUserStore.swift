@@ -16,9 +16,9 @@ enum AppUserBootstrapState: Equatable {
         case .idle, .loading, .loaded:
             nil
         case .missingConfiguration:
-            "Нужно подключить устройство к серверу."
+            L10n.text("Нужно подключить устройство к серверу.")
         case .emptyServer:
-            "На сервере пока нет пользователей."
+            L10n.text("На сервере пока нет пользователей.")
         case .failed(let message):
             message
         }

@@ -7,7 +7,7 @@ enum DeckStoreError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingSelectedUser:
-            "Пользователь ещё не загружен с сервера."
+            L10n.text("Пользователь ещё не загружен с сервера.")
         }
     }
 }
