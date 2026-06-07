@@ -2823,8 +2823,8 @@ nonisolated final class ContentDatabase {
         ORDER BY user_deck_assignments.deck_group_sort_order IS NULL,
                  user_deck_assignments.deck_group_sort_order,
                  user_deck_assignments.deck_group_title,
-                 user_deck_assignments.deck_sort_order,
-                 title
+                 title COLLATE NOCASE,
+                 decks.id
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {

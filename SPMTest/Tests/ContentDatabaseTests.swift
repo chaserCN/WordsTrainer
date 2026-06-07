@@ -1069,6 +1069,102 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("loadDecks sorts assigned decks by title inside deck group")
+    func loadDecksSortsAssignedDecksByTitleInsideDeckGroup() throws {
+        try withIsolatedDatabase { database in
+            let secondDeckID = UUID(uuidString: "55555555-5555-4555-8555-555555555555")!
+            let secondVersionID = UUID(uuidString: "66666666-6666-4666-8666-666666666666")!
+            let groupID = UUID(uuidString: "99999999-9999-4999-8999-999999999999")!
+            let json = """
+            {
+              "user": {
+                "id": "\(userID.databaseString)",
+                "display_name": "Test Learner",
+                "avatar_media_id": null
+              },
+              "users": [
+                {
+                  "id": "\(userID.databaseString)",
+                  "display_name": "Test Learner",
+                  "avatar_media_id": null
+                }
+              ],
+              "snapshot": {
+                "assignments": [
+                  {
+                    "user_id": "\(userID.databaseString)",
+                    "deck_id": "\(deckID.databaseString)",
+                    "deck_version_id": null,
+                    "assignment_status": "active",
+                    "title": "Zeta",
+                    "avatar_system_name": "book",
+                    "avatar_media_id": null,
+                    "language_code": "en",
+                    "current_version_id": "\(versionID.databaseString)",
+                    "version_number": 1,
+                    "version_status": "published",
+                    "user_enabled": true,
+                    "preference_updated_at": null,
+                    "deck_group_id": "\(groupID.databaseString)",
+                    "deck_group_title": "English",
+                    "deck_group_sort_order": 0,
+                    "deck_sort_order": 0,
+                    "manifest": {
+                      "new_cards_per_day": 10,
+                      "review_cards_per_day": 100
+                    }
+                  },
+                  {
+                    "user_id": "\(userID.databaseString)",
+                    "deck_id": "\(secondDeckID.databaseString)",
+                    "deck_version_id": null,
+                    "assignment_status": "active",
+                    "title": "Alpha",
+                    "avatar_system_name": "book",
+                    "avatar_media_id": null,
+                    "language_code": "en",
+                    "current_version_id": "\(secondVersionID.databaseString)",
+                    "version_number": 1,
+                    "version_status": "published",
+                    "user_enabled": true,
+                    "preference_updated_at": null,
+                    "deck_group_id": "\(groupID.databaseString)",
+                    "deck_group_title": "English",
+                    "deck_group_sort_order": 0,
+                    "deck_sort_order": 100,
+                    "manifest": {
+                      "new_cards_per_day": 10,
+                      "review_cards_per_day": 100
+                    }
+                  }
+                ],
+                "content": {
+                  "cards": [],
+                  "examples": [],
+                  "forms": [],
+                  "distractors": []
+                },
+                "media": [],
+                "progress": [],
+                "reviews": [],
+                "practice_reviews": [],
+                "study_data_resets": [],
+                "matching_records": [],
+                "matching_attempts": [],
+                "user_settings": []
+              }
+            }
+            """
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            let bootstrap = try decoder.decode(ServerBootstrap.self, from: Data(json.utf8))
+
+            try database.importServerBootstrap(bootstrap, selectedUserID: userID)
+
+            #expect(try database.loadDecks().map(\.title) == ["Alpha", "Zeta"])
+        }
+    }
+
     @Test("pending progress FSRS JSON payload decodes back into a card")
     func pendingProgressFSRSJSONPayloadRoundtripsToCard() throws {
         try withIsolatedDatabase { database in

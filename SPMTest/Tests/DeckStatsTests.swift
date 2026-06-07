@@ -20,6 +20,19 @@ struct DeckStatsTests {
         #expect(reviewed.fsrsCard.due > now.addingTimeInterval(23 * 60 * 60))
     }
 
+    @Test("review schedule moves night due dates to morning")
+    func reviewScheduleMovesNightDueDatesToMorning() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let evening = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 22, minute: 30))!
+        let earlyMorning = calendar.date(from: DateComponents(year: 2026, month: 6, day: 4, hour: 3, minute: 30))!
+        let daytime = calendar.date(from: DateComponents(year: 2026, month: 6, day: 4, hour: 9, minute: 15))!
+
+        #expect(ReviewSchedule.availableDate(for: evening, calendar: calendar) == calendar.date(from: DateComponents(year: 2026, month: 6, day: 4, hour: 8))!)
+        #expect(ReviewSchedule.availableDate(for: earlyMorning, calendar: calendar) == calendar.date(from: DateComponents(year: 2026, month: 6, day: 4, hour: 8))!)
+        #expect(ReviewSchedule.availableDate(for: daytime, calendar: calendar) == daytime)
+    }
+
     @Test("deck stats count new cards")
     func newCardCount() {
         let id = UUID()
@@ -205,6 +218,37 @@ struct DeckStatsTests {
         #expect(stats.studyTotal == 1)
     }
 
+    @Test("deck stats do not count night due dates as later today")
+    func dueLaterTodaySkipsQuietHours() {
+        let cardID = UUID()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 21, minute: 52))!
+        let night = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 22, minute: 30))!
+        let deck = DeckContent(
+            id: UUID(),
+            title: "Test",
+            avatarSystemName: nil,
+            languageCode: "en",
+            newCardsPerDay: 20,
+            reviewCardsPerDay: 200,
+            cards: [
+                TestFixtures.card(id: cardID, word: "cat", translation: "кот"),
+            ]
+        )
+
+        let stats = DeckStatsCalculator.compute(
+            deck: deck,
+            progressByCardID: [cardID: CardProgress(cardID: cardID, fsrsCard: reviewCard(due: night, now: now))],
+            dailyUsage: nil,
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(stats.reviewDue == 0)
+        #expect(stats.dueLaterToday == 0)
+    }
+
     @Test("deck stats cap review cards due later today by daily review limit")
     func dueLaterTodayReviewCountRespectsDailyLimit() {
         let dueNowID = UUID()
@@ -387,6 +431,42 @@ struct DeckStatsTests {
         let queue = StudyQueueBuilder.build(deck: deck, progressByCardID: [:], dailyUsage: nil)
 
         #expect(queue.map(\.card.id) == [active.id])
+    }
+
+    @Test("study queue waits until morning for night due cards")
+    func studyQueueWaitsUntilMorningForNightDueCards() {
+        let card = TestFixtures.card(word: "cat", translation: "кот")
+        let calendar = Calendar.current
+        let base = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 22, minute: 30))!
+        let morning = ReviewSchedule.availableDate(for: base)
+        let deck = DeckContent(
+            id: UUID(),
+            title: "Test",
+            avatarSystemName: nil,
+            languageCode: "en",
+            newCardsPerDay: 0,
+            reviewCardsPerDay: 200,
+            cards: [card]
+        )
+        let progressByCardID = [
+            card.id: CardProgress(cardID: card.id, fsrsCard: reviewCard(due: base, now: base))
+        ]
+
+        let nightQueue = StudyQueueBuilder.build(
+            deck: deck,
+            progressByCardID: progressByCardID,
+            dailyUsage: nil,
+            now: base.addingTimeInterval(60)
+        )
+        let morningQueue = StudyQueueBuilder.build(
+            deck: deck,
+            progressByCardID: progressByCardID,
+            dailyUsage: nil,
+            now: morning
+        )
+
+        #expect(nightQueue.isEmpty)
+        #expect(morningQueue.map(\.card.id) == [card.id])
     }
 
     @Test("study queue is empty for inactive deck")

@@ -196,9 +196,15 @@ struct DeckListView: View {
         activeDecks.contains { !$0.activeCards.isEmpty }
     }
 
-    /// Активные колоды выше, отключённые ниже; внутри каждой группы — порядок из БД (по названию).
+    /// Активные колоды выше, отключённые ниже; внутри каждой группы — по названию.
     private var sortedDeckBindings: [Binding<DeckContent>] {
-        $decks.filter(\.wrappedValue.isActive) + $decks.filter { !$0.wrappedValue.isActive }
+        let activeDecks = $decks
+            .filter(\.wrappedValue.isActive)
+            .sorted(by: compareDeckBindingsByTitle)
+        let inactiveDecks = $decks
+            .filter { !$0.wrappedValue.isActive }
+            .sorted(by: compareDeckBindingsByTitle)
+        return activeDecks + inactiveDecks
     }
 
     private var showsGroupedDecks: Bool {
@@ -214,17 +220,7 @@ struct DeckListView: View {
                 key: key,
                 title: key.title,
                 sortOrder: key.sortOrder,
-                decks: decks.sorted { lhs, rhs in
-                    let left = lhs.wrappedValue
-                    let right = rhs.wrappedValue
-                    if left.isActive != right.isActive {
-                        return left.isActive
-                    }
-                    if left.deckSortOrder != right.deckSortOrder {
-                        return left.deckSortOrder < right.deckSortOrder
-                    }
-                    return left.title.localizedStandardCompare(right.title) == .orderedAscending
-                }
+                decks: decks.sorted(by: compareDeckBindingsByActivityThenTitle)
             )
         }
         .sorted { lhs, rhs in
@@ -240,6 +236,28 @@ struct DeckListView: View {
                 return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
             }
         }
+    }
+
+    private func compareDeckBindingsByTitle(_ lhs: Binding<DeckContent>, _ rhs: Binding<DeckContent>) -> Bool {
+        let left = lhs.wrappedValue
+        let right = rhs.wrappedValue
+        let titleComparison = left.title.localizedStandardCompare(right.title)
+        if titleComparison != .orderedSame {
+            return titleComparison == .orderedAscending
+        }
+        return left.id.uuidString < right.id.uuidString
+    }
+
+    private func compareDeckBindingsByActivityThenTitle(
+        _ lhs: Binding<DeckContent>,
+        _ rhs: Binding<DeckContent>
+    ) -> Bool {
+        let left = lhs.wrappedValue
+        let right = rhs.wrappedValue
+        if left.isActive != right.isActive {
+            return left.isActive
+        }
+        return compareDeckBindingsByTitle(lhs, rhs)
     }
 
     private var emptyDecksMessage: String {

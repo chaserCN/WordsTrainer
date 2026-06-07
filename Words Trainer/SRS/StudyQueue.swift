@@ -110,6 +110,7 @@ nonisolated enum StudyQueueBuilder {
             let progress = progressByCardID[content.id]
                 ?? CardProgress.newCard(cardID: content.id, now: now)
             let fsrs = progress.fsrsCard
+            let due = ReviewSchedule.availableDate(for: fsrs.due)
             let item = StudyQueueItem(card: content, progress: progress)
 
             switch fsrs.state {
@@ -118,11 +119,11 @@ nonisolated enum StudyQueueBuilder {
                     newCards.append(item)
                 }
             case .learning, .relearning:
-                if fsrs.due <= now {
+                if due <= now {
                     learning.append(item)
                 }
             case .review:
-                if fsrs.due <= now {
+                if due <= now {
                     review.append(item)
                 }
             }
@@ -150,12 +151,13 @@ final class StudySessionEngine: @unchecked Sendable {
         outcome: ReviewOutcome,
         now: Date = .now
     ) throws -> CardProgress {
-        let updated = try BinaryFSRS.review(
+        var updated = try BinaryFSRS.review(
             scheduler: scheduler,
             card: progress.fsrsCard,
             passed: outcome.passed,
             now: now
         )
+        updated.due = ReviewSchedule.availableDate(for: updated.due)
         return CardProgress(cardID: progress.cardID, fsrsCard: updated, updatedAt: now)
     }
 

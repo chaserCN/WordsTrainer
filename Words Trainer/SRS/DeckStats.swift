@@ -43,19 +43,20 @@ nonisolated enum DeckStatsCalculator {
                 continue
             }
             let fsrs = progress.fsrsCard
+            let due = ReviewSchedule.availableDate(for: fsrs.due, calendar: calendar)
             switch fsrs.state {
             case .new:
                 newCount += 1
             case .learning, .relearning:
-                if fsrs.due <= now {
+                if due <= now {
                     learningDue += 1
-                } else if StudyDay.isDate(fsrs.due, inSameStudyDayAs: now, calendar: calendar) {
+                } else if StudyDay.isDate(due, inSameStudyDayAs: now, calendar: calendar) {
                     learningLaterToday += 1
                 }
             case .review:
-                if fsrs.due <= now {
+                if due <= now {
                     reviewDue += 1
-                } else if StudyDay.isDate(fsrs.due, inSameStudyDayAs: now, calendar: calendar) {
+                } else if StudyDay.isDate(due, inSameStudyDayAs: now, calendar: calendar) {
                     reviewLaterToday += 1
                 }
             }
@@ -111,12 +112,13 @@ nonisolated enum StudyPlanForecastCalculator {
                 }
 
                 let fsrs = progress.fsrsCard
+                let due = ReviewSchedule.availableDate(for: fsrs.due, calendar: calendar)
                 switch fsrs.state {
                 case .new:
                     newCardsRemaining += 1
                 case .learning, .relearning:
                     guard let offset = studyDayOffset(
-                        for: fsrs.due,
+                        for: due,
                         today: today,
                         days: days,
                         calendar: calendar
@@ -124,7 +126,7 @@ nonisolated enum StudyPlanForecastCalculator {
                     learningDueByOffset[offset] += 1
                 case .review:
                     guard let offset = studyDayOffset(
-                        for: fsrs.due,
+                        for: due,
                         today: today,
                         days: days,
                         calendar: calendar

@@ -24,3 +24,28 @@ nonisolated enum StudyDay {
         key(for: date, calendar: calendar) == key(for: other, calendar: calendar)
     }
 }
+
+nonisolated enum ReviewSchedule {
+    static let quietHoursStart = 22
+    static let quietHoursEnd = 8
+
+    static func availableDate(for dueDate: Date, calendar: Calendar = .current) -> Date {
+        let hour = calendar.component(.hour, from: dueDate)
+        guard hour >= quietHoursStart || hour < quietHoursEnd else {
+            return dueDate
+        }
+
+        var components = calendar.dateComponents([.year, .month, .day], from: dueDate)
+        if hour >= quietHoursStart {
+            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: dueDate) else {
+                return dueDate
+            }
+            components = calendar.dateComponents([.year, .month, .day], from: nextDay)
+        }
+        components.hour = quietHoursEnd
+        components.minute = 0
+        components.second = 0
+        components.nanosecond = 0
+        return calendar.date(from: components) ?? dueDate
+    }
+}
