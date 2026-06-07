@@ -237,7 +237,7 @@ final class AppUserStore {
                         } else {
                             Self.logger.warning("changes media incomplete; keeping previous localServerRevision=\(localServerRevision, privacy: .public)")
                         }
-                        try applyCachedUserAvatarURLsFromExistingFiles()
+                        try applyCachedUserAvatarURLs(from: changes)
                         guard isCurrentRefreshTask(taskID) else { return .cancelled }
                         bootstrapState = .loaded
                         let assignmentCount = decks.count
@@ -488,7 +488,7 @@ final class AppUserStore {
 
     private func cacheMedia(from changes: ServerSyncChanges, database: ContentDatabase, taskID: UUID) async throws -> Int {
         try await cacheMedia(
-            users: [],
+            users: changes.users,
             assignments: changes.assignments,
             content: changes.content,
             media: changes.media,
@@ -712,8 +712,12 @@ final class AppUserStore {
         users = try usersWithCachedUserAvatarURLs(users, mediaObjects: mediaObjects)
     }
 
-    private func applyCachedUserAvatarURLsFromExistingFiles() throws {
-        users = try usersWithCachedUserAvatarURLs(users, mediaObjects: [:])
+    private func applyCachedUserAvatarURLs(from changes: ServerSyncChanges) throws {
+        let mediaObjects = Dictionary(
+            uniqueKeysWithValues: changes.media.map { ($0.id, $0) }
+        )
+        let sourceUsers = changes.users.isEmpty ? users : changes.users.map(\.appUser)
+        users = try usersWithCachedUserAvatarURLs(sourceUsers, mediaObjects: mediaObjects)
     }
 
     private func usersWithCachedUserAvatarURLs(

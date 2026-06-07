@@ -86,6 +86,7 @@ struct ServerBootstrap: Decodable, Sendable {
 }
 
 struct ServerSyncChanges: Decodable, Sendable {
+    let users: [ServerUser]
     let assignments: [ServerDeckAssignment]
     let content: ServerContentPayload
     let media: [ServerMediaObject]
@@ -104,6 +105,7 @@ struct ServerSyncChanges: Decodable, Sendable {
     }
 
     private enum ChangeKeys: String, CodingKey {
+        case users
         case assignments
         case content
         case media
@@ -119,6 +121,7 @@ struct ServerSyncChanges: Decodable, Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let changes = try container.nestedContainer(keyedBy: ChangeKeys.self, forKey: .changes)
+        users = try changes.decodeIfPresent([ServerUser].self, forKey: .users) ?? []
         assignments = try changes.decodeIfPresent([ServerDeckAssignment].self, forKey: .assignments) ?? []
         content = try changes.decodeIfPresent(ServerContentPayload.self, forKey: .content) ?? .empty
         media = try changes.decodeIfPresent([ServerMediaObject].self, forKey: .media) ?? []
