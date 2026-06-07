@@ -6,7 +6,7 @@ struct ClozeMCQStudyView: View {
     let deckChoicePool: [WordCardContent]
     let totalCount: Int
     let remainingCount: Int
-    let onAnswer: (ReviewOutcome) -> Void
+    let onAnswer: (ReviewOutcome, UUID?) -> Void
 
     @State private var displayedCardID: UUID?
     @State private var selected: String?
@@ -202,7 +202,8 @@ struct ClozeMCQStudyView: View {
 
     private func advance() {
         previousCorrectOption = card.effectiveClozeAnswer
-        onAnswer(passed ? .correct : .incorrect)
+        let additionalFailureCardID = passed ? nil : selected.flatMap { previewCard(for: $0)?.id }
+        onAnswer(passed ? .correct : .incorrect, additionalFailureCardID)
     }
 
     private func optionsMatch(_ lhs: String, _ rhs: String) -> Bool {

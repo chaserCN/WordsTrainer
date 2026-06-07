@@ -584,6 +584,19 @@ nonisolated final class ContentDatabase {
         return DeckDailyUsage(dayKey: dayKey, newCardsStudied: count)
     }
 
+    func deckID(forCardID cardID: UUID) throws -> UUID? {
+        let sql = "SELECT deck_id FROM cards WHERE id = ?"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: cardID)
+
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return uuidColumn(statement, index: 0)
+    }
+
     func saveProgress(deckID: UUID, progress: CardProgress) throws {
         let fsrsData = try JSONEncoder().encode(progress.fsrsCard)
         let sql = """

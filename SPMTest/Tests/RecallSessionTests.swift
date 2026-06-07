@@ -57,6 +57,38 @@ struct RecallSessionTests {
         #expect(saved?.fsrsCard.state != .new)
     }
 
+    @Test("cloze wrong answer can fail selected distractor progress too")
+    @MainActor
+    func clozeWrongAnswerFailsSelectedDistractorProgressToo() throws {
+        let engine = StudySessionEngine()
+        let currentID = UUID()
+        let selectedID = UUID()
+        let current = TestFixtures.card(id: currentID, word: "cat", translation: "кот")
+        let selectedProgress = CardProgress.newCard(cardID: selectedID)
+        let session = StudySession(
+            deckID: UUID(),
+            mode: .clozeMultipleChoice,
+            queue: [TestFixtures.queueItem(card: current)],
+            dailyUsage: nil,
+            engine: engine
+        )
+
+        var savedCurrent: CardProgress?
+        var savedSelected: CardProgress?
+        try session.advanceAfterReview(
+            outcome: .incorrect,
+            additionalFailureProgress: selectedProgress
+        ) { progress, _ in
+            savedCurrent = progress
+        } onAdditionalFailureSave: { progress in
+            savedSelected = progress
+        }
+
+        #expect(savedCurrent?.cardID == currentID)
+        #expect(savedSelected?.cardID == selectedID)
+        #expect(savedSelected?.fsrsCard.reps ?? 0 > selectedProgress.fsrsCard.reps)
+    }
+
     @Test("recall forgot makes card count as new in deck stats")
     @MainActor
     func recallForgotCountsAsNew() throws {

@@ -382,6 +382,14 @@ final class DeckStore {
         }
     }
 
+    func progress(deckID: UUID, cardID: UUID) throws -> CardProgress {
+        try database.progressMap(deckID: deckID)[cardID] ?? CardProgress.newCard(cardID: cardID)
+    }
+
+    func deckID(forCardID cardID: UUID) throws -> UUID? {
+        try database.deckID(forCardID: cardID)
+    }
+
     func saveStudyReview(_ event: StudyReviewEvent) throws {
         try database.saveStudyReview(event)
     }
@@ -636,12 +644,25 @@ final class DeckStore {
 extension StudySession {
     func advanceAfterReview(
         outcome: ReviewOutcome,
+        additionalFailureCardID: UUID? = nil,
         store: DeckStore
     ) throws {
         let shouldNotify = savesProgress && !(mode == .recall && outcome == .remembered)
         let progressDeckID = current?.deckID ?? deckID
-        try advanceAfterReview(outcome: outcome) { progress, wasNew in
+        let additionalFailure = try additionalFailureContext(
+            outcome: outcome,
+            cardID: additionalFailureCardID,
+            currentDeckID: progressDeckID,
+            store: store
+        )
+        try advanceAfterReview(
+            outcome: outcome,
+            additionalFailureProgress: additionalFailure?.progress
+        ) { progress, wasNew in
             try store.saveProgress(deckID: progressDeckID, progress: progress, wasNew: wasNew)
+        } onAdditionalFailureSave: { progress in
+            guard let additionalFailure else { return }
+            try store.saveProgress(deckID: additionalFailure.deckID, progress: progress, wasNew: false)
         } onReview: { event in
             try store.saveStudyReview(event)
         } onPracticeReview: { event in
@@ -649,5 +670,27 @@ extension StudySession {
         }
         guard shouldNotify else { return }
         store.notifyLocalDataDidChange(deckID: progressDeckID)
+        if let additionalFailure, additionalFailure.deckID != progressDeckID {
+            store.notifyLocalDataDidChange(deckID: additionalFailure.deckID)
+        }
+    }
+
+    private func additionalFailureContext(
+        outcome: ReviewOutcome,
+        cardID: UUID?,
+        currentDeckID: UUID,
+        store: DeckStore
+    ) throws -> (deckID: UUID, progress: CardProgress)? {
+        guard savesProgress,
+              mode == .clozeMultipleChoice,
+              outcome == .incorrect,
+              let cardID,
+              cardID != current?.card.id else {
+            return nil
+        }
+
+        let selectedDeckID = try store.deckID(forCardID: cardID) ?? currentDeckID
+        let progress = try store.progress(deckID: selectedDeckID, cardID: cardID)
+        return (selectedDeckID, progress)
     }
 }

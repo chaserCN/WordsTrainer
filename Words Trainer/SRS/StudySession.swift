@@ -94,7 +94,9 @@ final class StudySession {
 
     func advanceAfterReview(
         outcome: ReviewOutcome,
+        additionalFailureProgress: CardProgress? = nil,
         onSave: (_ progress: CardProgress, _ wasNew: Bool) throws -> Void,
+        onAdditionalFailureSave: ((_ progress: CardProgress) throws -> Void)? = nil,
         onReview: ((_ event: StudyReviewEvent) throws -> Void)? = nil,
         onPracticeReview: ((_ event: PracticeReviewEvent) throws -> Void)? = nil
     ) throws {
@@ -131,6 +133,15 @@ final class StudySession {
                         newState: String(describing: updated.fsrsCard.state)
                     )
                 )
+            }
+            if let additionalFailureProgress,
+               additionalFailureProgress.cardID != item.progress.cardID {
+                let updatedAdditional = try engine.applyReview(
+                    progress: additionalFailureProgress,
+                    outcome: .incorrect,
+                    now: reviewedAt
+                )
+                try onAdditionalFailureSave?(updatedAdditional)
             }
         } else if mode.recordsStudyReview {
             let eventDeckID = item.deckID ?? deckID
