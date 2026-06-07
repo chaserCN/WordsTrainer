@@ -22,6 +22,26 @@
             <string>%d карточки</string>
         </dict>
     </dict>
+    <key>count.cards.random</key>
+    <dict>
+        <key>NSStringLocalizedFormatKey</key>
+        <string>%#@cards@</string>
+        <key>cards</key>
+        <dict>
+            <key>NSStringFormatSpecTypeKey</key>
+            <string>NSStringPluralRuleType</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>d</string>
+            <key>one</key>
+            <string>%d случайная карточка</string>
+            <key>few</key>
+            <string>%d случайные карточки</string>
+            <key>many</key>
+            <string>%d случайных карточек</string>
+            <key>other</key>
+            <string>%d случайных карточек</string>
+        </dict>
+    </dict>
     <key>count.decks</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>

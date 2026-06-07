@@ -8,6 +8,9 @@ struct DeckListView: View {
     @State private var loadError: String?
     @State private var startError: String?
     @State private var isSearching = false
+    @State private var searchSourceRevision = 0
+    @State private var searchIndex: DeckWordSearchIndex?
+    @State private var searchIndexTask: Task<Void, Never>?
     @State private var showRandomModes = false
     @State private var randomStudyCards: [WordCardContent] = []
     @State private var isVisible = false
@@ -15,7 +18,8 @@ struct DeckListView: View {
     @State private var reloadGeneration = 0
     @State private var needsReloadWhenVisible = false
 
-    static let searchTransition: Animation = .snappy(duration: 0.32, extraBounce: 0)
+    static let searchTransitionDuration: TimeInterval = 0.32
+    static let searchTransition: Animation = .snappy(duration: searchTransitionDuration, extraBounce: 0)
 
     var body: some View {
         NavigationStack {
@@ -51,6 +55,8 @@ struct DeckListView: View {
             cancelScheduledReload()
         }
         .onChange(of: userStore.selectedUserID) {
+            isSearching = false
+            invalidateSearchIndex()
             store = nil
             storeUserID = nil
             reloadImmediately()
@@ -86,14 +92,19 @@ struct DeckListView: View {
             )
         } else if let store {
             ZStack {
+                deckList(store: store)
+                    .opacity(isSearching ? 0 : 1)
+                    .allowsHitTesting(!isSearching)
+                    .accessibilityHidden(isSearching)
+
                 if isSearching {
-                    WordSearchPane(items: searchItems) {
+                    WordSearchPane(
+                        index: searchIndex,
+                        sourceRevision: searchSourceRevision
+                    ) {
                         withAnimation(Self.searchTransition) { isSearching = false }
                     }
                     .transition(.move(edge: .trailing).combined(with: .opacity))
-                } else {
-                    deckList(store: store)
-                        .transition(.move(edge: .leading).combined(with: .opacity))
                 }
             }
         }
@@ -112,7 +123,7 @@ struct DeckListView: View {
                         startRandom()
                     },
                     search: {
-                    withAnimation(Self.searchTransition) { isSearching = true }
+                        openSearch()
                     }
                 )
 
@@ -149,14 +160,6 @@ struct DeckListView: View {
 
     private var hasSearchItems: Bool {
         activeDecks.contains { !$0.activeCards.isEmpty }
-    }
-
-    private var searchItems: [DeckWordSearchItem] {
-        decks.flatMap { deck in
-            deck.activeCards.map { card in
-                DeckWordSearchItem(card: card, deckID: deck.id, deckTitle: deck.title)
-            }
-        }
     }
 
     /// Активные колоды выше, отключённые ниже; внутри каждой группы — порядок из БД (по названию).
@@ -259,10 +262,43 @@ struct DeckListView: View {
         }
     }
 
+    private func openSearch() {
+        withAnimation(Self.searchTransition) { isSearching = true }
+    }
+
+    /// Сбрасывает построенный индекс поиска, пока новые данные не загружены.
+    private func invalidateSearchIndex() {
+        searchIndexTask?.cancel()
+        searchIndexTask = nil
+        searchIndex = nil
+        searchSourceRevision += 1
+    }
+
+    /// Строит индекс поиска в фоне заранее, чтобы форма поиска появлялась уже заполненной
+    /// и анимация открытия не дёргалась из-за тяжёлой работы на главном потоке.
+    private func rebuildSearchIndex() {
+        searchIndexTask?.cancel()
+        let snapshot = decks
+        guard !snapshot.isEmpty else {
+            searchIndex = nil
+            searchSourceRevision += 1
+            return
+        }
+        searchIndexTask = Task { @MainActor in
+            let built = await Task.detached(priority: .utility) {
+                DeckWordSearchIndex(decks: snapshot)
+            }.value
+            guard !Task.isCancelled else { return }
+            searchIndex = built
+            searchSourceRevision += 1
+        }
+    }
+
     private func bootstrap() async {
         do {
             guard let selectedUserID = userStore.selectedUserID else {
                 decks = []
+                invalidateSearchIndex()
                 store = nil
                 storeUserID = nil
                 loadError = nil
@@ -271,7 +307,9 @@ struct DeckListView: View {
             let deckStore = try DeckStore(userID: selectedUserID)
             storeUserID = selectedUserID
             store = deckStore
-            decks = try deckStore.allDecks()
+            let loadedDecks = try deckStore.allDecks()
+            decks = loadedDecks
+            rebuildSearchIndex()
             loadError = nil
         } catch {
             loadError = error.localizedDescription
@@ -386,7 +424,7 @@ private struct HeaderIconButton: View {
     }
 }
 
-private struct DeckWordSearchItem: Identifiable, Hashable {
+private struct DeckWordSearchItem: Identifiable, Hashable, Sendable {
     let card: WordCardContent
     let deckID: UUID
     let deckTitle: String
@@ -395,26 +433,25 @@ private struct DeckWordSearchItem: Identifiable, Hashable {
 }
 
 private struct WordSearchPane: View {
-    private let items: [DeckWordSearchItem]
-    private let index: DeckWordSearchIndex
+    private let index: DeckWordSearchIndex?
+    private let sourceRevision: Int
     private let onCancel: () -> Void
 
     @State private var query = ""
     @State private var debouncedQuery = ""
-    @State private var visibleItems: [DeckWordSearchItem]
+    @State private var visibleItems: [DeckWordSearchItem] = []
     @FocusState private var isSearchFieldFocused: Bool
 
     private static let searchDebounceNanoseconds: UInt64 = 180_000_000
 
     init(
-        items: [DeckWordSearchItem],
+        index: DeckWordSearchIndex?,
+        sourceRevision: Int,
         onCancel: @escaping () -> Void
     ) {
-        let index = DeckWordSearchIndex(items: items)
-        self.items = items
         self.index = index
+        self.sourceRevision = sourceRevision
         self.onCancel = onCancel
-        _visibleItems = State(initialValue: index.sortedItems)
     }
 
     private var trimmedQuery: String {
@@ -436,38 +473,43 @@ private struct WordSearchPane: View {
         .padding(.top, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task {
-            try? await Task.sleep(nanoseconds: 120_000_000)
+            // Поднимаем клавиатуру только после того, как форма доехала до места:
+            // если фокусироваться посреди перехода, первое появление клавиатуры
+            // подвешивает анимацию ровно на середине.
+            try? await Task.sleep(for: .seconds(DeckListView.searchTransitionDuration + 0.05))
+            guard !Task.isCancelled else { return }
             isSearchFieldFocused = true
         }
-        .task(id: query) {
-            let nextQuery = query
-            if nextQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                debouncedQuery = nextQuery
-                visibleItems = index.sortedItems
-                return
-            }
-
-            try? await Task.sleep(nanoseconds: Self.searchDebounceNanoseconds)
-            guard !Task.isCancelled else { return }
-            debouncedQuery = nextQuery
-            visibleItems = index.results(for: nextQuery)
+        .task(id: sourceRevision) {
+            applyCurrentIndex()
         }
-        .onChange(of: items) {
-            visibleItems = index.results(for: debouncedQuery)
+        .task(id: query) {
+            await updateResults(for: query)
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        if items.isEmpty {
+        if let index, index.sortedItems.isEmpty {
             DataPlaceholderView(
                 title: "Нет слов",
                 systemImage: "text.book.closed",
                 message: "В колодах пока нет активных карточек."
             )
             .frame(minHeight: 360)
+        } else if index == nil {
+            VStack(spacing: 14) {
+                ProgressView()
+                    .tint(LovableSurface.primary)
+
+                Text(L10n.text("Загружаем данные"))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(LovableSurface.muted)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 360)
         } else if trimmedQuery.isEmpty {
-            wordRows(index.sortedItems)
+            wordRows(visibleItems)
         } else if visibleItems.isEmpty {
             DataPlaceholderView(
                 title: "Нет совпадений",
@@ -478,6 +520,31 @@ private struct WordSearchPane: View {
         } else {
             wordRows(visibleItems)
         }
+    }
+
+    /// Применяет уже готовый индекс (построенный заранее в DeckListView) к текущему запросу.
+    private func applyCurrentIndex() {
+        guard let index else {
+            visibleItems = []
+            return
+        }
+        debouncedQuery = query
+        visibleItems = index.results(for: query)
+    }
+
+    private func updateResults(for query: String) async {
+        guard let currentIndex = index else { return }
+        let nextQuery = query
+        if nextQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            debouncedQuery = nextQuery
+            visibleItems = currentIndex.sortedItems
+            return
+        }
+
+        try? await Task.sleep(nanoseconds: Self.searchDebounceNanoseconds)
+        guard !Task.isCancelled, let currentIndex = index else { return }
+        debouncedQuery = nextQuery
+        visibleItems = currentIndex.results(for: nextQuery)
     }
 
     @ViewBuilder
@@ -551,14 +618,14 @@ private struct WordSearchPane: View {
     }
 }
 
-private struct DeckWordSearchIndex {
-    private struct Entry {
+private struct DeckWordSearchIndex: Sendable {
+    private struct Entry: Sendable {
         let item: DeckWordSearchItem
         let sortOrder: Int
         let candidates: [Candidate]
     }
 
-    private struct Candidate {
+    private struct Candidate: Sendable {
         let original: String
         let normalized: String
         let normalizedCharacters: [Character]
@@ -566,6 +633,10 @@ private struct DeckWordSearchIndex {
 
     let sortedItems: [DeckWordSearchItem]
     private let entries: [Entry]
+
+    init(decks: [DeckContent]) {
+        self.init(items: Self.items(from: decks))
+    }
 
     init(items: [DeckWordSearchItem]) {
         let sortedItems = items.sorted(by: Self.sortItems)
@@ -576,6 +647,14 @@ private struct DeckWordSearchIndex {
                 sortOrder: sortOrder,
                 candidates: Self.candidates(for: item)
             )
+        }
+    }
+
+    private static func items(from decks: [DeckContent]) -> [DeckWordSearchItem] {
+        decks.flatMap { deck in
+            deck.activeCards.map { card in
+                DeckWordSearchItem(card: card, deckID: deck.id, deckTitle: deck.title)
+            }
         }
     }
 

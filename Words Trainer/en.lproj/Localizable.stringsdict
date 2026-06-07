@@ -18,6 +18,22 @@
             <string>%d cards</string>
         </dict>
     </dict>
+    <key>count.cards.random</key>
+    <dict>
+        <key>NSStringLocalizedFormatKey</key>
+        <string>%#@cards@</string>
+        <key>cards</key>
+        <dict>
+            <key>NSStringFormatSpecTypeKey</key>
+            <string>NSStringPluralRuleType</string>
+            <key>NSStringFormatValueTypeKey</key>
+            <string>d</string>
+            <key>one</key>
+            <string>%d random card</string>
+            <key>other</key>
+            <string>%d random cards</string>
+        </dict>
+    </dict>
     <key>count.decks</key>
     <dict>
         <key>NSStringLocalizedFormatKey</key>
