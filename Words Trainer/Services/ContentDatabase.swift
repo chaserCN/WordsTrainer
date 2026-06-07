@@ -4,10 +4,6 @@ import SQLite3
 
 nonisolated(unsafe) private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-nonisolated private enum ContentDatabaseDefaults {
-    static let userID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
-}
-
 nonisolated private enum SyncMetadataKey {
     static let serverRevision = "server_revision"
     static let deviceID = "device_id"
@@ -89,7 +85,7 @@ nonisolated final class ContentDatabase {
     private let userID: UUID
     var currentUserID: UUID { userID }
 
-    init(userID: UUID = ContentDatabaseDefaults.userID, mode: OpenMode = .readWrite) throws {
+    init(userID: UUID, mode: OpenMode = .readWrite) throws {
         self.userID = userID
         _ = try AppDataPaths.dataDirectoryURL()
         let path = try AppDataPaths.databaseURL().path
@@ -110,7 +106,7 @@ nonisolated final class ContentDatabase {
         }
     }
 
-    convenience init(userID: UUID = ContentDatabaseDefaults.userID, readOnly: Bool) throws {
+    convenience init(userID: UUID, readOnly: Bool) throws {
         try self.init(userID: userID, mode: readOnly ? .readOnly : .readWrite)
     }
 
@@ -2604,88 +2600,6 @@ nonisolated final class ContentDatabase {
         try addColumnIfMissing(table: "study_reviews", column: "source", definition: "TEXT NOT NULL DEFAULT 'deck_session'")
         try addColumnIfMissing(table: "study_reviews", column: "deck_version_id", definition: "TEXT")
         try addColumnIfMissing(table: "practice_reviews", column: "deck_version_id", definition: "TEXT")
-        try migrateUserScopedTablesIfNeeded()
-        try seedDefaultAssignmentsIfNeeded()
-    }
-
-    private func migrateUserScopedTablesIfNeeded() throws {
-        let defaultUserID = ContentDatabaseDefaults.userID.databaseString
-        if try !hasColumn("user_id", inTable: "card_progress") {
-            try executeMigrationStatements([
-                "ALTER TABLE card_progress RENAME TO card_progress_legacy",
-                """
-                CREATE TABLE card_progress (
-                    user_id TEXT NOT NULL,
-                    card_id TEXT NOT NULL,
-                    deck_id TEXT NOT NULL,
-                    fsrs_data BLOB NOT NULL,
-                    updated_at REAL NOT NULL,
-                    synced_at REAL,
-                    PRIMARY KEY (user_id, card_id),
-                    FOREIGN KEY (deck_id) REFERENCES decks(id)
-                )
-                """,
-                """
-                INSERT INTO card_progress (user_id, card_id, deck_id, fsrs_data, updated_at, synced_at)
-                SELECT '\(defaultUserID)', card_id, deck_id, fsrs_data, updated_at, NULL
-                FROM card_progress_legacy
-                """,
-                "DROP TABLE card_progress_legacy",
-                "CREATE INDEX IF NOT EXISTS idx_card_progress_deck_id ON card_progress(deck_id)",
-            ])
-        }
-
-        if try !hasColumn("user_id", inTable: "deck_daily_usage") {
-            try executeMigrationStatements([
-                "ALTER TABLE deck_daily_usage RENAME TO deck_daily_usage_legacy",
-                """
-                CREATE TABLE deck_daily_usage (
-                    user_id TEXT NOT NULL,
-                    deck_id TEXT NOT NULL,
-                    day_key TEXT NOT NULL,
-                    new_cards_studied INTEGER NOT NULL DEFAULT 0,
-                    PRIMARY KEY (user_id, deck_id, day_key),
-                    FOREIGN KEY (deck_id) REFERENCES decks(id)
-                )
-                """,
-                """
-                INSERT INTO deck_daily_usage (user_id, deck_id, day_key, new_cards_studied)
-                SELECT '\(defaultUserID)', deck_id, day_key, new_cards_studied
-                FROM deck_daily_usage_legacy
-                """,
-                "DROP TABLE deck_daily_usage_legacy",
-            ])
-        }
-
-        if try !hasColumn("user_id", inTable: "deck_matching_records") {
-            try executeMigrationStatements([
-                "ALTER TABLE deck_matching_records RENAME TO deck_matching_records_legacy",
-                """
-                CREATE TABLE deck_matching_records (
-                    user_id TEXT NOT NULL,
-                    deck_id TEXT NOT NULL,
-                    best_duration_seconds REAL NOT NULL,
-                    pair_count INTEGER NOT NULL,
-                    achieved_at REAL NOT NULL,
-                    synced_at REAL,
-                    PRIMARY KEY (user_id, deck_id),
-                    FOREIGN KEY (deck_id) REFERENCES decks(id)
-                )
-                """,
-                """
-                INSERT INTO deck_matching_records (user_id, deck_id, best_duration_seconds, pair_count, achieved_at, synced_at)
-                SELECT '\(defaultUserID)', deck_id, best_duration_seconds, pair_count, achieved_at, NULL
-                FROM deck_matching_records_legacy
-                """,
-                "DROP TABLE deck_matching_records_legacy",
-            ])
-        }
-
-        try addColumnIfMissing(
-            table: "study_reviews",
-            column: "user_id",
-            definition: "TEXT NOT NULL DEFAULT '\(defaultUserID)'"
-        )
         try executeMigrationStatements([
             "CREATE INDEX IF NOT EXISTS idx_study_reviews_user_reviewed ON study_reviews(user_id, reviewed_at)",
         ])
@@ -2702,21 +2616,6 @@ nonisolated final class ContentDatabase {
     private func addColumnIfMissing(table: String, column: String, definition: String) throws {
         guard try !hasColumn(column, inTable: table) else { return }
         let sql = "ALTER TABLE \(table) ADD COLUMN \(column) \(definition)"
-        guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
-            throw ContentDatabaseError.migrationFailed
-        }
-    }
-
-    private func seedDefaultAssignmentsIfNeeded() throws {
-        let defaultUserID = ContentDatabaseDefaults.userID.databaseString
-        let sql = """
-        INSERT OR IGNORE INTO user_deck_assignments (user_id, deck_id, status)
-        SELECT '\(defaultUserID)', id, status
-        FROM decks
-        WHERE NOT EXISTS (
-            SELECT 1 FROM user_deck_assignments WHERE user_deck_assignments.deck_id = decks.id
-        )
-        """
         guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
             throw ContentDatabaseError.migrationFailed
         }
