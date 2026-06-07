@@ -643,22 +643,28 @@ private struct StatisticsPanel: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(
-                LinearGradient(
-                    colors: [
-                        oklch(0.25, 0.04, 265),
-                        oklch(0.18, 0.04, 270)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            )
+            // Тень вешаем на фоновую фигуру, а не на весь content: иначе SwiftUI
+            // считает размытую тень из всей растеризованной панели (вместе с текстом)
+            // и пере-композитит её на каждом кадре скролла. Силуэт-фигура же
+            // растеризуется один раз и просто сдвигается. Текст остаётся живым.
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                oklch(0.25, 0.04, 265),
+                                oklch(0.18, 0.04, 270)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .shadow(color: oklch(0.1, 0.04, 265, 0.14), radius: 8, x: 0, y: 4)
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(.white.opacity(0.05), lineWidth: 0.5)
             }
-            .shadow(color: oklch(0.1, 0.04, 265, 0.14), radius: 8, x: 0, y: 4)
     }
 }
 
@@ -928,6 +934,9 @@ private struct StudyTimeRow: View {
                 }
             }
             .frame(height: 7)
+            // Кэшируем полоску в текстуру, чтобы при скролле не пере-композитить
+            // слои капсул каждый кадр; текст строки остаётся живым.
+            .drawingGroup()
         }
     }
 }
@@ -2137,6 +2146,23 @@ private struct ActivityMonthView: View, Equatable {
             }
         }
         .frame(width: 162, alignment: .leading)
+        // Десятки прямоугольников на месяц — это десятки слоёв, которые GPU
+        // композитит каждый кадр при скролле. Расплющиваем сетку месяца в одну
+        // закэшированную текстуру; она перерисовывается только когда меняется
+        // сам месяц (т.е. при обновлении статистики), а не при прокрутке.
+        .drawingGroup()
+        // drawingGroup растеризует поддерево и теряет per-cell метки VoiceOver,
+        // поэтому отдаём сводку по месяцу одним элементом.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        let totalCards = month.weeks
+            .flatMap(\.cells)
+            .compactMap(\.day)
+            .reduce(0) { $0 + $1.reviewedCount }
+        return "\(month.title): \(LocalizedCounts.cardPhrase(totalCards))"
     }
 }
 
@@ -2490,6 +2516,10 @@ private struct ForecastSection: View {
                             }
                         }
                         .frame(height: 8)
+                        // Полоска с тенью двигается вместе со скроллом и пере-композитится
+                        // каждый кадр. Кэшируем её в текстуру — текст слева/справа остаётся
+                        // живым и доступным VoiceOver.
+                        .drawingGroup()
                         ZStack(alignment: .trailing) {
                             Text(countColumnLabel)
                                 .hidden()
