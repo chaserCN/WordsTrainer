@@ -393,6 +393,10 @@ nonisolated struct DeckContent: Identifiable, Hashable, Sendable {
     var languageCode: String
     var newCardsPerDay: Int
     var reviewCardsPerDay: Int
+    var deckGroupID: UUID?
+    var deckGroupTitle: String?
+    var deckGroupSortOrder: Int?
+    var deckSortOrder: Int
     var cards: [WordCardContent]
 
     var isActive: Bool { status.isActive }
@@ -408,6 +412,10 @@ nonisolated struct DeckContent: Identifiable, Hashable, Sendable {
         languageCode: String,
         newCardsPerDay: Int,
         reviewCardsPerDay: Int,
+        deckGroupID: UUID? = nil,
+        deckGroupTitle: String? = nil,
+        deckGroupSortOrder: Int? = nil,
+        deckSortOrder: Int = 0,
         cards: [WordCardContent]
     ) {
         self.id = id
@@ -419,6 +427,10 @@ nonisolated struct DeckContent: Identifiable, Hashable, Sendable {
         self.languageCode = languageCode
         self.newCardsPerDay = newCardsPerDay
         self.reviewCardsPerDay = reviewCardsPerDay
+        self.deckGroupID = deckGroupID
+        self.deckGroupTitle = deckGroupTitle
+        self.deckGroupSortOrder = deckGroupSortOrder
+        self.deckSortOrder = deckSortOrder
         self.cards = cards
     }
 }

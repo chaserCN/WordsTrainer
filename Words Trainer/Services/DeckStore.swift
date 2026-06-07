@@ -232,6 +232,13 @@ final class DeckStore {
         )
     }
 
+    func randomStudyCards(deckIDs: Set<UUID>) throws -> [WordCardContent] {
+        try RandomStudySessionBuilder.randomCards(
+            snapshots: todaySnapshots(deckIDs: deckIDs),
+            limit: database.randomCardCount()
+        )
+    }
+
     func stats(for deck: DeckContent) throws -> DeckStats {
         let progress = try database.progressMap(deckID: deck.id)
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
@@ -357,6 +364,15 @@ final class DeckStore {
     func startRandomCardsSession(cards: [WordCardContent], mode: StudyMode) throws -> StudySession? {
         try RandomStudySessionBuilder.session(
             snapshots: todaySnapshots(),
+            cards: cards,
+            mode: mode,
+            engine: engine
+        )
+    }
+
+    func startRandomCardsSession(cards: [WordCardContent], deckIDs: Set<UUID>, mode: StudyMode) throws -> StudySession? {
+        try RandomStudySessionBuilder.session(
+            snapshots: todaySnapshots(deckIDs: deckIDs),
             cards: cards,
             mode: mode,
             engine: engine
@@ -506,6 +522,15 @@ final class DeckStore {
         try allDecks().filter(\.isActive).map { deck in
             try todaySnapshot(deck: deck)
         }
+    }
+
+    private func todaySnapshots(deckIDs: Set<UUID>) throws -> [TodayStudyDeckSnapshot] {
+        guard !deckIDs.isEmpty else { return [] }
+        return try allDecks()
+            .filter { $0.isActive && deckIDs.contains($0.id) }
+            .map { deck in
+                try todaySnapshot(deck: deck)
+            }
     }
 
     private func todaySnapshot(deck: DeckContent) throws -> TodayStudyDeckSnapshot {

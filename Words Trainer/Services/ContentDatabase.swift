@@ -197,6 +197,10 @@ nonisolated final class ContentDatabase {
                 languageCode: row.languageCode,
                 newCardsPerDay: row.newCardsPerDay,
                 reviewCardsPerDay: row.reviewCardsPerDay,
+                deckGroupID: row.deckGroupID,
+                deckGroupTitle: row.deckGroupTitle,
+                deckGroupSortOrder: row.deckGroupSortOrder,
+                deckSortOrder: row.deckSortOrder,
                 cards: try fetchCards(deckID: row.id)
             )
         }
@@ -1576,17 +1580,33 @@ nonisolated final class ContentDatabase {
     private func upsertAssignments(_ assignments: [ServerDeckAssignment], selectedUserID: UUID) throws {
         for assignment in assignments where assignment.userId == selectedUserID {
             let sql = """
-            INSERT INTO user_deck_assignments (user_id, deck_id, status)
-            VALUES (?, ?, ?)
-            ON CONFLICT(user_id, deck_id) DO UPDATE SET
-                status = excluded.status
-            """
-            try exec(
-                sql,
-                uuid: selectedUserID,
-                uuid2: assignment.deckId,
-                text: localStatus(assignment.assignmentStatus).rawValue
+            INSERT INTO user_deck_assignments (
+                user_id, deck_id, status, deck_group_id, deck_group_title,
+                deck_group_sort_order, deck_sort_order
             )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, deck_id) DO UPDATE SET
+                status = excluded.status,
+                deck_group_id = excluded.deck_group_id,
+                deck_group_title = excluded.deck_group_title,
+                deck_group_sort_order = excluded.deck_group_sort_order,
+                deck_sort_order = excluded.deck_sort_order
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            defer { sqlite3_finalize(statement) }
+            try bind(statement, index: 1, uuid: selectedUserID)
+            try bind(statement, index: 2, uuid: assignment.deckId)
+            try bind(statement, index: 3, text: localStatus(assignment.assignmentStatus).rawValue)
+            try bind(statement, index: 4, uuid: assignment.deckGroupId)
+            try bind(statement, index: 5, text: assignment.deckGroupTitle)
+            try bind(statement, index: 6, int: assignment.deckGroupSortOrder)
+            try bind(statement, index: 7, int: assignment.deckSortOrder ?? 0)
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw ContentDatabaseError.queryFailed
+            }
         }
     }
 
@@ -2382,6 +2402,10 @@ nonisolated final class ContentDatabase {
             user_id TEXT NOT NULL,
             deck_id TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+            deck_group_id TEXT,
+            deck_group_title TEXT,
+            deck_group_sort_order INTEGER,
+            deck_sort_order INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (user_id, deck_id),
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
@@ -2563,6 +2587,10 @@ nonisolated final class ContentDatabase {
         }
         try addColumnIfMissing(table: "decks", column: "avatar_media_id", definition: "TEXT")
         try addColumnIfMissing(table: "decks", column: "content_version_id", definition: "TEXT")
+        try addColumnIfMissing(table: "user_deck_assignments", column: "deck_group_id", definition: "TEXT")
+        try addColumnIfMissing(table: "user_deck_assignments", column: "deck_group_title", definition: "TEXT")
+        try addColumnIfMissing(table: "user_deck_assignments", column: "deck_group_sort_order", definition: "INTEGER")
+        try addColumnIfMissing(table: "user_deck_assignments", column: "deck_sort_order", definition: "INTEGER NOT NULL DEFAULT 0")
         try addColumnIfMissing(table: "cards", column: "image_media_id", definition: "TEXT")
         try addColumnIfMissing(table: "cards", column: "audio_word_media_id", definition: "TEXT")
         try addColumnIfMissing(table: "card_examples", column: "image_media_id", definition: "TEXT")
@@ -2768,6 +2796,10 @@ nonisolated final class ContentDatabase {
         let languageCode: String
         let newCardsPerDay: Int
         let reviewCardsPerDay: Int
+        let deckGroupID: UUID?
+        let deckGroupTitle: String?
+        let deckGroupSortOrder: Int?
+        let deckSortOrder: Int
     }
 
     private func fetchDeckRows() throws -> [DeckRow] {
@@ -2780,13 +2812,19 @@ nonisolated final class ContentDatabase {
                    ELSE 'inactive'
                END AS effective_status,
                decks.title, decks.avatar_system_name, decks.content_version_id,
-               decks.avatar_media_id, decks.language_code, decks.new_cards_per_day, decks.review_cards_per_day
+               decks.avatar_media_id, decks.language_code, decks.new_cards_per_day, decks.review_cards_per_day,
+               user_deck_assignments.deck_group_id, user_deck_assignments.deck_group_title,
+               user_deck_assignments.deck_group_sort_order, user_deck_assignments.deck_sort_order
         FROM decks
         JOIN user_deck_assignments ON user_deck_assignments.deck_id = decks.id
         LEFT JOIN user_deck_preferences ON user_deck_preferences.user_id = user_deck_assignments.user_id
             AND user_deck_preferences.deck_id = user_deck_assignments.deck_id
         WHERE user_deck_assignments.user_id = ?
-        ORDER BY title
+        ORDER BY user_deck_assignments.deck_group_sort_order IS NULL,
+                 user_deck_assignments.deck_group_sort_order,
+                 user_deck_assignments.deck_group_title,
+                 user_deck_assignments.deck_sort_order,
+                 title
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -2810,7 +2848,11 @@ nonisolated final class ContentDatabase {
                     avatarMediaID: uuidColumn(statement, index: 5),
                     languageCode: languageCode,
                     newCardsPerDay: Int(sqlite3_column_int(statement, 7)),
-                    reviewCardsPerDay: Int(sqlite3_column_int(statement, 8))
+                    reviewCardsPerDay: Int(sqlite3_column_int(statement, 8)),
+                    deckGroupID: uuidColumn(statement, index: 9),
+                    deckGroupTitle: textColumn(statement, index: 10),
+                    deckGroupSortOrder: intColumn(statement, index: 11),
+                    deckSortOrder: Int(sqlite3_column_int(statement, 12))
                 )
             )
         }

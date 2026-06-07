@@ -176,6 +176,10 @@ struct ServerDeckAssignment: Decodable, Sendable {
     let manifest: ServerDeckManifest?
     let userEnabled: Bool?
     let preferenceUpdatedAt: String?
+    let deckGroupId: UUID?
+    let deckGroupTitle: String?
+    let deckGroupSortOrder: Int?
+    let deckSortOrder: Int?
 }
 
 struct ServerContentPayload: Decodable, Sendable {

@@ -13,10 +13,13 @@ struct DeckListView: View {
     @State private var searchIndexTask: Task<Void, Never>?
     @State private var showRandomModes = false
     @State private var randomStudyCards: [WordCardContent] = []
+    @State private var randomStudyTitle = RandomStudySessionBuilder.title
+    @State private var randomStudyDeckIDs: Set<UUID>?
     @State private var isVisible = false
     @State private var reloadTask: Task<Void, Never>?
     @State private var reloadGeneration = 0
     @State private var needsReloadWhenVisible = false
+    @State private var collapsedDeckGroupIDs: Set<String> = []
 
     static let searchTransitionDuration: TimeInterval = 0.32
     static let searchTransition: Animation = .snappy(duration: searchTransitionDuration, extraBounce: 0)
@@ -29,7 +32,12 @@ struct DeckListView: View {
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showRandomModes) {
                 if let store {
-                    RandomAllDecksModesView(store: store, initialCards: randomStudyCards)
+                    RandomAllDecksModesView(
+                        store: store,
+                        initialCards: randomStudyCards,
+                        title: randomStudyTitle,
+                        deckIDs: randomStudyDeckIDs
+                    )
                 }
             }
         }
@@ -41,6 +49,7 @@ struct DeckListView: View {
             Text(startError ?? "")
         }
         .task {
+            loadCollapsedDeckGroups()
             await bootstrap()
         }
         .onAppear {
@@ -57,6 +66,7 @@ struct DeckListView: View {
         .onChange(of: userStore.selectedUserID) {
             isSearching = false
             invalidateSearchIndex()
+            loadCollapsedDeckGroups()
             store = nil
             storeUserID = nil
             reloadImmediately()
@@ -127,24 +137,48 @@ struct DeckListView: View {
                     }
                 )
 
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    ForEach(sortedDeckBindings) { $deck in
-                        NavigationLink {
-                            DeckDetailView(deck: $deck, store: store)
-                        } label: {
-                            LovableDeckCard(deck: deck)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .opacity(deck.isActive ? 1 : 0.45)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                deckRows(store: store)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
             .padding(.top, 28)
             .padding(.bottom, 32)
+        }
+    }
+
+    @ViewBuilder
+    private func deckRows(store: DeckStore) -> some View {
+        if showsGroupedDecks {
+            LazyVStack(alignment: .leading, spacing: 26) {
+                ForEach(groupedDeckSections) { section in
+                    DeckGroupSectionView(
+                        section: section,
+                        store: store,
+                        isCollapsed: collapsedDeckGroupIDs.contains(section.id),
+                        random: {
+                            startRandom(deckIDs: section.activeDeckIDs, title: section.title)
+                        },
+                        toggle: {
+                            toggleDeckGroup(section.id)
+                        }
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                ForEach(sortedDeckBindings) { $deck in
+                    NavigationLink {
+                        DeckDetailView(deck: $deck, store: store)
+                    } label: {
+                        LovableDeckCard(deck: deck)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .opacity(deck.isActive ? 1 : 0.45)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -165,6 +199,47 @@ struct DeckListView: View {
     /// Активные колоды выше, отключённые ниже; внутри каждой группы — порядок из БД (по названию).
     private var sortedDeckBindings: [Binding<DeckContent>] {
         $decks.filter(\.wrappedValue.isActive) + $decks.filter { !$0.wrappedValue.isActive }
+    }
+
+    private var showsGroupedDecks: Bool {
+        decks.contains(where: \.hasDeckGroup)
+    }
+
+    private var groupedDeckSections: [DeckGroupSection] {
+        let grouped = Dictionary(grouping: sortedDeckBindings) { binding in
+            DeckGroupKey(deck: binding.wrappedValue)
+        }
+        return grouped.map { key, decks in
+            DeckGroupSection(
+                key: key,
+                title: key.title,
+                sortOrder: key.sortOrder,
+                decks: decks.sorted { lhs, rhs in
+                    let left = lhs.wrappedValue
+                    let right = rhs.wrappedValue
+                    if left.isActive != right.isActive {
+                        return left.isActive
+                    }
+                    if left.deckSortOrder != right.deckSortOrder {
+                        return left.deckSortOrder < right.deckSortOrder
+                    }
+                    return left.title.localizedStandardCompare(right.title) == .orderedAscending
+                }
+            )
+        }
+        .sorted { lhs, rhs in
+            switch (lhs.key.isOther, rhs.key.isOther) {
+            case (true, false):
+                return false
+            case (false, true):
+                return true
+            default:
+                if lhs.sortOrder != rhs.sortOrder {
+                    return lhs.sortOrder < rhs.sortOrder
+                }
+                return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+            }
+        }
     }
 
     private var emptyDecksMessage: String {
@@ -252,6 +327,24 @@ struct DeckListView: View {
         guard let store else { return }
         do {
             randomStudyCards = try store.randomStudyCards()
+            randomStudyTitle = RandomStudySessionBuilder.title
+            randomStudyDeckIDs = nil
+            guard !randomStudyCards.isEmpty else {
+                startError = "Нет карточек для этого упражнения."
+                return
+            }
+            showRandomModes = true
+        } catch {
+            startError = error.localizedDescription
+        }
+    }
+
+    private func startRandom(deckIDs: Set<UUID>, title: String) {
+        guard let store else { return }
+        do {
+            randomStudyCards = try store.randomStudyCards(deckIDs: deckIDs)
+            randomStudyTitle = title
+            randomStudyDeckIDs = deckIDs
             guard !randomStudyCards.isEmpty else {
                 startError = "Нет карточек для этого упражнения."
                 return
@@ -264,6 +357,21 @@ struct DeckListView: View {
 
     private func openSearch() {
         withAnimation(Self.searchTransition) { isSearching = true }
+    }
+
+    private func loadCollapsedDeckGroups() {
+        collapsedDeckGroupIDs = DeckGroupExpansionStorage.load(userID: userStore.selectedUserID)
+    }
+
+    private func toggleDeckGroup(_ groupID: String) {
+        withAnimation(.snappy(duration: 0.22, extraBounce: 0)) {
+            if collapsedDeckGroupIDs.contains(groupID) {
+                collapsedDeckGroupIDs.remove(groupID)
+            } else {
+                collapsedDeckGroupIDs.insert(groupID)
+            }
+        }
+        DeckGroupExpansionStorage.save(collapsedDeckGroupIDs, userID: userStore.selectedUserID)
     }
 
     /// Сбрасывает построенный индекс поиска, пока новые данные не загружены.
@@ -314,6 +422,217 @@ struct DeckListView: View {
         } catch {
             loadError = error.localizedDescription
         }
+    }
+}
+
+private struct DeckGroupKey: Hashable {
+    let id: String
+    let title: String
+    let sortOrder: Int
+    let isOther: Bool
+
+    init(deck: DeckContent) {
+        if let title = deck.normalizedDeckGroupTitle {
+            id = deck.deckGroupID?.uuidString.lowercased() ?? "title:\(title)"
+            self.title = title
+            sortOrder = deck.deckGroupSortOrder ?? 0
+            isOther = false
+        } else {
+            id = "other"
+            title = L10n.text("Другие")
+            sortOrder = Int.max
+            isOther = true
+        }
+    }
+}
+
+private extension DeckContent {
+    var hasDeckGroup: Bool {
+        normalizedDeckGroupTitle != nil
+    }
+
+    var normalizedDeckGroupTitle: String? {
+        guard let deckGroupTitle else { return nil }
+        let trimmed = deckGroupTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private struct DeckGroupSection: Identifiable {
+    let key: DeckGroupKey
+    let title: String
+    let sortOrder: Int
+    let decks: [Binding<DeckContent>]
+
+    var id: String { key.id }
+
+    var activeDeckCount: Int {
+        decks.map(\.wrappedValue).filter(\.isActive).count
+    }
+
+    var activeCardCount: Int {
+        decks.map(\.wrappedValue).filter(\.isActive).reduce(0) { total, deck in
+            total + deck.activeCards.count
+        }
+    }
+
+    var activeDeckIDs: Set<UUID> {
+        Set(decks.map(\.wrappedValue).filter(\.isActive).map(\.id))
+    }
+}
+
+private struct DeckGroupSectionView: View {
+    let section: DeckGroupSection
+    let store: DeckStore
+    let isCollapsed: Bool
+    let random: () -> Void
+    let toggle: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            DeckGroupHeader(section: section, isCollapsed: isCollapsed, random: random, toggle: toggle)
+
+            if !isCollapsed {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(section.decks) { $deck in
+                        NavigationLink {
+                            DeckDetailView(deck: $deck, store: store)
+                        } label: {
+                            LovableDeckCard(deck: deck)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .opacity(deck.isActive ? 1 : 0.45)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct DeckGroupHeader: View {
+    let section: DeckGroupSection
+    let isCollapsed: Bool
+    let random: () -> Void
+    let toggle: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button(action: toggle) {
+                HStack(spacing: 10) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(LovableSurface.muted)
+                        .frame(width: 18, height: 18)
+                        .rotationEffect(.degrees(isCollapsed ? -90 : 0))
+
+                    Text(section.title)
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(LovableSurface.foreground)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+
+                    Text("\(section.activeDeckCount) · \(section.activeCardCount)")
+                        .font(.system(size: 14, weight: .regular))
+                        .monospacedDigit()
+                        .foregroundStyle(LovableSurface.muted)
+
+                    Spacer(minLength: 0)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                L10n.format(
+                    "%@, %@, %@",
+                    section.title,
+                    LocalizedCounts.deckPhrase(section.activeDeckCount),
+                    LocalizedCounts.cardPhrase(section.activeCardCount)
+                )
+            )
+            .accessibilityValue(isCollapsed ? L10n.text("Закрыта") : L10n.text("Открыта"))
+
+            GroupStudyButton(
+                title: L10n.text("Учить"),
+                accessibilityLabel: L10n.format(L10n.text("Случайные карточки из %@"), section.title),
+                isEnabled: section.activeCardCount > 0,
+                action: random
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct GroupStudyButton: View {
+    let title: String
+    let accessibilityLabel: String
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: "shuffle")
+                    .font(.system(size: 14, weight: .bold))
+                    .symbolRenderingMode(.monochrome)
+
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .foregroundStyle(oklch(0.35, 0.04, 260))
+            .frame(height: 32)
+            .padding(.horizontal, 12)
+            .background(oklch(1, 0, 0, 0.45), in: Capsule())
+            .overlay(alignment: .top) {
+                Capsule()
+                    .stroke(oklch(1, 0, 0, 0.7), lineWidth: 0.5)
+                    .frame(height: 1)
+                    .padding(.horizontal, 10)
+            }
+            .overlay {
+                Capsule()
+                    .stroke(oklch(0.18, 0.02, 260, 0.06), lineWidth: 0.5)
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(GroupStudyButtonStyle())
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.45)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+private struct GroupStudyButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+private enum DeckGroupExpansionStorage {
+    private static let keyPrefix = "deckList.collapsedDeckGroupIDs"
+
+    static func load(userID: UUID?, defaults: UserDefaults = .standard) -> Set<String> {
+        guard let key = key(for: userID) else { return [] }
+        return Set(defaults.stringArray(forKey: key) ?? [])
+    }
+
+    static func save(_ groupIDs: Set<String>, userID: UUID?, defaults: UserDefaults = .standard) {
+        guard let key = key(for: userID) else { return }
+        if groupIDs.isEmpty {
+            defaults.removeObject(forKey: key)
+        } else {
+            defaults.set(groupIDs.sorted(), forKey: key)
+        }
+    }
+
+    private static func key(for userID: UUID?) -> String? {
+        guard let userID else { return nil }
+        return "\(keyPrefix).\(userID.uuidString.lowercased())"
     }
 }
 
@@ -618,7 +937,7 @@ private struct WordSearchPane: View {
     }
 }
 
-private struct DeckWordSearchIndex: Sendable {
+private nonisolated struct DeckWordSearchIndex: Sendable {
     private struct Entry: Sendable {
         let item: DeckWordSearchItem
         let sortOrder: Int

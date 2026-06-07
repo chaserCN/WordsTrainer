@@ -1533,14 +1533,23 @@ private struct TodayStudyModesView: View {
 
 struct RandomAllDecksModesView: View {
     let store: DeckStore
+    let title: String
+    let deckIDs: Set<UUID>?
 
     @State private var cards: [WordCardContent]
     @State private var session: StudySession?
     @State private var showStudy = false
     @State private var loadError: String?
 
-    init(store: DeckStore, initialCards: [WordCardContent]) {
+    init(
+        store: DeckStore,
+        initialCards: [WordCardContent],
+        title: String = RandomStudySessionBuilder.title,
+        deckIDs: Set<UUID>? = nil
+    ) {
         self.store = store
+        self.title = title
+        self.deckIDs = deckIDs
         _cards = State(initialValue: initialCards)
     }
 
@@ -1548,8 +1557,8 @@ struct RandomAllDecksModesView: View {
         TodayStudyModesView(
             queueCount: cards.count,
             wordListCards: cards,
-            navigationTitle: RandomStudySessionBuilder.title,
-            summaryTitle: RandomStudySessionBuilder.title,
+            navigationTitle: title,
+            summaryTitle: title,
             summaryText: LocalizedCounts.randomCards(cards.count),
             summarySystemImage: "shuffle",
             showsSummaryStats: false,
@@ -1557,7 +1566,7 @@ struct RandomAllDecksModesView: View {
         )
         .navigationDestination(isPresented: $showStudy) {
             if let session {
-                StudySessionView(session: session, store: store, deckTitle: RandomStudySessionBuilder.title)
+                StudySessionView(session: session, store: store, deckTitle: title)
             }
         }
         .alert("Не удалось начать упражнение", isPresented: loadErrorBinding) {
@@ -1580,7 +1589,11 @@ struct RandomAllDecksModesView: View {
 
     private func start(_ mode: StudyMode) {
         do {
-            session = try store.startRandomCardsSession(cards: cards, mode: mode)
+            if let deckIDs {
+                session = try store.startRandomCardsSession(cards: cards, deckIDs: deckIDs, mode: mode)
+            } else {
+                session = try store.startRandomCardsSession(cards: cards, mode: mode)
+            }
             guard session != nil else {
                 loadError = "Нет карточек для этого упражнения."
                 return
