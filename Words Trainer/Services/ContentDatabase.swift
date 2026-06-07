@@ -1173,12 +1173,13 @@ nonisolated final class ContentDatabase {
         try beginTransaction()
         do {
             let timestamp = syncedAt.timeIntervalSince1970
-            let reviewIDs = response.map { Set($0.acceptedReviewIds + $0.duplicateReviewIds) }
-            let practiceReviewIDs = response.map { Set($0.acceptedPracticeReviewIds + $0.duplicatePracticeReviewIds) }
-            let rejectedProgressCardIDs = response.map { Set($0.rejectedProgressCardIds) }
-            let rejectedMatchingDeckIDs = response.map { Set($0.rejectedMatchingRecordDeckIds) }
-            let matchingAttemptIDs = response.map { Set($0.acceptedMatchingAttemptIds + $0.duplicateMatchingAttemptIds) }
-            let rejectedDeckPreferenceIDs = response.map { Set($0.rejectedDeckPreferenceDeckIds) }
+            let reviewIDs = response.map { Set($0.acceptedReviewIds + $0.duplicateReviewIds + $0.rejectedReviewIds) }
+            let practiceReviewIDs = response.map {
+                Set($0.acceptedPracticeReviewIds + $0.duplicatePracticeReviewIds + $0.rejectedPracticeReviewIds)
+            }
+            let matchingAttemptIDs = response.map {
+                Set($0.acceptedMatchingAttemptIds + $0.duplicateMatchingAttemptIds + $0.rejectedMatchingAttemptIds)
+            }
 
             for reviewID in batch.reviewIDs where reviewIDs?.contains(reviewID) ?? true {
                 try markReviewSynced(reviewID: reviewID, syncedAt: timestamp)
@@ -1186,16 +1187,16 @@ nonisolated final class ContentDatabase {
             for snapshot in batch.practiceReviewSnapshots where practiceReviewIDs?.contains(snapshot.id) ?? true {
                 try markPracticeReviewSynced(snapshot: snapshot, syncedAt: timestamp)
             }
-            for snapshot in batch.progressSnapshots where !(rejectedProgressCardIDs?.contains(snapshot.cardID) ?? false) {
+            for snapshot in batch.progressSnapshots {
                 try markProgressSynced(snapshot: snapshot, syncedAt: timestamp)
             }
-            for snapshot in batch.matchingSnapshots where !(rejectedMatchingDeckIDs?.contains(snapshot.deckID) ?? false) {
+            for snapshot in batch.matchingSnapshots {
                 try markMatchingRecordSynced(snapshot: snapshot, syncedAt: timestamp)
             }
             for snapshot in batch.matchingAttemptSnapshots where matchingAttemptIDs?.contains(snapshot.id) ?? true {
                 try markMatchingAttemptSynced(snapshot: snapshot, syncedAt: timestamp)
             }
-            for snapshot in batch.deckPreferenceSnapshots where !(rejectedDeckPreferenceIDs?.contains(snapshot.deckID) ?? false) {
+            for snapshot in batch.deckPreferenceSnapshots {
                 try markDeckPreferenceSynced(snapshot: snapshot, syncedAt: timestamp)
             }
             if let serverRevision = response?.serverRevision {

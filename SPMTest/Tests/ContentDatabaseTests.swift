@@ -768,8 +768,8 @@ struct ContentDatabaseTests {
         }
     }
 
-    @Test("mark uploaded with response keeps rejected events pending")
-    func markUploadedWithResponseKeepsRejectedEventsPending() throws {
+    @Test("mark uploaded with response acknowledges rejected events")
+    func markUploadedWithResponseAcknowledgesRejectedEvents() throws {
         try withIsolatedDatabase { database in
             try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
             let reviewedAt = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
@@ -777,6 +777,7 @@ struct ContentDatabaseTests {
             let rejectedReviewID = UUID(uuidString: "88888888-8888-4888-8888-888888888888")!
             let duplicatePracticeID = UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-cccccccccccc")!
             let acceptedAttemptID = UUID(uuidString: "99999999-9999-4999-8999-999999999999")!
+            let rejectedAttemptID = UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!
 
             try database.saveStudyReview(
                 StudyReviewEvent(
@@ -829,6 +830,17 @@ struct ContentDatabaseTests {
                     pairCount: 4
                 )
             )
+            try database.saveMatchingAttempt(
+                MatchingAttemptEvent(
+                    id: rejectedAttemptID,
+                    deckID: UUID(uuidString: "00000000-0000-0000-0000-0000A11CA7E5")!,
+                    mode: .matching,
+                    source: .deckSession,
+                    completedAt: reviewedAt,
+                    duration: 9.5,
+                    pairCount: 4
+                )
+            )
 
             let batch = try database.pendingServerSyncBatch()
             try database.markServerSyncBatchUploaded(
@@ -844,13 +856,14 @@ struct ContentDatabaseTests {
                     duplicateMatchingAttemptIds: [],
                     deckPreferenceDeckIds: [],
                     rejectedReviewIds: [rejectedReviewID],
+                    rejectedMatchingAttemptIds: [rejectedAttemptID],
                     serverRevision: "42"
                 ),
                 syncedAt: reviewedAt
             )
 
             let nextBatch = try database.pendingServerSyncBatch()
-            #expect(nextBatch.reviewIDs == [rejectedReviewID])
+            #expect(nextBatch.reviewIDs.isEmpty)
             #expect(nextBatch.practiceReviewIDs.isEmpty)
             #expect(nextBatch.matchingAttemptIDs.isEmpty)
             #expect(try database.serverRevision() == "42")

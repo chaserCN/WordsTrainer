@@ -189,6 +189,7 @@ struct StudySessionView: View {
             return deckID
         case .none:
             guard session.deckID != TodayStudySessionBuilder.deckID,
+                  session.deckID != RandomStudySessionBuilder.deckID,
                   session.deckID != WeakCardsPractice.deckID else {
                 return nil
             }
