@@ -16,6 +16,43 @@ struct ContentDatabaseTests {
     private let audioExampleMediaID = UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!
     private let exampleID = UUID(uuidString: "99999999-9999-4999-8999-999999999999")!
 
+    @Test("server user settings update random card count")
+    func serverUserSettingsUpdateRandomCardCount() throws {
+        try withIsolatedDatabase { database in
+            #expect(try database.randomCardCount() == UserStudySettingsDefaults.randomCardCount)
+
+            try database.importServerBootstrap(
+                bootstrap(
+                    userSettings: [
+                        userSettingsJSON(randomCardCount: 12, serverRevision: "7"),
+                    ]
+                ),
+                selectedUserID: userID
+            )
+            #expect(try database.randomCardCount() == 12)
+
+            try database.importServerChanges(
+                try changes(
+                    userSettings: [
+                        userSettingsJSON(randomCardCount: 5, serverRevision: "8"),
+                    ]
+                ),
+                selectedUserID: userID
+            )
+            #expect(try database.randomCardCount() == 5)
+
+            try database.importServerChanges(
+                try changes(
+                    userSettings: [
+                        userSettingsJSON(randomCardCount: 18, serverRevision: "6"),
+                    ]
+                ),
+                selectedUserID: userID
+            )
+            #expect(try database.randomCardCount() == 5)
+        }
+    }
+
     @Test("rebuildDerivedStats counts only passed new-card reviews")
     func rebuildDerivedStatsCountsOnlyPassedNewReviews() throws {
         try withIsolatedDatabase { database in
@@ -2000,6 +2037,7 @@ struct ContentDatabaseTests {
         media: [String] = [],
         userEnabled: Bool = true,
         preferenceUpdatedAt: String? = nil,
+        userSettings: [String] = [],
         legacyAssignmentVersionID: UUID? = nil,
         serverRevision: String? = nil
     ) throws -> ServerBootstrap {
@@ -2109,13 +2147,55 @@ struct ContentDatabaseTests {
             "practice_reviews": [\(practiceReviews.joined(separator: ","))],
             "study_data_resets": [\(studyDataResets.joined(separator: ","))],
             "matching_attempts": [\(matchingAttempts.joined(separator: ","))],
-            "matching_records": [\(matchingRecords.joined(separator: ","))]
+            "matching_records": [\(matchingRecords.joined(separator: ","))],
+            "user_settings": [\(userSettings.joined(separator: ","))]
           }
         }
         """
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         return try decoder.decode(ServerBootstrap.self, from: Data(json.utf8))
+    }
+
+    private func changes(userSettings: [String] = []) throws -> ServerSyncChanges {
+        let json = """
+        {
+          "mode": "delta",
+          "fromRevision": "0",
+          "toRevision": "1",
+          "changes": {
+            "assignments": [],
+            "content": {
+              "cards": [],
+              "examples": [],
+              "forms": [],
+              "distractors": []
+            },
+            "media": [],
+            "progress": [],
+            "reviews": [],
+            "practice_reviews": [],
+            "study_data_resets": [],
+            "matching_attempts": [],
+            "matching_records": [],
+            "user_settings": [\(userSettings.joined(separator: ","))]
+          }
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode(ServerSyncChanges.self, from: Data(json.utf8))
+    }
+
+    private func userSettingsJSON(randomCardCount: Int, serverRevision: String) -> String {
+        """
+        {
+          "user_id": "\(userID.databaseString)",
+          "random_card_count": \(randomCardCount),
+          "updated_at": "2026-06-02T12:00:00.000Z",
+          "server_revision": "\(serverRevision)"
+        }
+        """
     }
 
     private func reviewJSON(

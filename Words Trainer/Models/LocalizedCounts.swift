@@ -42,6 +42,10 @@ nonisolated enum LocalizedCounts {
         localizedFormat("count.cards.for_practice", cardPhrase(count))
     }
 
+    static func randomCards(_ count: Int) -> String {
+        localizedFormat("count.cards.random", cardPhrase(count))
+    }
+
     static func dayPhrase(_ count: Int) -> String {
         localizedPlural("count.days", count)
     }

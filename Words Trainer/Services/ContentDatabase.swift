@@ -21,6 +21,11 @@ nonisolated private enum WeakCardFilter {
     static let minimumFailureRate = 0.25
 }
 
+nonisolated enum UserStudySettingsDefaults {
+    static let randomCardCount = 30
+    static let minimumRandomCardCount = 1
+}
+
 struct ContentCacheCleanupResult {
     let removedDeckIDs: [UUID]
 }
@@ -226,6 +231,7 @@ nonisolated final class ContentDatabase {
             }
             try upsertDecks(bootstrap.assignments)
             try upsertServerDeckPreferences(bootstrap.assignments, selectedUserID: selectedUserID)
+            try upsertServerUserSettings(bootstrap.userSettings, selectedUserID: selectedUserID)
             try upsertCards(bootstrap.content.cards, versionDeckIDs: versionDeckIDs)
             try upsertExamples(bootstrap.content.examples)
             try upsertForms(bootstrap.content.forms)
@@ -274,6 +280,7 @@ nonisolated final class ContentDatabase {
             }
             try upsertDecks(changes.assignments)
             try upsertServerDeckPreferences(changes.assignments, selectedUserID: selectedUserID)
+            try upsertServerUserSettings(changes.userSettings, selectedUserID: selectedUserID)
             try upsertCards(changes.content.cards, versionDeckIDs: versionDeckIDs)
             try upsertExamples(changes.content.examples)
             try upsertForms(changes.content.forms)
@@ -874,6 +881,29 @@ nonisolated final class ContentDatabase {
         try bind(statement, index: 5, text: "matching_audio")
         guard sqlite3_step(statement) == SQLITE_ROW else { return 0 }
         return Int(sqlite3_column_int(statement, 0))
+    }
+
+    func randomCardCount() throws -> Int {
+        let sql = """
+        SELECT random_card_count
+        FROM user_settings
+        WHERE user_id = ?
+        LIMIT 1
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return UserStudySettingsDefaults.randomCardCount
+        }
+        return max(
+            UserStudySettingsDefaults.minimumRandomCardCount,
+            Int(sqlite3_column_int(statement, 0))
+        )
     }
 
     func studyTimeBreakdown(since startDate: Date) throws -> StudyTimeBreakdown {
@@ -1584,6 +1614,38 @@ nonisolated final class ContentDatabase {
             guard sqlite3_bind_int(statement, 3, (assignment.userEnabled ?? true) ? 1 : 0) == SQLITE_OK,
                   sqlite3_bind_double(statement, 4, updatedAt) == SQLITE_OK,
                   sqlite3_bind_double(statement, 5, syncedAt) == SQLITE_OK,
+                  sqlite3_step(statement) == SQLITE_DONE else {
+                throw ContentDatabaseError.queryFailed
+            }
+        }
+    }
+
+    private func upsertServerUserSettings(_ settings: [ServerUserSettingsPayload], selectedUserID: UUID) throws {
+        for setting in settings where setting.userId == selectedUserID {
+            let updatedAt = parseServerDate(setting.updatedAt)?.timeIntervalSince1970 ?? 0
+            let serverRevision = Int64(setting.serverRevision ?? "0") ?? 0
+            let randomCardCount = max(
+                UserStudySettingsDefaults.minimumRandomCardCount,
+                setting.randomCardCount
+            )
+            let sql = """
+            INSERT INTO user_settings (user_id, random_card_count, updated_at, server_revision)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                random_card_count = excluded.random_card_count,
+                updated_at = excluded.updated_at,
+                server_revision = excluded.server_revision
+            WHERE excluded.server_revision >= user_settings.server_revision
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            defer { sqlite3_finalize(statement) }
+            try bind(statement, index: 1, uuid: selectedUserID)
+            guard sqlite3_bind_int(statement, 2, Int32(randomCardCount)) == SQLITE_OK,
+                  sqlite3_bind_double(statement, 3, updatedAt) == SQLITE_OK,
+                  sqlite3_bind_int64(statement, 4, serverRevision) == SQLITE_OK,
                   sqlite3_step(statement) == SQLITE_DONE else {
                 throw ContentDatabaseError.queryFailed
             }
@@ -2334,6 +2396,12 @@ nonisolated final class ContentDatabase {
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
         CREATE INDEX IF NOT EXISTS idx_user_deck_preferences_user_id ON user_deck_preferences(user_id);
+        CREATE TABLE IF NOT EXISTS user_settings (
+            user_id TEXT PRIMARY KEY NOT NULL,
+            random_card_count INTEGER NOT NULL DEFAULT 30,
+            updated_at REAL NOT NULL DEFAULT 0,
+            server_revision INTEGER NOT NULL DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS media_objects (
             id TEXT PRIMARY KEY NOT NULL,
             storage_key TEXT,
@@ -2665,6 +2733,7 @@ nonisolated final class ContentDatabase {
             "UPDATE deck_daily_usage SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
             "UPDATE user_deck_preferences SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
             "UPDATE user_deck_preferences SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
+            "UPDATE user_settings SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
             "UPDATE sync_metadata SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
             "UPDATE deck_matching_records SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
             "UPDATE deck_matching_records SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",

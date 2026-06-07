@@ -6,7 +6,10 @@ struct DeckListView: View {
     @State private var store: DeckStore?
     @State private var storeUserID: UUID?
     @State private var loadError: String?
+    @State private var startError: String?
     @State private var isSearching = false
+    @State private var showRandomModes = false
+    @State private var randomStudyCards: [WordCardContent] = []
     @State private var isVisible = false
     @State private var reloadTask: Task<Void, Never>?
     @State private var reloadGeneration = 0
@@ -20,6 +23,18 @@ struct DeckListView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background { LovableBackground(variant: .decks) }
             .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(isPresented: $showRandomModes) {
+                if let store {
+                    RandomAllDecksModesView(store: store, initialCards: randomStudyCards)
+                }
+            }
+        }
+        .alert("Не удалось начать упражнение", isPresented: startErrorBinding) {
+            Button("ОК", role: .cancel) {
+                startError = nil
+            }
+        } message: {
+            Text(startError ?? "")
         }
         .task {
             await bootstrap()
@@ -91,10 +106,15 @@ struct DeckListView: View {
                 DeckListHeader(
                     deckCount: activeDecks.count,
                     cardCount: activeCardCount,
-                    isSearchEnabled: hasSearchItems
-                ) {
+                    isRandomEnabled: hasSearchItems,
+                    isSearchEnabled: hasSearchItems,
+                    random: {
+                        startRandom()
+                    },
+                    search: {
                     withAnimation(Self.searchTransition) { isSearching = true }
-                }
+                    }
+                )
 
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(sortedDeckBindings) { $deck in
@@ -187,6 +207,15 @@ struct DeckListView: View {
         }
     }
 
+    private var startErrorBinding: Binding<Bool> {
+        Binding(
+            get: { startError != nil },
+            set: { isPresented in
+                if !isPresented { startError = nil }
+            }
+        )
+    }
+
     private func reloadImmediately() {
         cancelScheduledReload()
         Task { await bootstrap() }
@@ -214,6 +243,20 @@ struct DeckListView: View {
         reloadTask?.cancel()
         reloadTask = nil
         needsReloadWhenVisible = false
+    }
+
+    private func startRandom() {
+        guard let store else { return }
+        do {
+            randomStudyCards = try store.randomStudyCards()
+            guard !randomStudyCards.isEmpty else {
+                startError = "Нет карточек для этого упражнения."
+                return
+            }
+            showRandomModes = true
+        } catch {
+            startError = error.localizedDescription
+        }
     }
 
     private func bootstrap() async {
@@ -264,7 +307,9 @@ struct DataPlaceholderView: View {
 private struct DeckListHeader: View {
     let deckCount: Int
     let cardCount: Int
+    let isRandomEnabled: Bool
     let isSearchEnabled: Bool
+    let random: () -> Void
     let search: () -> Void
 
     var body: some View {
@@ -294,25 +339,50 @@ private struct DeckListHeader: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button(action: search) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(LovableSurface.foreground)
-                    .frame(width: 44, height: 44)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay {
-                        Circle()
-                            .stroke(.white.opacity(0.58), lineWidth: 0.8)
-                    }
-                    .shadow(color: oklch(0.18, 0.05, 260, 0.12), radius: 12, x: 0, y: 6)
-                    .contentShape(Circle())
+            HStack(spacing: 10) {
+                HeaderIconButton(
+                    systemImage: "shuffle",
+                    accessibilityLabel: L10n.text("Случайные"),
+                    isEnabled: isRandomEnabled,
+                    action: random
+                )
+
+                HeaderIconButton(
+                    systemImage: "magnifyingglass",
+                    accessibilityLabel: L10n.text("Поиск"),
+                    isEnabled: isSearchEnabled,
+                    action: search
+                )
             }
-            .buttonStyle(.plain)
-            .disabled(!isSearchEnabled)
-            .opacity(isSearchEnabled ? 1 : 0.45)
-            .accessibilityLabel(L10n.text("Поиск"))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct HeaderIconButton: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(LovableSurface.foreground)
+                .frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(0.58), lineWidth: 0.8)
+                }
+                .shadow(color: oklch(0.18, 0.05, 260, 0.12), radius: 12, x: 0, y: 6)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.45)
+        .accessibilityLabel(L10n.text(accessibilityLabel))
     }
 }
 

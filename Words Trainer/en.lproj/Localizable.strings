@@ -2,6 +2,7 @@
 "count.cards.in_weak" = "%@ in difficult cards";
 "count.cards.today" = "%@ today";
 "count.cards.for_practice" = "%@ for practice";
+"count.cards.random" = "%@ random";
 "count.days.period" = "over %@";
 "count.days.streak" = "%@ streak";
 "duration.less_than" = "<%@";
@@ -42,6 +43,8 @@
 "Колоды" = "Decks";
 "Статистика" = "Stats";
 "Практика сегодня" = "Today's practice";
+"Случайные" = "Random";
+"Поиск" = "Search";
 "Дневная очередь" = "Daily queue";
 "Забытые слова" = "Forgotten words";
 "Ошибка" = "Error";

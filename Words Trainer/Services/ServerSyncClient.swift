@@ -13,6 +13,7 @@ struct ServerBootstrap: Decodable, Sendable {
     let studyDataResets: [ServerStudyDataResetPayload]
     let matchingRecords: [ServerMatchingRecordPayload]
     let matchingAttempts: [ServerMatchingAttemptPayload]
+    let userSettings: [ServerUserSettingsPayload]
     let serverRevision: String?
 
     init(
@@ -27,6 +28,7 @@ struct ServerBootstrap: Decodable, Sendable {
         studyDataResets: [ServerStudyDataResetPayload] = [],
         matchingRecords: [ServerMatchingRecordPayload],
         matchingAttempts: [ServerMatchingAttemptPayload] = [],
+        userSettings: [ServerUserSettingsPayload] = [],
         serverRevision: String? = nil
     ) {
         self.user = user
@@ -40,6 +42,7 @@ struct ServerBootstrap: Decodable, Sendable {
         self.studyDataResets = studyDataResets
         self.matchingRecords = matchingRecords
         self.matchingAttempts = matchingAttempts
+        self.userSettings = userSettings
         self.serverRevision = serverRevision
     }
 
@@ -60,6 +63,7 @@ struct ServerBootstrap: Decodable, Sendable {
         case studyDataResets
         case matchingRecords
         case matchingAttempts
+        case userSettings
     }
 
     init(from decoder: Decoder) throws {
@@ -76,6 +80,7 @@ struct ServerBootstrap: Decodable, Sendable {
         studyDataResets = try snapshot.decodeIfPresent([ServerStudyDataResetPayload].self, forKey: .studyDataResets) ?? []
         matchingRecords = try snapshot.decodeIfPresent([ServerMatchingRecordPayload].self, forKey: .matchingRecords) ?? []
         matchingAttempts = try snapshot.decodeIfPresent([ServerMatchingAttemptPayload].self, forKey: .matchingAttempts) ?? []
+        userSettings = try snapshot.decodeIfPresent([ServerUserSettingsPayload].self, forKey: .userSettings) ?? []
         serverRevision = try container.decodeIfPresent(String.self, forKey: .revision)
     }
 }
@@ -90,6 +95,7 @@ struct ServerSyncChanges: Decodable, Sendable {
     let studyDataResets: [ServerStudyDataResetPayload]
     let matchingRecords: [ServerMatchingRecordPayload]
     let matchingAttempts: [ServerMatchingAttemptPayload]
+    let userSettings: [ServerUserSettingsPayload]
     let serverRevision: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -107,6 +113,7 @@ struct ServerSyncChanges: Decodable, Sendable {
         case studyDataResets
         case matchingRecords
         case matchingAttempts
+        case userSettings
     }
 
     init(from decoder: Decoder) throws {
@@ -121,6 +128,7 @@ struct ServerSyncChanges: Decodable, Sendable {
         studyDataResets = try changes.decodeIfPresent([ServerStudyDataResetPayload].self, forKey: .studyDataResets) ?? []
         matchingRecords = try changes.decodeIfPresent([ServerMatchingRecordPayload].self, forKey: .matchingRecords) ?? []
         matchingAttempts = try changes.decodeIfPresent([ServerMatchingAttemptPayload].self, forKey: .matchingAttempts) ?? []
+        userSettings = try changes.decodeIfPresent([ServerUserSettingsPayload].self, forKey: .userSettings) ?? []
         serverRevision = try container.decodeIfPresent(String.self, forKey: .toRevision)
     }
 }
@@ -381,6 +389,13 @@ struct ServerStudyDataResetPayload: Codable, Sendable {
     let userId: UUID
     let deckId: UUID?
     let resetAt: String
+    let serverRevision: String?
+}
+
+struct ServerUserSettingsPayload: Codable, Sendable {
+    let userId: UUID
+    let randomCardCount: Int
+    let updatedAt: String?
     let serverRevision: String?
 }
 

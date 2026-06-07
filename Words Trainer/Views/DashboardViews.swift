@@ -1405,6 +1405,11 @@ private struct TodayStudyModesView: View {
     var practiceCount: Int = 0
     var deck: DeckContent? = nil
     var wordListCards: [WordCardContent] = []
+    var navigationTitle: String? = nil
+    var summaryTitle: String? = nil
+    var summaryText: String? = nil
+    var summarySystemImage: String? = nil
+    var showsSummaryStats = true
     let start: (StudyMode) -> Void
 
     private var canStart: Bool {
@@ -1434,6 +1439,10 @@ private struct TodayStudyModesView: View {
                             laterCount: laterCount,
                             practiceCount: practiceCount,
                             deck: deck,
+                            title: summaryTitle,
+                            summaryText: summaryText,
+                            systemImage: summarySystemImage,
+                            showsStats: showsSummaryStats,
                             showsChevron: true
                         )
                     }
@@ -1445,7 +1454,11 @@ private struct TodayStudyModesView: View {
                         dueCount: dueCount,
                         laterCount: laterCount,
                         practiceCount: practiceCount,
-                        deck: deck
+                        deck: deck,
+                        title: summaryTitle,
+                        summaryText: summaryText,
+                        systemImage: summarySystemImage,
+                        showsStats: showsSummaryStats
                     )
                 }
 
@@ -1502,10 +1515,71 @@ private struct TodayStudyModesView: View {
             .padding(.bottom, 32)
         }
         .background { LovableBackground(variant: .today) }
-        .navigationTitle(deck?.title ?? L10n.text("Сегодня"))
+        .navigationTitle(navigationTitle ?? deck?.title ?? L10n.text("Сегодня"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.light, for: .navigationBar)
         .tint(LovableSurface.foreground)
+    }
+}
+
+struct RandomAllDecksModesView: View {
+    let store: DeckStore
+
+    @State private var cards: [WordCardContent]
+    @State private var session: StudySession?
+    @State private var showStudy = false
+    @State private var loadError: String?
+
+    init(store: DeckStore, initialCards: [WordCardContent]) {
+        self.store = store
+        _cards = State(initialValue: initialCards)
+    }
+
+    var body: some View {
+        TodayStudyModesView(
+            queueCount: cards.count,
+            wordListCards: cards,
+            navigationTitle: RandomStudySessionBuilder.title,
+            summaryTitle: RandomStudySessionBuilder.title,
+            summaryText: LocalizedCounts.randomCards(cards.count),
+            summarySystemImage: "shuffle",
+            showsSummaryStats: false,
+            start: start
+        )
+        .navigationDestination(isPresented: $showStudy) {
+            if let session {
+                StudySessionView(session: session, store: store, deckTitle: RandomStudySessionBuilder.title)
+            }
+        }
+        .alert("Не удалось начать упражнение", isPresented: loadErrorBinding) {
+            Button("ОК", role: .cancel) {
+                loadError = nil
+            }
+        } message: {
+            Text(loadError ?? "")
+        }
+    }
+
+    private var loadErrorBinding: Binding<Bool> {
+        Binding(
+            get: { loadError != nil },
+            set: { isPresented in
+                if !isPresented { loadError = nil }
+            }
+        )
+    }
+
+    private func start(_ mode: StudyMode) {
+        do {
+            session = try store.startRandomCardsSession(cards: cards, mode: mode)
+            guard session != nil else {
+                loadError = "Нет карточек для этого упражнения."
+                return
+            }
+            showStudy = true
+        } catch {
+            loadError = error.localizedDescription
+        }
     }
 }
 
@@ -1748,6 +1822,10 @@ private struct QueueSummaryCard: View {
     let laterCount: Int
     var practiceCount: Int = 0
     var deck: DeckContent? = nil
+    var title: String? = nil
+    var summaryText: String? = nil
+    var systemImage: String? = nil
+    var showsStats = true
     var showsChevron: Bool = false
 
     private var isPrimary: Bool {
@@ -1772,6 +1850,22 @@ private struct QueueSummaryCard: View {
     @ViewBuilder private var deckOrDateAvatar: some View {
         if let deck {
             DeckAvatarView(deck: deck, size: 56)
+        } else if let systemImage {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [LovableSurface.primary, LovableSurface.primaryDeep],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 56, height: 56)
+                .overlay {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .shadow(color: oklch(0.4, 0.22, 260, 0.28), radius: 12, x: 0, y: 8)
         } else {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(
@@ -1803,11 +1897,11 @@ private struct QueueSummaryCard: View {
                 deckOrDateAvatar
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(deck?.title ?? L10n.text("Дневная очередь"))
+                    Text(title ?? deck?.title ?? L10n.text("Дневная очередь"))
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(.white.opacity(isPrimary ? 1 : 0.72))
                         .lineLimit(1)
-                    Text(summaryText)
+                    Text(effectiveSummaryText)
                         .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(.white.opacity(isPrimary ? 0.55 : 0.45))
                 }
@@ -1815,17 +1909,19 @@ private struct QueueSummaryCard: View {
                 Spacer(minLength: 0)
             }
 
-            HStack(spacing: 10) {
-                LovableStat(count: newCount, label: "Новые", color: LovableSurface.blueText)
-                Rectangle()
-                    .fill(.white.opacity(0.1))
-                    .frame(width: 1, height: 12)
-                LovableStat(count: dueCount, label: "Повторить", color: LovableSurface.amberText)
-                if laterCount > 0 {
+            if showsStats {
+                HStack(spacing: 10) {
+                    LovableStat(count: newCount, label: "Новые", color: LovableSurface.blueText)
                     Rectangle()
                         .fill(.white.opacity(0.1))
                         .frame(width: 1, height: 12)
-                    LovableStat(count: laterCount, label: "Позже", color: oklch(0.74, 0.1, 285))
+                    LovableStat(count: dueCount, label: "Повторить", color: LovableSurface.amberText)
+                    if laterCount > 0 {
+                        Rectangle()
+                            .fill(.white.opacity(0.1))
+                            .frame(width: 1, height: 12)
+                        LovableStat(count: laterCount, label: "Позже", color: oklch(0.74, 0.1, 285))
+                    }
                 }
             }
         }
@@ -1843,7 +1939,10 @@ private struct QueueSummaryCard: View {
         .opacity(isPrimary ? 1 : 0.62)
     }
 
-    private var summaryText: String {
+    private var effectiveSummaryText: String {
+        if let summaryText {
+            return summaryText
+        }
         if queueCount == 0, practiceCount > 0 {
             return L10n.format("Очередь закончена · %@", LocalizedCounts.cardsForPractice(practiceCount))
         }

@@ -167,3 +167,103 @@ enum TodayStudySessionBuilder {
         .none
     }
 }
+
+enum RandomStudySessionBuilder {
+    static let deckID = UUID(uuidString: "00000000-0000-0000-0000-0000A11CA7E5")!
+    nonisolated static let defaultLimit = UserStudySettingsDefaults.randomCardCount
+    static var title: String { L10n.text("Случайные") }
+
+    @MainActor
+    static func randomSession(
+        snapshots: [TodayStudyDeckSnapshot],
+        mode: StudyMode,
+        engine: StudySessionEngine,
+        limit: Int = defaultLimit
+    ) -> StudySession? {
+        var rng = SystemRandomNumberGenerator()
+        return randomSession(
+            snapshots: snapshots,
+            mode: mode,
+            engine: engine,
+            limit: limit,
+            using: &rng
+        )
+    }
+
+    @MainActor
+    static func randomSession<RNG: RandomNumberGenerator>(
+        snapshots: [TodayStudyDeckSnapshot],
+        mode: StudyMode,
+        engine: StudySessionEngine,
+        limit: Int = defaultLimit,
+        using rng: inout RNG
+    ) -> StudySession? {
+        let cards = randomCards(snapshots: snapshots, limit: limit, using: &rng)
+        return session(
+            snapshots: snapshots,
+            cards: cards,
+            mode: mode,
+            engine: engine
+        )
+    }
+
+    @MainActor
+    static func session(
+        snapshots: [TodayStudyDeckSnapshot],
+        cards: [WordCardContent],
+        mode: StudyMode,
+        engine: StudySessionEngine
+    ) -> StudySession? {
+        let activeSnapshots = snapshots.filter { $0.deck.isActive }
+        let requestedCardIDs = Set(cards.map(\.id))
+        var itemByCardID: [UUID: StudyQueueItem] = [:]
+        var queue: [StudyQueueItem] = []
+        var choicePool: [WordCardContent] = []
+
+        for snapshot in activeSnapshots {
+            choicePool.append(contentsOf: snapshot.deck.activeCards)
+            for card in snapshot.deck.activeCards where requestedCardIDs.contains(card.id) {
+                itemByCardID[card.id] = StudyQueueItem(
+                    card: card,
+                    progress: snapshot.progressByCardID[card.id] ?? CardProgress.newCard(cardID: card.id),
+                    deckID: snapshot.deck.id
+                )
+            }
+        }
+
+        queue = cards.compactMap { itemByCardID[$0.id] }
+        guard !queue.isEmpty else { return nil }
+
+        return StudySession(
+            deckID: deckID,
+            mode: mode,
+            queue: queue,
+            deckCards: choicePool,
+            dailyUsage: nil,
+            engine: engine,
+            matchingRecordScope: MatchingRecordScope.none,
+            reviewSource: .deckSession
+        )
+    }
+
+    static func randomCards(
+        snapshots: [TodayStudyDeckSnapshot],
+        limit: Int = defaultLimit
+    ) -> [WordCardContent] {
+        var rng = SystemRandomNumberGenerator()
+        return randomCards(snapshots: snapshots, limit: limit, using: &rng)
+    }
+
+    static func randomCards<RNG: RandomNumberGenerator>(
+        snapshots: [TodayStudyDeckSnapshot],
+        limit: Int = defaultLimit,
+        using rng: inout RNG
+    ) -> [WordCardContent] {
+        guard limit > 0 else { return [] }
+        var cards = snapshots
+            .filter { $0.deck.isActive }
+            .flatMap { $0.deck.activeCards }
+        cards.shuffle(using: &rng)
+        return Array(cards.prefix(limit))
+    }
+}

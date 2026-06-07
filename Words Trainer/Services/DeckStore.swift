@@ -225,6 +225,13 @@ final class DeckStore {
         try TodayStudySessionBuilder.todayPracticeCardCount(snapshot: todaySnapshot(deck: deck))
     }
 
+    func randomStudyCards() throws -> [WordCardContent] {
+        try RandomStudySessionBuilder.randomCards(
+            snapshots: todaySnapshots(),
+            limit: database.randomCardCount()
+        )
+    }
+
     func stats(for deck: DeckContent) throws -> DeckStats {
         let progress = try database.progressMap(deckID: deck.id)
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
@@ -335,6 +342,24 @@ final class DeckStore {
             dailyUsage: usage,
             engine: engine,
             reviewSource: .deckSession
+        )
+    }
+
+    func startRandomCardsSession(mode: StudyMode) throws -> StudySession? {
+        try RandomStudySessionBuilder.randomSession(
+            snapshots: todaySnapshots(),
+            mode: mode,
+            engine: engine,
+            limit: database.randomCardCount()
+        )
+    }
+
+    func startRandomCardsSession(cards: [WordCardContent], mode: StudyMode) throws -> StudySession? {
+        try RandomStudySessionBuilder.session(
+            snapshots: todaySnapshots(),
+            cards: cards,
+            mode: mode,
+            engine: engine
         )
     }
 
