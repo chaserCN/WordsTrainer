@@ -137,7 +137,9 @@ struct DeckStatsTests {
     func reviewCountIsCappedByDailyLimit() {
         let firstID = UUID()
         let secondID = UUID()
-        let now = Date()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 12))!
         let deck = DeckContent(
             id: UUID(),
             title: "Test",
@@ -491,7 +493,9 @@ struct DeckStatsTests {
 
     @Test("study queue samples review cards from shuffled due pool")
     func studyQueueSamplesReviewsFromShuffledPool() {
-        let now = Date()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 12))!
         let cards = (0..<6).map { index in
             TestFixtures.card(word: "word \(index)", translation: "перевод \(index)")
         }

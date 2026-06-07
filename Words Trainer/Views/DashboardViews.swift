@@ -49,7 +49,7 @@ struct TodayView: View {
     @State private var streakDays = 0
     @State private var showUserSwitcher = false
     @State private var showTodayModes = false
-    @State private var toast: TodayToast?
+    @State private var toast: AppToast?
     @State private var toastDismissTask: Task<Void, Never>?
     @State private var loadError: String?
     @State private var isVisible = false
@@ -217,7 +217,7 @@ struct TodayView: View {
     @ViewBuilder
     private var toastOverlay: some View {
         if let toast {
-            TodayToastView(toast: toast)
+            AppToastView(toast: toast)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 16)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -406,7 +406,12 @@ struct TodayView: View {
 
     private func presentToast(status: TodaySyncStatus, autoDismissAfter duration: Duration?) {
         toastDismissTask?.cancel()
-        let nextToast = TodayToast(status: status)
+        let nextToast = AppToast(
+            title: status.title,
+            message: status.message,
+            systemImage: status.systemImage,
+            tint: status.tint
+        )
         withAnimation(.snappy(duration: 0.22)) {
             toast = nextToast
         }
@@ -1063,51 +1068,6 @@ private struct TodaySyncStatus: Equatable {
     }
 }
 
-private struct TodayToast: Identifiable, Equatable {
-    let id = UUID()
-    let status: TodaySyncStatus
-
-    static func == (lhs: TodayToast, rhs: TodayToast) -> Bool {
-        lhs.id == rhs.id
-    }
-}
-
-private struct TodayToastView: View {
-    let toast: TodayToast
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: toast.status.systemImage)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(toast.status.tint, in: Circle())
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(toast.status.title)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(LovableSurface.foreground)
-                Text(toast.status.message)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(LovableSurface.muted)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.white, lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.08), radius: 18, x: 0, y: 8)
-        .accessibilityElement(children: .combine)
-    }
-}
-
 private struct TodaySyncStatusCard: View {
     let status: TodaySyncStatus
 
@@ -1543,6 +1503,8 @@ struct RandomAllDecksModesView: View {
     @State private var session: StudySession?
     @State private var showStudy = false
     @State private var loadError: String?
+    @State private var toast: AppToast?
+    @State private var toastDismissTask: Task<Void, Never>?
 
     init(
         store: DeckStore,
@@ -1567,6 +1529,17 @@ struct RandomAllDecksModesView: View {
             showsSummaryStats: false,
             start: start
         )
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(action: regenerateCards) {
+                    Image(systemName: "die.face.5")
+                        .foregroundStyle(LovableSurface.foreground)
+                }
+                .accessibilityLabel(L10n.text("Перегенерировать"))
+            }
+        }
+        .overlay(alignment: .bottom) { toastOverlay }
+        .animation(.snappy(duration: 0.22), value: toast)
         .navigationDestination(isPresented: $showStudy) {
             if let session {
                 StudySessionView(session: session, store: store, deckTitle: title)
@@ -1579,6 +1552,9 @@ struct RandomAllDecksModesView: View {
         } message: {
             Text(loadError ?? "")
         }
+        .onDisappear {
+            clearRegeneratedToast()
+        }
     }
 
     private var loadErrorBinding: Binding<Bool> {
@@ -1588,6 +1564,65 @@ struct RandomAllDecksModesView: View {
                 if !isPresented { loadError = nil }
             }
         )
+    }
+
+    @ViewBuilder
+    private var toastOverlay: some View {
+        if let toast {
+            AppToastView(toast: toast)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    private func regenerateCards() {
+        do {
+            let refreshedCards = if let deckIDs {
+                try store.randomStudyCards(deckIDs: deckIDs)
+            } else {
+                try store.randomStudyCards()
+            }
+            guard !refreshedCards.isEmpty else {
+                loadError = "Нет карточек для этого упражнения."
+                return
+            }
+            session = nil
+            withAnimation(.snappy(duration: 0.22, extraBounce: 0)) {
+                cards = refreshedCards
+            }
+            presentRegeneratedToast(cardCount: refreshedCards.count)
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
+    private func presentRegeneratedToast(cardCount: Int) {
+        toastDismissTask?.cancel()
+        let nextToast = AppToast(
+            title: L10n.text("Карточки обновлены"),
+            message: LocalizedCounts.randomCards(cardCount),
+            systemImage: "die.face.5",
+            tint: LovableSurface.primary
+        )
+        withAnimation(.snappy(duration: 0.22)) {
+            toast = nextToast
+        }
+        toastDismissTask = Task { [id = nextToast.id] in
+            try? await Task.sleep(for: .seconds(1.8))
+            await MainActor.run {
+                guard toast?.id == id else { return }
+                withAnimation(.snappy(duration: 0.22)) {
+                    toast = nil
+                }
+            }
+        }
+    }
+
+    private func clearRegeneratedToast() {
+        toastDismissTask?.cancel()
+        toastDismissTask = nil
+        toast = nil
     }
 
     private func start(_ mode: StudyMode) {

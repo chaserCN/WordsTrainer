@@ -131,6 +131,7 @@
 "Новый рекорд для колоды" = "New deck record";
 "Новый рекорд" = "New record";
 "Не удалось начать упражнение" = "Could not start exercise";
+"Карточки обновлены" = "Cards updated";
 
 "Время занятий сегодня" = "Study time today";
 "Дни занятий" = "Study days";
@@ -155,6 +156,7 @@
 "Поиск по колодам и словам" = "Search decks and words";
 "Отмена" = "Cancel";
 "Очистить" = "Clear";
+"Перегенерировать" = "Regenerate";
 "Открыта" = "Open";
 "Закрыта" = "Closed";
 "Учить" = "Study";
