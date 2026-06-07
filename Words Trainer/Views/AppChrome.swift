@@ -77,14 +77,92 @@ enum LovableSurface {
     static let amberText = oklch(0.78, 0.15, 65)
 }
 
-enum LovableBackgroundVariant {
+enum LovableBackgroundVariant: Hashable {
     case today
     case decks
     case stats
     case flashcards
 }
 
+/// Фон экрана. Содержимое (MeshGradient + размытые орбы) для каждого варианта при
+/// фиксированном на запуск `hueShift` — статичная картинка, поэтому рендерим её
+/// один раз в `UIImage` и показываем как `Image`.
+///
+/// Это важно для навигации: раньше при каждом push'е создавался свежий
+/// `LovableBackground`, и его `drawingGroup` приходилось впервые растеризовать
+/// офскрин-проходом прямо во время перехода. На лёгком экране (режимы «Сегодня»)
+/// фон прокрашивался на кадр позже → полупрозрачные панели мелькали «белесыми»
+/// поверх белого окна; на тяжёлом (DeckDetailView) растеризация блокировала
+/// главный поток → дёрганый слайд. Готовая картинка композитится мгновенно и
+/// убирает оба артефакта.
 struct LovableBackground: View {
+    let variant: LovableBackgroundVariant
+
+    var body: some View {
+        Group {
+            if let image = LovableBackgroundImageCache.image(for: variant) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                // Фолбэк (нулевой размер экрана и т.п.): живой рендер.
+                LovableBackgroundContent(variant: variant)
+                    .drawingGroup()
+            }
+        }
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
+    }
+}
+
+/// Кэш заранее отрендеренных фонов по вариантам. Картинка для варианта рендерится
+/// один раз (лениво при первом обращении или прогревается на старте) и переиспользуется
+/// всеми экранами и всеми переходами.
+@MainActor
+enum LovableBackgroundImageCache {
+    private static var images: [LovableBackgroundVariant: UIImage] = [:]
+
+    static func image(for variant: LovableBackgroundVariant) -> UIImage? {
+        if let cached = images[variant] { return cached }
+        let size = screenSize
+        guard size.width > 0, size.height > 0 else { return nil }
+        let renderer = ImageRenderer(
+            content: LovableBackgroundContent(variant: variant)
+                .frame(width: size.width, height: size.height)
+        )
+        renderer.scale = screenScale
+        guard let image = renderer.uiImage else { return nil }
+        images[variant] = image
+        return image
+    }
+
+    /// Прогревает фоны заранее, чтобы первый показ/переход не платил за рендер.
+    static func warm(_ variants: [LovableBackgroundVariant]) {
+        for variant in variants {
+            _ = image(for: variant)
+        }
+    }
+
+    private static var screenSize: CGSize {
+        if let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive })
+            ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
+            return scene.screen.bounds.size
+        }
+        return UIScreen.main.bounds.size
+    }
+
+    private static var screenScale: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.screen.scale ?? UIScreen.main.scale
+    }
+}
+
+/// Живой рендер фона (MeshGradient + орбы). Используется как источник для растеризации
+/// в `UIImage` и как фолбэк.
+private struct LovableBackgroundContent: View {
     let variant: LovableBackgroundVariant
 
     var body: some View {
@@ -106,14 +184,9 @@ struct LovableBackground: View {
                     .frame(width: orb.size.width, height: orb.size.height)
                     .blur(radius: 60)
                     .offset(orb.offset)
-                    .accessibilityHidden(true)
             }
         }
-        // Орбы статичны: один раз растеризуем размытие в текстуру и кэшируем,
-        // вместо перерисовки blur каждый кадр. Это убирает постоянную нагрузку
-        // на CPU/GPU (особенно в симуляторе, где blur считается на CPU).
-        .drawingGroup()
-        .ignoresSafeArea()
+        .clipped()
     }
 
     /// Цвет фона с учётом случайного оттенка текущего запуска.

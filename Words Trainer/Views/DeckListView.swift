@@ -1544,11 +1544,13 @@ struct DeckDetailView: View {
             }
         }
         .task(id: statsTaskID) {
-            reloadDeckState()
+            await reloadDeckState()
         }
         .onChange(of: showStudy) { _, isShowing in
             guard !isShowing else { return }
-            reloadDeckState()
+            Task {
+                await reloadDeckState()
+            }
         }
         .alert("Не удалось обновить колоду", isPresented: statusErrorBinding) {
             Button("ОК", role: .cancel) {
@@ -1609,15 +1611,22 @@ struct DeckDetailView: View {
         }
     }
 
-    private func reloadDeckState() {
-        stats = (try? store.stats(for: deck)) ?? .zero
-        matchingRecord = try? store.matchingRecord(deckID: deck.id)
-        reloadWeakCards()
-    }
-
-    private func reloadWeakCards() {
-        let weakCards = (try? store.weakCards(deckID: deck.id, limit: deck.activeCards.count)) ?? []
-        weakCardIDs = Set(weakCards.map(\.cardID))
+    @MainActor
+    private func reloadDeckState() async {
+        let userID = store.currentUserID
+        let currentDeck = deck
+        do {
+            let snapshot = try await DeckStore.deckDetailSnapshot(userID: userID, deck: currentDeck)
+            guard !Task.isCancelled else { return }
+            stats = snapshot.stats
+            matchingRecord = snapshot.matchingRecord
+            weakCardIDs = snapshot.weakCardIDs
+        } catch {
+            guard !Task.isCancelled else { return }
+            stats = .zero
+            matchingRecord = nil
+            weakCardIDs = []
+        }
         if exerciseScope == .weak, weakCardIDs.isEmpty {
             exerciseScope = .all
         }
@@ -1650,7 +1659,9 @@ struct DeckDetailView: View {
         do {
             try store.setDeckStatus(newStatus, for: deck.id)
             deck.status = newStatus
-            reloadDeckState()
+            Task {
+                await reloadDeckState()
+            }
         } catch {
             statusError = error.localizedDescription
         }

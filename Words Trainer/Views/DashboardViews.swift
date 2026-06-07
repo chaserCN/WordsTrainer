@@ -22,6 +22,9 @@ struct AppRootView: View {
         }
         .tint(.cyan)
         .task {
+            // Заранее растеризуем фоны вкладок, чтобы первый переход в колоду/режимы
+            // не платил за офскрин-рендер MeshGradient + blur во время анимации.
+            LovableBackgroundImageCache.warm([.today, .decks, .stats])
             await userStore.refreshFromServer()
         }
         .onChange(of: scenePhase) { _, phase in

@@ -43,6 +43,12 @@ nonisolated struct DeckStatisticsSnapshot: Sendable {
     let weakCards: [WeakCardStat]
 }
 
+nonisolated struct DeckDetailSnapshot: Sendable {
+    let stats: DeckStats
+    let matchingRecord: DeckMatchingRecord?
+    let weakCardIDs: Set<UUID>
+}
+
 @MainActor
 @Observable
 final class DeckStore {
@@ -81,6 +87,12 @@ final class DeckStore {
     nonisolated static func statisticsSnapshot(userID: UUID) async throws -> DeckStatisticsSnapshot {
         try await Task.detached(priority: .userInitiated) {
             try loadStatisticsSnapshot(userID: userID)
+        }.value
+    }
+
+    nonisolated static func deckDetailSnapshot(userID: UUID, deck: DeckContent) async throws -> DeckDetailSnapshot {
+        try await Task.detached(priority: .userInitiated) {
+            try loadDeckDetailSnapshot(userID: userID, deck: deck)
         }.value
     }
 
@@ -611,6 +623,34 @@ final class DeckStore {
             activityDays: try studyActivity(database: database, days: 120),
             scheduledDays: try scheduledReviewDays(database: database, days: 7),
             weakCards: try database.weakCards(limit: WeakCardsPractice.fetchLimit)
+        )
+    }
+
+    nonisolated private static func loadDeckDetailSnapshot(
+        userID: UUID,
+        deck: DeckContent
+    ) throws -> DeckDetailSnapshot {
+        let database = try ContentDatabase(userID: userID, mode: .readOnly)
+        return try database.readTransaction {
+            try loadDeckDetailSnapshot(database: database, deck: deck)
+        }
+    }
+
+    nonisolated private static func loadDeckDetailSnapshot(
+        database: ContentDatabase,
+        deck: DeckContent
+    ) throws -> DeckDetailSnapshot {
+        let progress = try database.progressMap(deckID: deck.id)
+        let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
+        let weakCards = try database.weakCards(limit: deck.activeCards.count, deckID: deck.id)
+        return DeckDetailSnapshot(
+            stats: DeckStatsCalculator.compute(
+                deck: deck,
+                progressByCardID: progress,
+                dailyUsage: usage
+            ),
+            matchingRecord: try database.matchingRecord(deckID: deck.id),
+            weakCardIDs: Set(weakCards.map(\.cardID))
         )
     }
 
