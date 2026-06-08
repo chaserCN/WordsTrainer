@@ -56,12 +56,14 @@ struct ContentDatabaseTests {
     func rebuildDerivedStatsCountsOnlyPassedNewReviews() throws {
         try withIsolatedDatabase { database in
             let passedReviewID = UUID(uuidString: "55555555-5555-4555-8555-555555555555")!
+            let siblingSenseReviewID = UUID(uuidString: "77777777-7777-4777-8777-777777777777")!
             let failedReviewID = UUID(uuidString: "66666666-6666-4666-8666-666666666666")!
             let reviewedAt = "2026-06-02T12:00:00.000Z"
             try database.importServerBootstrap(
                 bootstrap(
                     reviews: [
                         reviewJSON(id: passedReviewID, outcome: "remembered", reviewedAt: reviewedAt, wasNew: true),
+                        reviewJSON(id: siblingSenseReviewID, outcome: "correct", reviewedAt: reviewedAt, wasNew: true),
                         reviewJSON(id: failedReviewID, outcome: "forgot", reviewedAt: reviewedAt, wasNew: true),
                     ]
                 ),

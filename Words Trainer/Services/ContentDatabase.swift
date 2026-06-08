@@ -610,6 +610,30 @@ nonisolated final class ContentDatabase {
         return uuidColumn(statement, index: 0)
     }
 
+    func hasPassedNewStudyReview(deckID: UUID, cardID: UUID, dayKey: String) throws -> Bool {
+        let sql = """
+        SELECT 1
+        FROM study_reviews
+        WHERE user_id = ?
+          AND deck_id = ?
+          AND card_id = ?
+          AND was_new = 1
+          AND outcome IN ('remembered', 'correct')
+          AND strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime', '-4 hours') = ?
+        LIMIT 1
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, uuid: deckID)
+        try bind(statement, index: 3, uuid: cardID)
+        try bind(statement, index: 4, text: dayKey)
+        return sqlite3_step(statement) == SQLITE_ROW
+    }
+
     func saveProgress(deckID: UUID, progress: CardProgress) throws {
         let fsrsData = try JSONEncoder().encode(progress.fsrsCard)
         let sql = """
@@ -708,6 +732,7 @@ nonisolated final class ContentDatabase {
             throw ContentDatabaseError.queryFailed
         }
 
+        try refreshDailyUsage(deckID: event.deckID, dayKey: DeckDailyUsage.dayKey(for: event.reviewedAt))
     }
 
     func savePracticeReview(_ event: PracticeReviewEvent) throws {
@@ -2416,7 +2441,7 @@ nonisolated final class ContentDatabase {
             user_id,
             deck_id,
             strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime', '-4 hours') AS day_key,
-            SUM(CASE WHEN was_new = 1 AND outcome IN ('remembered', 'correct') THEN 1 ELSE 0 END) AS new_cards_studied
+            COUNT(DISTINCT CASE WHEN was_new = 1 AND outcome IN ('remembered', 'correct') THEN card_id END) AS new_cards_studied
         FROM study_reviews
         WHERE user_id = ?
         GROUP BY user_id, deck_id, day_key
@@ -2428,6 +2453,53 @@ nonisolated final class ContentDatabase {
         }
         defer { sqlite3_finalize(statement) }
         try bind(statement, index: 1, uuid: selectedUserID)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            throw ContentDatabaseError.queryFailed
+        }
+    }
+
+    private func refreshDailyUsage(deckID: UUID, dayKey: String) throws {
+        let sql = """
+        SELECT COUNT(DISTINCT card_id)
+        FROM study_reviews
+        WHERE user_id = ?
+          AND deck_id = ?
+          AND was_new = 1
+          AND outcome IN ('remembered', 'correct')
+          AND strftime('%Y-%m-%d', reviewed_at, 'unixepoch', 'localtime', '-4 hours') = ?
+        """
+        let count: Int = try {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            defer { sqlite3_finalize(statement) }
+            try bind(statement, index: 1, uuid: userID)
+            try bind(statement, index: 2, uuid: deckID)
+            try bind(statement, index: 3, text: dayKey)
+            guard sqlite3_step(statement) == SQLITE_ROW else {
+                throw ContentDatabaseError.queryFailed
+            }
+            return Int(sqlite3_column_int(statement, 0))
+        }()
+
+        if count > 0 {
+            try saveDailyUsage(deckID: deckID, usage: DeckDailyUsage(dayKey: dayKey, newCardsStudied: count))
+        } else {
+            try deleteDailyUsage(deckID: deckID, dayKey: dayKey)
+        }
+    }
+
+    private func deleteDailyUsage(deckID: UUID, dayKey: String) throws {
+        let sql = "DELETE FROM deck_daily_usage WHERE user_id = ? AND deck_id = ? AND day_key = ?"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        try bind(statement, index: 2, uuid: deckID)
+        try bind(statement, index: 3, text: dayKey)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw ContentDatabaseError.queryFailed
         }

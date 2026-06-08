@@ -8,7 +8,7 @@ struct ClozeMCQStudyView: View {
     let remainingCount: Int
     let onAnswer: (ReviewOutcome, UUID?) -> Void
 
-    @State private var displayedCardID: UUID?
+    @State private var displayedRoundID: UUID?
     @State private var selected: String?
     @State private var answered = false
     @State private var choices: [ClozeChoice] = []
@@ -25,6 +25,10 @@ struct ClozeMCQStudyView: View {
             card.effectiveClozeAnswer,
             options: [.caseInsensitive, .diacriticInsensitive]
         ) == .orderedSame
+    }
+
+    private var roundID: UUID {
+        card.primarySenseID ?? card.id
     }
 
     var body: some View {
@@ -99,7 +103,7 @@ struct ClozeMCQStudyView: View {
         .onAppear {
             resetRoundIfNeeded()
         }
-        .onChange(of: card.id) { _, _ in
+        .onChange(of: roundID) { _, _ in
             resetRound()
         }
         .overlay {
@@ -188,12 +192,12 @@ struct ClozeMCQStudyView: View {
     }
 
     private func resetRoundIfNeeded() {
-        guard displayedCardID != card.id else { return }
+        guard displayedRoundID != roundID else { return }
         resetRound()
     }
 
     private func resetRound() {
-        displayedCardID = card.id
+        displayedRoundID = roundID
         selected = nil
         answered = false
         choices = card

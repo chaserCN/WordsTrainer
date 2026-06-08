@@ -112,7 +112,7 @@ final class StudySession {
         outcome: ReviewOutcome,
         additionalFailureProgress: CardProgress? = nil,
         reviewsActiveCardSenses: Bool = false,
-        onSave: (_ progress: CardProgress, _ wasNew: Bool) throws -> Void,
+        onSave: (_ item: StudyQueueItem, _ progress: CardProgress, _ wasNew: Bool) throws -> Void,
         onAdditionalFailureSave: ((_ progress: CardProgress) throws -> Void)? = nil,
         onReview: ((_ event: StudyReviewEvent) throws -> Void)? = nil,
         onPracticeReview: ((_ event: PracticeReviewEvent) throws -> Void)? = nil
@@ -143,7 +143,7 @@ final class StudySession {
                 let recordsNewCardStudied = wasNew
                     && outcome.passed
                     && (!reviewsActiveCardSenses || !didRecordNewCardStudied)
-                try onSave(updated, recordsNewCardStudied)
+                try onSave(reviewedItem, updated, recordsNewCardStudied)
                 if recordsNewCardStudied {
                     didRecordNewCardStudied = true
                 }

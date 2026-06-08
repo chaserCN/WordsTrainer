@@ -112,12 +112,19 @@ nonisolated enum StudyQueueBuilder {
 
         var learning: [StudyQueueItem] = []
         var review: [StudyQueueItem] = []
-        var newCards: [StudyQueueItem] = []
+        // New senses grouped by card so the daily new-card budget is spent per
+        // card, not per sense: a card with several senses still counts as one
+        // new card and introduces all of its senses together.
+        var newSensesByCardID: [UUID: [StudyQueueItem]] = [:]
+        var newCardOrder: [UUID] = []
 
         let studiedToday = dailyUsage?.newCardsStudied ?? 0
         let newSlotsLeft = max(0, deck.newCardsPerDay - studiedToday)
 
         for content in deck.activeCards {
+            var cardNew: [StudyQueueItem] = []
+            var cardHasDue = false
+
             for sense in content.activeSenses {
                 let progress = progressBySenseID[sense.id]
                     ?? CardProgress.newSense(senseID: sense.id, now: now)
@@ -127,27 +134,37 @@ nonisolated enum StudyQueueBuilder {
 
                 switch fsrs.state {
                 case .new:
-                    if newSlotsLeft > 0 {
-                        newCards.append(item)
-                    }
+                    cardNew.append(item)
                 case .learning, .relearning:
                     if due <= now {
                         learning.append(item)
+                        cardHasDue = true
                     }
                 case .review:
                     if due <= now {
                         review.append(item)
+                        cardHasDue = true
                     }
                 }
+            }
+
+            // A card's new senses only consume a daily new-card slot when the
+            // card isn't already due for learning/review today. This mirrors
+            // DeckStatsCalculator's per-card bucket priority (a due card is
+            // counted as learning/review, not new), so the queue and the stats
+            // badge agree on the card count.
+            if !cardNew.isEmpty && !cardHasDue {
+                newCardOrder.append(content.id)
+                newSensesByCardID[content.id] = cardNew
             }
         }
 
         learning.shuffle(using: &rng)
         review.shuffle(using: &rng)
-        newCards.shuffle(using: &rng)
+        newCardOrder.shuffle(using: &rng)
 
         let takenReview = Array(review.prefix(min(review.count, deck.reviewCardsPerDay)))
-        let takenNew = Array(newCards.prefix(min(newCards.count, newSlotsLeft)))
+        let takenNew = newCardOrder.prefix(newSlotsLeft).flatMap { newSensesByCardID[$0] ?? [] }
         return learning + takenReview + takenNew
     }
 }

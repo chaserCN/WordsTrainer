@@ -403,13 +403,18 @@ final class DeckStore {
 
     func saveProgress(
         deckID: UUID,
+        cardID: UUID?,
         progress: CardProgress,
         wasNew: Bool
     ) throws {
         try database.saveProgress(deckID: deckID, progress: progress)
 
         if wasNew {
+            guard let cardID else { return }
             let key = DeckDailyUsage.todayKey()
+            guard try !database.hasPassedNewStudyReview(deckID: deckID, cardID: cardID, dayKey: key) else {
+                return
+            }
             let usage = try database.dailyUsage(deckID: deckID, dayKey: key)
                 ?? DeckDailyUsage(dayKey: key)
             let updated = engine.recordNewCardStudied(previous: usage)
@@ -749,10 +754,10 @@ extension StudySession {
             outcome: outcome,
             additionalFailureProgress: additionalFailureProgress,
             reviewsActiveCardSenses: reviewsActiveCardSenses
-        ) { progress, wasNew in
-            try store.saveProgress(deckID: progressDeckID, progress: progress, wasNew: wasNew)
+        ) { item, progress, wasNew in
+            try store.saveProgress(deckID: progressDeckID, cardID: item.cardID, progress: progress, wasNew: wasNew)
         } onAdditionalFailureSave: { progress in
-            try store.saveProgress(deckID: progressDeckID, progress: progress, wasNew: false)
+            try store.saveProgress(deckID: progressDeckID, cardID: nil, progress: progress, wasNew: false)
         } onReview: { event in
             try store.saveStudyReview(event)
         } onPracticeReview: { event in

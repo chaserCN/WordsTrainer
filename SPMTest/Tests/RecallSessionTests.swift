@@ -24,7 +24,7 @@ struct RecallSessionTests {
         )
 
         var saved: CardProgress?
-        try session.advanceAfterReview(outcome: .forgot) { progress, _ in
+        try session.advanceAfterReview(outcome: .forgot) { _, progress, _ in
             saved = progress
         }
 
@@ -50,7 +50,7 @@ struct RecallSessionTests {
         )
 
         var saved: CardProgress?
-        try session.advanceAfterReview(outcome: .forgot) { progress, _ in
+        try session.advanceAfterReview(outcome: .forgot) { _, progress, _ in
             saved = progress
         }
 
@@ -83,7 +83,7 @@ struct RecallSessionTests {
         try session.advanceAfterReview(
             outcome: .remembered,
             reviewsActiveCardSenses: true
-        ) { progress, wasNew in
+        ) { _, progress, wasNew in
             savedSenseIDs.append(progress.senseID)
             newCardStudyFlags.append(wasNew)
         } onReview: { event in
@@ -121,7 +121,7 @@ struct RecallSessionTests {
         try session.advanceAfterReview(
             outcome: .incorrect,
             additionalFailureProgress: selectedProgress
-        ) { progress, _ in
+        ) { _, progress, _ in
             savedCurrent = progress
         } onAdditionalFailureSave: { progress in
             savedSelected = progress
@@ -164,7 +164,7 @@ struct RecallSessionTests {
         )
 
         var saved: CardProgress?
-        try session.advanceAfterReview(outcome: .forgot) { progress, _ in
+        try session.advanceAfterReview(outcome: .forgot) { _, progress, _ in
             saved = progress
         }
 
@@ -192,7 +192,7 @@ struct RecallSessionTests {
         )
 
         var saved: CardProgress?
-        try session.advanceAfterReview(outcome: .remembered) { progress, _ in
+        try session.advanceAfterReview(outcome: .remembered) { _, progress, _ in
             saved = progress
         }
 
@@ -216,7 +216,7 @@ struct RecallSessionTests {
 
         var didSaveProgress = false
         var didSaveReview = false
-        try session.advanceAfterReview(outcome: .forgot) { _, _ in
+        try session.advanceAfterReview(outcome: .forgot) { _, _, _ in
             didSaveProgress = true
         } onReview: { _ in
             didSaveReview = true
@@ -243,7 +243,7 @@ struct RecallSessionTests {
 
         var didSaveProgress = false
         var didSaveReview = false
-        try session.advanceAfterReview(outcome: .remembered) { _, _ in
+        try session.advanceAfterReview(outcome: .remembered) { _, _, _ in
             didSaveProgress = true
         } onReview: { _ in
             didSaveReview = true
@@ -272,7 +272,7 @@ struct RecallSessionTests {
         )
 
         var practiceEvent: PracticeReviewEvent?
-        try session.advanceAfterReview(outcome: .remembered) { _, _ in } onReview: { _ in
+        try session.advanceAfterReview(outcome: .remembered) { _, _, _ in } onReview: { _ in
             Issue.record("Practice should not create a study review")
         } onPracticeReview: { event in
             practiceEvent = event
@@ -311,7 +311,7 @@ struct RecallSessionTests {
 
         var reviewDeckID: UUID?
         var reviewSource: StudyReviewSource?
-        try session.advanceAfterReview(outcome: .remembered) { _, _ in } onReview: { event in
+        try session.advanceAfterReview(outcome: .remembered) { _, _, _ in } onReview: { event in
             reviewDeckID = event.deckID
             reviewSource = event.source
         }

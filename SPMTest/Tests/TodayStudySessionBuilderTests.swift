@@ -1,4 +1,5 @@
 import Foundation
+import FSRS
 import Testing
 @testable import WordsTrainerLogic
 
@@ -31,6 +32,84 @@ struct TodayStudySessionBuilderTests {
         #expect(Set(session.queue.compactMap(\.deckID)) == [firstDeck.id, secondDeck.id])
         #expect(Set(session.queue.map(\.card.id)) == [firstCard.id, secondCard.id])
         #expect(Set(session.deckChoicePool.map(\.id)) == [firstCard.id, secondCard.id])
+    }
+
+    @Test("new-card budget counts distinct cards, not senses")
+    func newCardBudgetCountsDistinctCards() {
+        // Four brand-new cards, each carrying two senses (8 new senses total).
+        let cards = (0..<4).map { index in
+            TestFixtures.card(word: "word-\(index)", translation: "sense-a; sense-b")
+        }
+        for card in cards {
+            #expect(card.activeSenses.count == 2)
+        }
+        let studyDeck = deck(title: "New", newCardsPerDay: 2, cards: cards)
+        var rng = SeededRNG(seed: 11)
+
+        let queue = StudyQueueBuilder.build(
+            deck: studyDeck,
+            progressBySenseID: [:],
+            dailyUsage: nil,
+            using: &rng
+        )
+
+        // The budget of 2 should admit exactly 2 distinct cards, with all of
+        // their senses, rather than 2 senses cut across cards.
+        let distinctCards = Set(queue.map(\.cardID))
+        #expect(distinctCards.count == 2)
+        #expect(queue.count == 4)
+        // Each admitted card contributes both of its senses.
+        for cardID in distinctCards {
+            #expect(queue.filter { $0.cardID == cardID }.count == 2)
+        }
+    }
+
+    @Test("a card already due is not also counted against the new-card budget")
+    func dueCardDoesNotConsumeNewBudget() {
+        let now = Date()
+        // Card with two senses: one already due for review, one still new.
+        let mixedCard = TestFixtures.card(word: "cast", translation: "бросать; гипс")
+        let dueSense = mixedCard.activeSenses[0]
+        let dueCard = Card(
+            due: now.addingTimeInterval(-60),
+            stability: 1,
+            difficulty: 1,
+            reps: 1,
+            state: .review,
+            lastReview: now.addingTimeInterval(-86_400)
+        )
+        let progressBySenseID = [
+            dueSense.id: CardProgress(senseID: dueSense.id, fsrsCard: dueCard),
+        ]
+        // A second, purely-new card competes for the single new-card slot.
+        let newCard = TestFixtures.card(word: "word", translation: "слово")
+        let studyDeck = deck(title: "Mixed", newCardsPerDay: 1, cards: [mixedCard, newCard])
+        var rng = SeededRNG(seed: 3)
+
+        let queue = StudyQueueBuilder.build(
+            deck: studyDeck,
+            progressBySenseID: progressBySenseID,
+            dailyUsage: nil,
+            now: now,
+            using: &rng
+        )
+
+        // The mixed card rides in as a review (its new sibling sense stays
+        // deferred and does not eat the slot), so the lone new slot goes to the
+        // purely-new card. The queue's distinct-card count matches DeckStats.
+        let stats = DeckStatsCalculator.compute(
+            deck: studyDeck,
+            progressBySenseID: progressBySenseID,
+            dailyUsage: nil,
+            now: now
+        )
+        #expect(Set(queue.map { $0.cardID }).count == stats.studyTotal)
+        #expect(stats.reviewDue == 1)
+        #expect(stats.newAvailable == 1)
+        #expect(queue.contains { $0.senseID == dueSense.id })
+        #expect(queue.contains { $0.cardID == newCard.id })
+        // The mixed card's new sibling is not introduced today.
+        #expect(!queue.contains { $0.cardID == mixedCard.id && $0.senseID != dueSense.id })
     }
 
     @Test("deck choice pool keeps each sense example focused")
@@ -276,6 +355,7 @@ struct TodayStudySessionBuilderTests {
         id: UUID = UUID(),
         status: ContentStatus = .active,
         title: String,
+        newCardsPerDay: Int = 20,
         cards: [WordCardContent]
     ) -> DeckContent {
         DeckContent(
@@ -284,7 +364,7 @@ struct TodayStudySessionBuilderTests {
             title: title,
             avatarSystemName: nil,
             languageCode: "en",
-            newCardsPerDay: 20,
+            newCardsPerDay: newCardsPerDay,
             reviewCardsPerDay: 200,
             cards: cards
         )
