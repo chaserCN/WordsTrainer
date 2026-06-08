@@ -323,6 +323,9 @@ enum MatchPalette {
     static let progressEnd = oklch(0.68, 0.22, 12)
     static let paceAheadStart = oklch(0.74, 0.14, 155)
     static let paceAheadEnd = oklch(0.66, 0.15, 162)
+    /// Бирюзовый прогресс изучения — в тон выбранному табу (cyan).
+    static let studyProgressStart = oklch(0.80, 0.13, 200)
+    static let studyProgressEnd = oklch(0.72, 0.15, 220)
 }
 
 /// Мягкий пастельный mesh-фон (персик/розовый/голубой/зелёный по углам).

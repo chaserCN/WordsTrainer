@@ -664,7 +664,7 @@ private struct MatchingStatusBar: View {
         TimelineView(.periodic(from: .now, by: 1.0)) { context in
             let elapsed = context.date.timeIntervalSince(startedAt)
             VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(spacing: 10) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text("\(remainingCount)")
                             .font(.title2.bold())
@@ -673,14 +673,21 @@ private struct MatchingStatusBar: View {
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(MatchPalette.muted)
                     }
-                    Spacer()
-                    Text(StudyDurationFormat.string(max(0, elapsed)))
-                        .font(.title2.bold().monospacedDigit())
-                        .foregroundStyle(MatchPalette.foreground)
+                    StudySessionProgressBar(
+                        completed: max(0, pairCount - remainingCount),
+                        total: pairCount
+                    )
                 }
 
-                if let recordDuration {
-                    paceBar(record: recordDuration, elapsed: max(0, elapsed))
+                HStack(spacing: 10) {
+                    if let recordDuration {
+                        paceBar(record: recordDuration, elapsed: max(0, elapsed))
+                    } else {
+                        Spacer(minLength: 0)
+                    }
+                    Text(StudyDurationFormat.string(max(0, elapsed)))
+                        .font(.title3.bold().monospacedDigit())
+                        .foregroundStyle(MatchPalette.foreground)
                 }
             }
         }

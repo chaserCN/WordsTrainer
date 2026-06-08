@@ -195,7 +195,7 @@ struct StudySessionProgressBar: View {
                 Capsule()
                     .fill(
                         LinearGradient(
-                            colors: [MatchPalette.progressStart, MatchPalette.progressEnd],
+                            colors: [MatchPalette.studyProgressStart, MatchPalette.studyProgressEnd],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
