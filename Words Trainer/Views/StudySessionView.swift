@@ -73,8 +73,8 @@ struct StudySessionView: View {
                             deckChoicePool: session.deckChoicePool,
                             totalCount: session.sessionChoicePool.count,
                             remainingCount: session.remainingCount
-                        ) { outcome, additionalFailureCardID in
-                            submit(outcome, additionalFailureCardID: additionalFailureCardID)
+                        ) { outcome, additionalFailureSenseID in
+                            submit(outcome, additionalFailureSenseID: additionalFailureSenseID)
                         }
                     case .matching, .matchingAudio, .clozeTyping:
                         EmptyView()
@@ -206,7 +206,7 @@ struct StudySessionView: View {
             || session.mode == .flashcards
     }
 
-    private func submit(_ outcome: ReviewOutcome, additionalFailureCardID: UUID? = nil) {
+    private func submit(_ outcome: ReviewOutcome, additionalFailureSenseID: UUID? = nil) {
         if session.mode == .flashcards {
             guard isFlashcardSubmitEnabled else { return }
             isFlashcardSubmitEnabled = false
@@ -220,7 +220,7 @@ struct StudySessionView: View {
             try validateCurrentUser()
             try session.advanceAfterReview(
                 outcome: outcome,
-                additionalFailureCardID: additionalFailureCardID,
+                additionalFailureSenseID: additionalFailureSenseID,
                 reviewsActiveCardSenses: session.mode == .flashcards && settings.flashcardDisplayMode == .wholeCard,
                 store: store
             )

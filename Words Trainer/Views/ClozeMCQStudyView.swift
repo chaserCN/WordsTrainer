@@ -202,8 +202,8 @@ struct ClozeMCQStudyView: View {
 
     private func advance() {
         previousCorrectOption = card.effectiveClozeAnswer
-        let additionalFailureCardID = passed ? nil : selected.flatMap { previewCard(for: $0)?.id }
-        onAnswer(passed ? .correct : .incorrect, additionalFailureCardID)
+        let additionalFailureSenseID = passed ? nil : selected.flatMap { previewCard(for: $0)?.primarySenseID }
+        onAnswer(passed ? .correct : .incorrect, additionalFailureSenseID)
     }
 
     private func optionsMatch(_ lhs: String, _ rhs: String) -> Bool {
@@ -231,9 +231,9 @@ struct ClozeMCQStudyView: View {
 
     private func previewCard(for option: String) -> WordCardContent? {
         let pools = [sessionChoicePool, deckChoicePool]
-        var seen: Set<UUID> = [card.id]
+        var seen: Set<UUID> = [card.primarySenseID ?? card.id]
 
-        for candidate in pools.flatMap({ $0 }) where seen.insert(candidate.id).inserted {
+        for candidate in pools.flatMap({ $0 }) where seen.insert(candidate.primarySenseID ?? candidate.id).inserted {
             if optionsMatch(option, candidate.effectiveClozeAnswer)
                 || candidate.forms.contains(where: { optionsMatch(option, $0.text) }) {
                 return candidate

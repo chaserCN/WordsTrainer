@@ -719,15 +719,23 @@ final class DeckStore {
 extension StudySession {
     func advanceAfterReview(
         outcome: ReviewOutcome,
-        additionalFailureCardID: UUID? = nil,
+        additionalFailureSenseID: UUID? = nil,
         reviewsActiveCardSenses: Bool = false,
         store: DeckStore
     ) throws {
         let shouldNotify = savesProgress && !(mode == .recall && outcome == .remembered)
         let progressDeckID = current?.deckID ?? deckID
+        let additionalFailureProgress: CardProgress?
+        if let additionalFailureSenseID {
+            let progressBySenseID = try store.database.progressMap(deckID: progressDeckID)
+            additionalFailureProgress = progressBySenseID[additionalFailureSenseID]
+                ?? CardProgress.newSense(senseID: additionalFailureSenseID)
+        } else {
+            additionalFailureProgress = nil
+        }
         try advanceAfterReview(
             outcome: outcome,
-            additionalFailureProgress: nil,
+            additionalFailureProgress: additionalFailureProgress,
             reviewsActiveCardSenses: reviewsActiveCardSenses
         ) { progress, wasNew in
             try store.saveProgress(deckID: progressDeckID, progress: progress, wasNew: wasNew)
