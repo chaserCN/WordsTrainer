@@ -212,10 +212,10 @@ final class DeckStore {
 
     func todayStudyCards() throws -> [WordCardContent] {
         if let session = try startTodaySession(mode: .flashcards) {
-            return uniqueCards(session.queue.map(\.card))
+            return uniqueCards(unfocusedCards(for: session.queue, in: try allDecks()))
         }
         if let session = try startTodayPracticeSession(mode: .flashcards) {
-            return uniqueCards(session.queue.map(\.card))
+            return uniqueCards(unfocusedCards(for: session.queue, in: try allDecks()))
         }
         return []
     }
@@ -223,10 +223,10 @@ final class DeckStore {
     func todayStudyCards(deck: DeckContent) throws -> [WordCardContent] {
         let todaySession = try startTodaySession(deck: deck, mode: .flashcards)
         if !todaySession.queue.isEmpty {
-            return uniqueCards(todaySession.queue.map(\.card))
+            return uniqueCards(unfocusedCards(for: todaySession.queue, in: [deck]))
         }
         if let practiceSession = try startTodayPracticeSession(deck: deck, mode: .flashcards) {
-            return uniqueCards(practiceSession.queue.map(\.card))
+            return uniqueCards(unfocusedCards(for: practiceSession.queue, in: [deck]))
         }
         return []
     }
@@ -417,6 +417,10 @@ final class DeckStore {
         }
     }
 
+    func progress(deckID: UUID, senseID: UUID) throws -> CardProgress? {
+        try database.progressMap(deckID: deckID)[senseID]
+    }
+
     func deckID(forCardID cardID: UUID) throws -> UUID? {
         try database.deckID(forCardID: cardID)
     }
@@ -532,6 +536,14 @@ final class DeckStore {
         return cards.filter { card in
             seen.insert(card.id).inserted
         }
+    }
+
+    private func unfocusedCards(for queue: [StudyQueueItem], in decks: [DeckContent]) -> [WordCardContent] {
+        var cardByID: [UUID: WordCardContent] = [:]
+        for card in decks.flatMap(\.activeCards) {
+            cardByID[card.id] = card
+        }
+        return queue.compactMap { item in cardByID[item.cardID] }
     }
 
     nonisolated private static func loadTodayDashboardSnapshot(userID: UUID) throws -> DeckTodaySnapshot {
@@ -665,11 +677,12 @@ final class DeckStore {
     }
 
     nonisolated private static func todayQueueCards(snapshot: TodayStudyDeckSnapshot) -> [WordCardContent] {
-        StudyQueueBuilder.build(
+        let cardByID = Dictionary(uniqueKeysWithValues: snapshot.deck.activeCards.map { ($0.id, $0) })
+        return StudyQueueBuilder.build(
             deck: snapshot.deck,
             progressBySenseID: snapshot.progressBySenseID,
             dailyUsage: snapshot.dailyUsage
-        ).map(\.card)
+        ).compactMap { item in cardByID[item.cardID] }
     }
 
     nonisolated private static func todayPracticeCards(snapshot: TodayStudyDeckSnapshot) -> [WordCardContent] {
@@ -727,8 +740,7 @@ extension StudySession {
         let progressDeckID = current?.deckID ?? deckID
         let additionalFailureProgress: CardProgress?
         if let additionalFailureSenseID {
-            let progressBySenseID = try store.database.progressMap(deckID: progressDeckID)
-            additionalFailureProgress = progressBySenseID[additionalFailureSenseID]
+            additionalFailureProgress = try store.progress(deckID: progressDeckID, senseID: additionalFailureSenseID)
                 ?? CardProgress.newSense(senseID: additionalFailureSenseID)
         } else {
             additionalFailureProgress = nil
