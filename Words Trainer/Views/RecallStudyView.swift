@@ -19,7 +19,7 @@ struct RecallStudyView: View {
 
             VStack(spacing: Self.actionGap) {
                 wordCard
-                    .studyCardChangeTransition(cardID: card.id)
+                    .studyCardChangeTransition(cardID: card.primarySenseID ?? card.id)
 
                 ReviewOutcomeControls(onAnswer: onAnswer)
             }

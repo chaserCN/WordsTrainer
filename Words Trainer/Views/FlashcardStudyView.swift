@@ -90,7 +90,7 @@ struct FlashcardStudyView: View {
                         actionButtons
                     }
                     .padding(.horizontal, 16)
-                    .studyCardChangeTransition(cardID: card.id, direction: cardChangeDirection)
+                    .studyCardChangeTransition(cardID: presentation.id, direction: cardChangeDirection)
 
                     Spacer(minLength: Self.verticalGap)
                 }

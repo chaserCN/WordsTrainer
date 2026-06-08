@@ -140,8 +140,8 @@ enum StudyCardChangeDirection {
     case right
 }
 
-struct StudyCardChangeTransition: ViewModifier {
-    let cardID: UUID
+struct StudyCardChangeTransition<ID: Hashable>: ViewModifier {
+    let cardID: ID
     var direction: StudyCardChangeDirection = .right
 
     private var removalOffset: CGSize {
@@ -170,8 +170,8 @@ struct StudyCardChangeTransition: ViewModifier {
 }
 
 extension View {
-    func studyCardChangeTransition(
-        cardID: UUID,
+    func studyCardChangeTransition<ID: Hashable>(
+        cardID: ID,
         direction: StudyCardChangeDirection = .right
     ) -> some View {
         modifier(StudyCardChangeTransition(cardID: cardID, direction: direction))
