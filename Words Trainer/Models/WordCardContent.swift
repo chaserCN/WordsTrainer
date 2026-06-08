@@ -17,6 +17,46 @@ nonisolated enum ContentStatus: String, Codable, Hashable, Sendable {
     var isActive: Bool { self == .active }
 }
 
+nonisolated struct SenseExampleContent: Codable, Hashable, Sendable {
+    let text: String
+    let translation: String?
+    let note: String?
+}
+
+nonisolated struct SentenceQuestionContent: Codable, Hashable, Sendable {
+    let template: String
+    let answer: String
+    let answerFormKey: String?
+    let audioAnswerURL: URL?
+}
+
+nonisolated struct WordSenseContent: Codable, Identifiable, Hashable, Sendable {
+    let id: UUID
+    let cardID: UUID
+    let status: ContentStatus
+    let displayPattern: String?
+    let translation: String
+    let note: String?
+    let imageURL: URL?
+    let example: SenseExampleContent
+    let sentenceQuestion: SentenceQuestionContent
+    let distractors: [String]
+
+    var isActive: Bool { status.isActive }
+
+    var exampleText: String { example.text }
+    var clozePrompt: String { sentenceQuestion.template }
+    var clozeTemplate: String? {
+        let template = sentenceQuestion.template
+        return template.contains(WordCardContent.blankToken) || template.contains("___") ? template : nil
+    }
+    var clozeAnswer: String? { sentenceQuestion.answer }
+    var clozeExampleTranslation: String? { example.translation }
+    var clozeExampleImageURL: URL? { imageURL }
+    var answerFormKey: String? { sentenceQuestion.answerFormKey }
+    var audioAnswerURL: URL? { sentenceQuestion.audioAnswerURL }
+}
+
 /// Card content from server or local seed (no SRS state).
 nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
     static let blankToken = "{{blank}}"
@@ -26,28 +66,12 @@ nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
     let word: String
     let lemma: String
     let partOfSpeech: String?
-    let translation: String
-    let clozePrompt: String
-    let clozeTemplate: String?
-    /// Override when the gap uses a different form than `word` (e.g. went vs go).
-    let clozeAnswer: String?
-    /// Russian translation of the example sentence (`card_examples.translation`).
-    let clozeExampleTranslation: String?
-    /// Optional image for the concrete example. Stored for future UI modes.
-    let clozeExampleImageURL: URL?
-    let answerFormKey: String?
-    let shortDefinition: String?
-    let memoryHint: String?
     let etymology: String?
-    let usageNote: String?
-    let synonymNote: String?
-    let grammarNote: String?
-    let explanation: String?
-    let imageURL: URL?
+    private let notes: String?
     let audioWordURL: URL?
-    let audioExampleURL: URL?
-    let distractors: [String]
     let forms: [WordForm]
+    let primarySenseID: UUID?
+    let senses: [WordSenseContent]
 
     init(
         id: UUID = UUID(),
@@ -55,50 +79,109 @@ nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
         word: String,
         lemma: String? = nil,
         partOfSpeech: String? = nil,
-        translation: String,
-        clozePrompt: String,
+        translation: String? = nil,
+        exampleText: String? = nil,
+        clozePrompt: String? = nil,
         clozeTemplate: String? = nil,
         clozeAnswer: String? = nil,
         clozeExampleTranslation: String? = nil,
         clozeExampleImageURL: URL? = nil,
         answerFormKey: String? = nil,
-        shortDefinition: String? = nil,
-        memoryHint: String? = nil,
         etymology: String? = nil,
-        usageNote: String? = nil,
-        synonymNote: String? = nil,
-        grammarNote: String? = nil,
         explanation: String? = nil,
         imageURL: URL? = nil,
         audioWordURL: URL? = nil,
-        audioExampleURL: URL? = nil,
+        audioAnswerURL: URL? = nil,
         distractors: [String] = [],
-        forms: [WordForm] = []
+        forms: [WordForm] = [],
+        primarySenseID: UUID? = nil,
+        senses: [WordSenseContent] = []
     ) {
         self.id = id
         self.status = status
         self.word = word
         self.lemma = lemma ?? Self.headword(from: word)
         self.partOfSpeech = partOfSpeech
-        self.translation = translation
-        self.clozePrompt = clozePrompt
-        self.clozeTemplate = clozeTemplate
-        self.clozeAnswer = clozeAnswer
-        self.clozeExampleTranslation = clozeExampleTranslation
-        self.clozeExampleImageURL = clozeExampleImageURL
-        self.answerFormKey = answerFormKey
-        self.shortDefinition = shortDefinition
-        self.memoryHint = memoryHint
         self.etymology = etymology
-        self.usageNote = usageNote
-        self.synonymNote = synonymNote
-        self.grammarNote = grammarNote
-        self.explanation = explanation
-        self.imageURL = imageURL
         self.audioWordURL = audioWordURL
-        self.audioExampleURL = audioExampleURL
-        self.distractors = distractors
         self.forms = forms
+        self.notes = explanation
+
+        if senses.isEmpty, let translation {
+            let fallbackQuestion = clozeTemplate ?? clozePrompt ?? Self.blankToken
+            let answer = clozeAnswer ?? Self.boldClozeAnswer(from: fallbackQuestion) ?? Self.headword(from: word)
+            let fallbackExample = exampleText
+                ?? Self.plainText(fromHTMLFragment: Self.fillTemplate(fallbackQuestion, with: answer))
+            let senseID = primarySenseID ?? id
+            self.primarySenseID = senseID
+            self.senses = [
+                WordSenseContent(
+                    id: senseID,
+                    cardID: id,
+                    status: status,
+                    displayPattern: nil,
+                    translation: translation,
+                    note: nil,
+                    imageURL: imageURL ?? clozeExampleImageURL,
+                    example: SenseExampleContent(
+                        text: fallbackExample,
+                        translation: clozeExampleTranslation,
+                        note: nil
+                    ),
+                    sentenceQuestion: SentenceQuestionContent(
+                        template: fallbackQuestion,
+                        answer: answer,
+                        answerFormKey: answerFormKey,
+                        audioAnswerURL: audioAnswerURL
+                    ),
+                    distractors: distractors
+                ),
+            ]
+        } else {
+            self.primarySenseID = primarySenseID
+            self.senses = senses
+        }
+    }
+
+    var activeSenses: [WordSenseContent] {
+        senses.filter(\.isActive)
+    }
+
+    var primarySense: WordSenseContent? {
+        if let primarySenseID,
+           let sense = activeSenses.first(where: { $0.id == primarySenseID }) {
+            return sense
+        }
+        return activeSenses.first
+    }
+
+    var translation: String { primarySense?.translation ?? "" }
+    var exampleText: String { primarySense?.exampleText ?? "" }
+    var clozePrompt: String { primarySense?.clozePrompt ?? Self.blankToken }
+    var clozeTemplate: String? { primarySense?.clozeTemplate }
+    var clozeAnswer: String? { primarySense?.clozeAnswer }
+    var clozeExampleTranslation: String? { primarySense?.clozeExampleTranslation }
+    var clozeExampleImageURL: URL? { primarySense?.clozeExampleImageURL }
+    var answerFormKey: String? { primarySense?.answerFormKey }
+    var explanation: String? { primarySense?.note ?? notes }
+    var imageURL: URL? { primarySense?.imageURL }
+    var audioAnswerURL: URL? { primarySense?.audioAnswerURL }
+    var distractors: [String] { primarySense?.distractors ?? [] }
+
+    func focused(on sense: WordSenseContent) -> WordCardContent {
+        WordCardContent(
+            id: id,
+            status: status,
+            word: sense.displayPattern ?? word,
+            lemma: lemma,
+            partOfSpeech: partOfSpeech,
+            etymology: etymology,
+            explanation: notes,
+            audioWordURL: audioWordURL,
+            forms: forms,
+            primarySenseID: sense.id,
+            senses: senses
+        )
     }
 
     /// Answer accepted in cloze exercises when `clozeAnswer` is nil.
@@ -279,7 +362,7 @@ nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
 
     /// Plain-text example sentence with the correct answer filled in.
     var clozeExamplePlainText: String {
-        Self.plainText(fromHTMLFragment: clozePromptFilled(with: effectiveClozeAnswer))
+        Self.plainText(fromHTMLFragment: exampleText)
     }
 
     static func boldClozeAnswer(from prompt: String) -> String? {

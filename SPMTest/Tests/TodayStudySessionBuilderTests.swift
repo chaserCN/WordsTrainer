@@ -16,8 +16,8 @@ struct TodayStudySessionBuilderTests {
         let session = try #require(
             TodayStudySessionBuilder.todaySession(
                 snapshots: [
-                    TodayStudyDeckSnapshot(deck: firstDeck, progressByCardID: [:], dailyUsage: nil),
-                    TodayStudyDeckSnapshot(deck: secondDeck, progressByCardID: [:], dailyUsage: nil),
+                    TodayStudyDeckSnapshot(deck: firstDeck, progressBySenseID: [:], dailyUsage: nil),
+                    TodayStudyDeckSnapshot(deck: secondDeck, progressBySenseID: [:], dailyUsage: nil),
                 ],
                 mode: .flashcards,
                 dayKey: "2026-06-02",
@@ -38,22 +38,24 @@ struct TodayStudySessionBuilderTests {
     func todayPracticeUsesReviewedCardsOnly() throws {
         let reviewedCard = TestFixtures.card(word: "cat", translation: "кот")
         let untouchedCard = TestFixtures.card(word: "dog", translation: "собака")
+        let reviewedSense = try #require(reviewedCard.primarySense)
         let activeDeck = deck(title: "Active", cards: [reviewedCard, untouchedCard])
         let inactiveDeck = deck(status: .inactive, title: "Inactive", cards: [
             TestFixtures.card(word: "bird", translation: "птица"),
         ])
+        let inactiveSenseIDs = inactiveDeck.cards.flatMap { $0.activeSenses.map(\.id) }
         let snapshots = [
             TodayStudyDeckSnapshot(
                 deck: activeDeck,
-                progressByCardID: [:],
+                progressBySenseID: [:],
                 dailyUsage: nil,
-                reviewedCardIDs: [reviewedCard.id]
+                reviewedSenseIDs: [reviewedSense.id]
             ),
             TodayStudyDeckSnapshot(
                 deck: inactiveDeck,
-                progressByCardID: [:],
+                progressBySenseID: [:],
                 dailyUsage: nil,
-                reviewedCardIDs: inactiveDeck.cards.map(\.id)
+                reviewedSenseIDs: inactiveSenseIDs
             ),
         ]
 
@@ -78,12 +80,13 @@ struct TodayStudySessionBuilderTests {
     @MainActor
     func deckPracticeDoesNotKeepMatchingRecordScope() throws {
         let reviewedCard = TestFixtures.card(word: "cat", translation: "кот")
+        let reviewedSense = try #require(reviewedCard.primarySense)
         let sourceDeck = deck(title: "Deck", cards: [reviewedCard])
         let snapshot = TodayStudyDeckSnapshot(
             deck: sourceDeck,
-            progressByCardID: [:],
+            progressBySenseID: [:],
             dailyUsage: nil,
-            reviewedCardIDs: [reviewedCard.id]
+            reviewedSenseIDs: [reviewedSense.id]
         )
 
         let session = try #require(
@@ -113,9 +116,9 @@ struct TodayStudySessionBuilderTests {
         let session = try #require(
             RandomStudySessionBuilder.randomSession(
                 snapshots: [
-                    TodayStudyDeckSnapshot(deck: firstDeck, progressByCardID: [:], dailyUsage: nil),
-                    TodayStudyDeckSnapshot(deck: secondDeck, progressByCardID: [:], dailyUsage: nil),
-                    TodayStudyDeckSnapshot(deck: inactiveDeck, progressByCardID: [:], dailyUsage: nil),
+                    TodayStudyDeckSnapshot(deck: firstDeck, progressBySenseID: [:], dailyUsage: nil),
+                    TodayStudyDeckSnapshot(deck: secondDeck, progressBySenseID: [:], dailyUsage: nil),
+                    TodayStudyDeckSnapshot(deck: inactiveDeck, progressBySenseID: [:], dailyUsage: nil),
                 ],
                 mode: .flashcards,
                 engine: StudySessionEngine(),
@@ -140,8 +143,8 @@ struct TodayStudySessionBuilderTests {
             TestFixtures.card(word: "inactive", translation: "x"),
         ])
         let snapshots = [
-            TodayStudyDeckSnapshot(deck: activeDeck, progressByCardID: [:], dailyUsage: nil),
-            TodayStudyDeckSnapshot(deck: inactiveDeck, progressByCardID: [:], dailyUsage: nil),
+            TodayStudyDeckSnapshot(deck: activeDeck, progressBySenseID: [:], dailyUsage: nil),
+            TodayStudyDeckSnapshot(deck: inactiveDeck, progressBySenseID: [:], dailyUsage: nil),
         ]
         var firstRNG = SeededRNG(seed: 21)
         var secondRNG = SeededRNG(seed: 21)
@@ -161,7 +164,7 @@ struct TodayStudySessionBuilderTests {
         var rng = SeededRNG(seed: 4)
 
         let sampled = RandomStudySessionBuilder.randomCards(
-            snapshots: [TodayStudyDeckSnapshot(deck: activeDeck, progressByCardID: [:], dailyUsage: nil)],
+            snapshots: [TodayStudyDeckSnapshot(deck: activeDeck, progressBySenseID: [:], dailyUsage: nil)],
             limit: 7,
             using: &rng
         )
@@ -180,7 +183,7 @@ struct TodayStudySessionBuilderTests {
         let session = try #require(
             RandomStudySessionBuilder.session(
                 snapshots: [
-                    TodayStudyDeckSnapshot(deck: sourceDeck, progressByCardID: [:], dailyUsage: nil),
+                    TodayStudyDeckSnapshot(deck: sourceDeck, progressBySenseID: [:], dailyUsage: nil),
                 ],
                 cards: selected,
                 mode: .flashcards,

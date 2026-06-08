@@ -39,7 +39,7 @@ final class WordAudioPlayer {
 
     func playClozeAnswer(from card: WordCardContent) {
         guard AppSettings.shared.isSoundEnabled else { return }
-        guard let url = card.audioExampleURL else { return }
+        guard let url = card.audioAnswerURL else { return }
         playFile(at: url, pitchCents: 0)
     }
 

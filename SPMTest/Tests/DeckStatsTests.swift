@@ -8,7 +8,7 @@ struct DeckStatsTests {
     @Test("default SRS engine skips short-term learning steps")
     func defaultEngineUsesLongTermScheduling() throws {
         let now = Date()
-        let progress = CardProgress.newCard(cardID: UUID(), now: now)
+        let progress = CardProgress.newSense(senseID: UUID(), now: now)
 
         let reviewed = try StudySessionEngine().applyReview(
             progress: progress,
@@ -47,7 +47,7 @@ struct DeckStatsTests {
                 TestFixtures.card(id: id, word: "cat", translation: "кот"),
             ]
         )
-        let stats = DeckStatsCalculator.compute(deck: deck, progressByCardID: [:], dailyUsage: nil)
+        let stats = DeckStatsCalculator.compute(deck: deck, progressBySenseID: [:], dailyUsage: nil)
         #expect(stats.newAvailable == 1)
     }
 
@@ -68,7 +68,7 @@ struct DeckStatsTests {
             ]
         )
 
-        let stats = DeckStatsCalculator.compute(deck: deck, progressByCardID: [:], dailyUsage: nil)
+        let stats = DeckStatsCalculator.compute(deck: deck, progressBySenseID: [:], dailyUsage: nil)
 
         #expect(stats.newAvailable == 1)
     }
@@ -88,7 +88,7 @@ struct DeckStatsTests {
             ]
         )
 
-        let stats = DeckStatsCalculator.compute(deck: deck, progressByCardID: [:], dailyUsage: nil)
+        let stats = DeckStatsCalculator.compute(deck: deck, progressBySenseID: [:], dailyUsage: nil)
 
         #expect(stats == .zero)
     }
@@ -110,7 +110,7 @@ struct DeckStatsTests {
             ]
         )
         let usage = DeckDailyUsage(dayKey: DeckDailyUsage.todayKey(), newCardsStudied: 0)
-        let stats = DeckStatsCalculator.compute(deck: deck, progressByCardID: [:], dailyUsage: usage)
+        let stats = DeckStatsCalculator.compute(deck: deck, progressBySenseID: [:], dailyUsage: usage)
         #expect(stats.newAvailable == 1)
     }
 
@@ -129,7 +129,7 @@ struct DeckStatsTests {
             ]
         )
         let usage = DeckDailyUsage(dayKey: DeckDailyUsage.todayKey(), newCardsStudied: 1)
-        let stats = DeckStatsCalculator.compute(deck: deck, progressByCardID: [:], dailyUsage: usage)
+        let stats = DeckStatsCalculator.compute(deck: deck, progressBySenseID: [:], dailyUsage: usage)
         #expect(stats.newAvailable == 0)
     }
 
@@ -140,6 +140,8 @@ struct DeckStatsTests {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 12))!
+        let firstCard = TestFixtures.card(id: firstID, word: "cat", translation: "кот")
+        let secondCard = TestFixtures.card(id: secondID, word: "dog", translation: "собака")
         let deck = DeckContent(
             id: UUID(),
             title: "Test",
@@ -147,10 +149,7 @@ struct DeckStatsTests {
             languageCode: "en",
             newCardsPerDay: 20,
             reviewCardsPerDay: 1,
-            cards: [
-                TestFixtures.card(id: firstID, word: "cat", translation: "кот"),
-                TestFixtures.card(id: secondID, word: "dog", translation: "собака"),
-            ]
+            cards: [firstCard, secondCard]
         )
         let dueCard = Card(
             due: now.addingTimeInterval(-60),
@@ -160,14 +159,14 @@ struct DeckStatsTests {
             state: .review,
             lastReview: now.addingTimeInterval(-86_400)
         )
-        let progressByCardID = [
-            firstID: CardProgress(cardID: firstID, fsrsCard: dueCard),
-            secondID: CardProgress(cardID: secondID, fsrsCard: dueCard),
+        let progressBySenseID = [
+            firstCard.primarySense!.id: CardProgress(senseID: firstCard.primarySense!.id, fsrsCard: dueCard),
+            secondCard.primarySense!.id: CardProgress(senseID: secondCard.primarySense!.id, fsrsCard: dueCard),
         ]
 
         let stats = DeckStatsCalculator.compute(
             deck: deck,
-            progressByCardID: progressByCardID,
+            progressBySenseID: progressBySenseID,
             dailyUsage: nil,
             now: now
         )
@@ -186,6 +185,10 @@ struct DeckStatsTests {
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 9))!
         let laterToday = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 21))!
         let tomorrow = calendar.date(from: DateComponents(year: 2026, month: 6, day: 4, hour: 9))!
+        let dueNowCard = TestFixtures.card(id: dueNowID, word: "cat", translation: "кот")
+        let reviewLaterCard = TestFixtures.card(id: reviewLaterID, word: "dog", translation: "собака")
+        let learningLaterCard = TestFixtures.card(id: learningLaterID, word: "bird", translation: "птица")
+        let tomorrowCard = TestFixtures.card(id: tomorrowID, word: "fish", translation: "рыба")
         let deck = DeckContent(
             id: UUID(),
             title: "Test",
@@ -193,23 +196,18 @@ struct DeckStatsTests {
             languageCode: "en",
             newCardsPerDay: 20,
             reviewCardsPerDay: 200,
-            cards: [
-                TestFixtures.card(id: dueNowID, word: "cat", translation: "кот"),
-                TestFixtures.card(id: reviewLaterID, word: "dog", translation: "собака"),
-                TestFixtures.card(id: learningLaterID, word: "bird", translation: "птица"),
-                TestFixtures.card(id: tomorrowID, word: "fish", translation: "рыба"),
-            ]
+            cards: [dueNowCard, reviewLaterCard, learningLaterCard, tomorrowCard]
         )
-        let progressByCardID = [
-            dueNowID: CardProgress(cardID: dueNowID, fsrsCard: reviewCard(due: now.addingTimeInterval(-60), now: now)),
-            reviewLaterID: CardProgress(cardID: reviewLaterID, fsrsCard: reviewCard(due: laterToday, now: now)),
-            learningLaterID: CardProgress(cardID: learningLaterID, fsrsCard: learningCard(due: laterToday, now: now)),
-            tomorrowID: CardProgress(cardID: tomorrowID, fsrsCard: reviewCard(due: tomorrow, now: now)),
+        let progressBySenseID = [
+            dueNowCard.primarySense!.id: CardProgress(senseID: dueNowCard.primarySense!.id, fsrsCard: reviewCard(due: now.addingTimeInterval(-60), now: now)),
+            reviewLaterCard.primarySense!.id: CardProgress(senseID: reviewLaterCard.primarySense!.id, fsrsCard: reviewCard(due: laterToday, now: now)),
+            learningLaterCard.primarySense!.id: CardProgress(senseID: learningLaterCard.primarySense!.id, fsrsCard: learningCard(due: laterToday, now: now)),
+            tomorrowCard.primarySense!.id: CardProgress(senseID: tomorrowCard.primarySense!.id, fsrsCard: reviewCard(due: tomorrow, now: now)),
         ]
 
         let stats = DeckStatsCalculator.compute(
             deck: deck,
-            progressByCardID: progressByCardID,
+            progressBySenseID: progressBySenseID,
             dailyUsage: nil,
             now: now,
             calendar: calendar
@@ -227,6 +225,7 @@ struct DeckStatsTests {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 21, minute: 52))!
         let night = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 22, minute: 30))!
+        let card = TestFixtures.card(id: cardID, word: "cat", translation: "кот")
         let deck = DeckContent(
             id: UUID(),
             title: "Test",
@@ -234,14 +233,17 @@ struct DeckStatsTests {
             languageCode: "en",
             newCardsPerDay: 20,
             reviewCardsPerDay: 200,
-            cards: [
-                TestFixtures.card(id: cardID, word: "cat", translation: "кот"),
-            ]
+            cards: [card]
         )
 
         let stats = DeckStatsCalculator.compute(
             deck: deck,
-            progressByCardID: [cardID: CardProgress(cardID: cardID, fsrsCard: reviewCard(due: night, now: now))],
+            progressBySenseID: [
+                card.primarySense!.id: CardProgress(
+                    senseID: card.primarySense!.id,
+                    fsrsCard: reviewCard(due: night, now: now)
+                ),
+            ],
             dailyUsage: nil,
             now: now,
             calendar: calendar
@@ -259,6 +261,8 @@ struct DeckStatsTests {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 9))!
         let laterToday = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 21))!
+        let dueNowCard = TestFixtures.card(id: dueNowID, word: "cat", translation: "кот")
+        let laterCard = TestFixtures.card(id: laterID, word: "dog", translation: "собака")
         let deck = DeckContent(
             id: UUID(),
             title: "Test",
@@ -266,19 +270,16 @@ struct DeckStatsTests {
             languageCode: "en",
             newCardsPerDay: 20,
             reviewCardsPerDay: 1,
-            cards: [
-                TestFixtures.card(id: dueNowID, word: "cat", translation: "кот"),
-                TestFixtures.card(id: laterID, word: "dog", translation: "собака"),
-            ]
+            cards: [dueNowCard, laterCard]
         )
-        let progressByCardID = [
-            dueNowID: CardProgress(cardID: dueNowID, fsrsCard: reviewCard(due: now.addingTimeInterval(-60), now: now)),
-            laterID: CardProgress(cardID: laterID, fsrsCard: reviewCard(due: laterToday, now: now)),
+        let progressBySenseID = [
+            dueNowCard.primarySense!.id: CardProgress(senseID: dueNowCard.primarySense!.id, fsrsCard: reviewCard(due: now.addingTimeInterval(-60), now: now)),
+            laterCard.primarySense!.id: CardProgress(senseID: laterCard.primarySense!.id, fsrsCard: reviewCard(due: laterToday, now: now)),
         ]
 
         let stats = DeckStatsCalculator.compute(
             deck: deck,
-            progressByCardID: progressByCardID,
+            progressBySenseID: progressBySenseID,
             dailyUsage: nil,
             now: now,
             calendar: calendar
@@ -308,16 +309,22 @@ struct DeckStatsTests {
             reviewCardsPerDay: 200,
             cards: dueCards + newCards
         )
-        let progressByCardID = Dictionary(
-            uniqueKeysWithValues: dueCards.map {
-                ($0.id, CardProgress(cardID: $0.id, fsrsCard: reviewCard(due: now.addingTimeInterval(-60), now: now)))
+        let progressBySenseID = Dictionary(
+            uniqueKeysWithValues: dueCards.map { card in
+                (
+                    card.primarySense!.id,
+                    CardProgress(
+                        senseID: card.primarySense!.id,
+                        fsrsCard: reviewCard(due: now.addingTimeInterval(-60), now: now)
+                    )
+                )
             }
         )
 
         let days = StudyPlanForecastCalculator.compute(
             days: 7,
             decks: [deck],
-            progressByDeckID: [deck.id: progressByCardID],
+            progressByDeckID: [deck.id: progressBySenseID],
             dailyUsageByDeckID: [:],
             now: now,
             calendar: calendar
@@ -347,16 +354,22 @@ struct DeckStatsTests {
             reviewCardsPerDay: 200,
             cards: dueTomorrow + newCards
         )
-        let progressByCardID = Dictionary(
-            uniqueKeysWithValues: dueTomorrow.map {
-                ($0.id, CardProgress(cardID: $0.id, fsrsCard: reviewCard(due: tomorrow, now: now)))
+        let progressBySenseID = Dictionary(
+            uniqueKeysWithValues: dueTomorrow.map { card in
+                (
+                    card.primarySense!.id,
+                    CardProgress(
+                        senseID: card.primarySense!.id,
+                        fsrsCard: reviewCard(due: tomorrow, now: now)
+                    )
+                )
             }
         )
 
         let days = StudyPlanForecastCalculator.compute(
             days: 3,
             decks: [deck],
-            progressByDeckID: [deck.id: progressByCardID],
+            progressByDeckID: [deck.id: progressBySenseID],
             dailyUsageByDeckID: [
                 deck.id: DeckDailyUsage(
                     dayKey: DeckDailyUsage.dayKey(for: now, calendar: calendar),
@@ -383,11 +396,11 @@ struct DeckStatsTests {
             reviewCardsPerDay: 0,
             cards: [card]
         )
-        let progress = CardProgress.newCard(cardID: card.id)
+        let progress = CardProgress.newSense(senseID: card.id)
         let reviewed = try StudySessionEngine().applyReview(progress: progress, outcome: .correct)
         let queue = StudyQueueBuilder.build(
             deck: deck,
-            progressByCardID: [card.id: reviewed],
+            progressBySenseID: [card.id: reviewed],
             dailyUsage: DeckDailyUsage(dayKey: DeckDailyUsage.todayKey(), newCardsStudied: 0)
         )
         #expect(queue.isEmpty)
@@ -430,7 +443,7 @@ struct DeckStatsTests {
             cards: [active, inactive]
         )
 
-        let queue = StudyQueueBuilder.build(deck: deck, progressByCardID: [:], dailyUsage: nil)
+        let queue = StudyQueueBuilder.build(deck: deck, progressBySenseID: [:], dailyUsage: nil)
 
         #expect(queue.map(\.card.id) == [active.id])
     }
@@ -450,19 +463,19 @@ struct DeckStatsTests {
             reviewCardsPerDay: 200,
             cards: [card]
         )
-        let progressByCardID = [
-            card.id: CardProgress(cardID: card.id, fsrsCard: reviewCard(due: base, now: base))
+        let progressBySenseID = [
+            card.primarySense!.id: CardProgress(senseID: card.primarySense!.id, fsrsCard: reviewCard(due: base, now: base))
         ]
 
         let nightQueue = StudyQueueBuilder.build(
             deck: deck,
-            progressByCardID: progressByCardID,
+            progressBySenseID: progressBySenseID,
             dailyUsage: nil,
             now: base.addingTimeInterval(60)
         )
         let morningQueue = StudyQueueBuilder.build(
             deck: deck,
-            progressByCardID: progressByCardID,
+            progressBySenseID: progressBySenseID,
             dailyUsage: nil,
             now: morning
         )
@@ -486,7 +499,7 @@ struct DeckStatsTests {
             ]
         )
 
-        let queue = StudyQueueBuilder.build(deck: deck, progressByCardID: [:], dailyUsage: nil)
+        let queue = StudyQueueBuilder.build(deck: deck, progressBySenseID: [:], dailyUsage: nil)
 
         #expect(queue.isEmpty)
     }
@@ -516,16 +529,16 @@ struct DeckStatsTests {
             state: .review,
             lastReview: now.addingTimeInterval(-86_400)
         )
-        let progressByCardID = Dictionary(
+        let progressBySenseID = Dictionary(
             uniqueKeysWithValues: cards.map {
-                ($0.id, CardProgress(cardID: $0.id, fsrsCard: dueCard))
+                ($0.primarySense!.id, CardProgress(senseID: $0.primarySense!.id, fsrsCard: dueCard))
             }
         )
         var firstRNG = SeededRNG(seed: 1)
 
         let firstQueue = StudyQueueBuilder.build(
             deck: deck,
-            progressByCardID: progressByCardID,
+            progressBySenseID: progressBySenseID,
             dailyUsage: nil,
             now: now,
             using: &firstRNG
@@ -541,7 +554,7 @@ struct DeckStatsTests {
     func binaryReview() throws {
         let engine = StudySessionEngine()
         let id = UUID()
-        var progress = CardProgress.newCard(cardID: id)
+        var progress = CardProgress.newSense(senseID: id)
         progress = try engine.applyReview(progress: progress, outcome: .correct)
         #expect(progress.fsrsCard.reps > 0)
     }

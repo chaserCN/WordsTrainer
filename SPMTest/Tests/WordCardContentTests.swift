@@ -363,7 +363,7 @@ struct MatchingPairTests {
     @Test("multiple senses produce separate pairs")
     func multipleSenses() {
         let card = TestFixtures.card(word: "cast", translation: "бросать; кидать; метать")
-        let pairs = MatchingPair.pairs(from: TestFixtures.queueItem(card: card))
+        let pairs = StudyQueueBuilder.allItems(cards: [card], progressBySenseID: [:]).flatMap(MatchingPair.pairs)
         #expect(pairs.count == 3)
         #expect(pairs.map(\.translation) == ["бросать", "кидать", "метать"])
         #expect(Set(pairs.map(\.cardID)).count == 1)

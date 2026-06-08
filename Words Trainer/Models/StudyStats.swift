@@ -10,6 +10,7 @@ nonisolated enum StudyReviewSource: String, Codable, Sendable, Hashable {
 nonisolated struct StudyReviewEvent: Sendable, Hashable {
     let id: UUID
     let cardID: UUID
+    let senseID: UUID
     let deckID: UUID
     let deckVersionID: UUID?
     let mode: StudyMode
@@ -24,6 +25,7 @@ nonisolated struct StudyReviewEvent: Sendable, Hashable {
     init(
         id: UUID = UUID(),
         cardID: UUID,
+        senseID: UUID,
         deckID: UUID,
         deckVersionID: UUID? = nil,
         mode: StudyMode,
@@ -37,6 +39,7 @@ nonisolated struct StudyReviewEvent: Sendable, Hashable {
     ) {
         self.id = id
         self.cardID = cardID
+        self.senseID = senseID
         self.deckID = deckID
         self.deckVersionID = deckVersionID
         self.mode = mode
@@ -53,6 +56,7 @@ nonisolated struct StudyReviewEvent: Sendable, Hashable {
 nonisolated struct PracticeReviewEvent: Sendable, Hashable {
     let id: UUID
     let cardID: UUID
+    let senseID: UUID
     let deckID: UUID
     let deckVersionID: UUID?
     let mode: StudyMode
@@ -64,6 +68,7 @@ nonisolated struct PracticeReviewEvent: Sendable, Hashable {
     init(
         id: UUID = UUID(),
         cardID: UUID,
+        senseID: UUID,
         deckID: UUID,
         deckVersionID: UUID? = nil,
         mode: StudyMode,
@@ -74,6 +79,7 @@ nonisolated struct PracticeReviewEvent: Sendable, Hashable {
     ) {
         self.id = id
         self.cardID = cardID
+        self.senseID = senseID
         self.deckID = deckID
         self.deckVersionID = deckVersionID
         self.mode = mode
@@ -128,6 +134,7 @@ nonisolated struct StudyTimeBreakdown: Hashable, Sendable {
 
 nonisolated struct WeakCardStat: Identifiable, Hashable, Sendable {
     let cardID: UUID
+    let senseID: UUID
     let deckID: UUID
     let word: String
     let translation: String
@@ -135,7 +142,7 @@ nonisolated struct WeakCardStat: Identifiable, Hashable, Sendable {
     let reviewedCount: Int
     let lastFailedAt: Date?
 
-    var id: UUID { cardID }
+    var id: UUID { senseID }
     var failureRate: Double {
         reviewedCount == 0 ? 0 : Double(failedCount) / Double(reviewedCount)
     }

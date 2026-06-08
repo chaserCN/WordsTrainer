@@ -212,14 +212,19 @@ struct ClozeMCQStudyView: View {
 
     private func previewPair(for option: String) -> MatchingPair? {
         if optionsMatch(option, card.effectiveClozeAnswer) {
-            return MatchingPair(cardID: card.id, card: card, senseIndex: 0, translation: card.translation)
+            return MatchingPair(
+                cardID: card.id,
+                senseID: card.primarySenseID ?? card.id,
+                card: card,
+                translation: card.translation
+            )
         }
 
         guard let previewCard = previewCard(for: option) else { return nil }
         return MatchingPair(
             cardID: previewCard.id,
+            senseID: previewCard.primarySenseID ?? previewCard.id,
             card: previewCard,
-            senseIndex: 0,
             translation: previewCard.translation
         )
     }

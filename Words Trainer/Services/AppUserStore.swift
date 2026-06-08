@@ -526,19 +526,19 @@ final class AppUserStore {
         }
         for card in content.cards {
             guard let deckID = versionDeckIDs[card.deckVersionId] else { continue }
-            if let mediaID = card.imageMediaId {
-                mediaScopes[mediaID, default: []].insert(.deck(deckID))
-            }
             if let mediaID = card.audioWordMediaId {
                 mediaScopes[mediaID, default: []].insert(.deck(deckID))
             }
         }
-        for example in content.examples {
-            guard let deckID = versionDeckIDs[example.deckVersionId] else { continue }
-            if let mediaID = example.imageMediaId {
+        for sense in content.senses {
+            guard let deckID = versionDeckIDs[sense.deckVersionId] else { continue }
+            if let mediaID = sense.imageMediaId {
                 mediaScopes[mediaID, default: []].insert(.deck(deckID))
             }
-            if let mediaID = example.audioExampleMediaId {
+        }
+        for question in content.sentenceQuestions {
+            guard let deckID = versionDeckIDs[question.deckVersionId] else { continue }
+            if let mediaID = question.audioAnswerMediaId {
                 mediaScopes[mediaID, default: []].insert(.deck(deckID))
             }
         }

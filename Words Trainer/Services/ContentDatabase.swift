@@ -27,7 +27,7 @@ struct ContentCacheCleanupResult {
 }
 
 struct PendingProgressSnapshot {
-    let cardID: UUID
+    let senseID: UUID
     let updatedAt: Date
 }
 
@@ -53,7 +53,7 @@ struct PendingServerSyncBatch {
     let payload: ServerSyncEventsPayload
     let reviewIDs: [UUID]
     let practiceReviewIDs: [UUID]
-    let progressCardIDs: [UUID]
+    let progressSenseIDs: [UUID]
     let matchingDeckIDs: [UUID]
     let matchingAttemptIDs: [UUID]
     let deckPreferenceDeckIDs: [UUID]
@@ -67,7 +67,7 @@ struct PendingServerSyncBatch {
         payload.isEmpty
             && reviewIDs.isEmpty
             && practiceReviewIDs.isEmpty
-            && progressCardIDs.isEmpty
+            && progressSenseIDs.isEmpty
             && matchingDeckIDs.isEmpty
             && matchingAttemptIDs.isEmpty
             && deckPreferenceDeckIDs.isEmpty
@@ -216,7 +216,9 @@ nonisolated final class ContentDatabase {
         )
         let importedContentVersionIDs = Set(
             bootstrap.content.cards.map(\.deckVersionId)
+                + bootstrap.content.senses.map(\.deckVersionId)
                 + bootstrap.content.examples.map(\.deckVersionId)
+                + bootstrap.content.sentenceQuestions.map(\.deckVersionId)
                 + bootstrap.content.forms.map(\.deckVersionId)
                 + bootstrap.content.distractors.map(\.deckVersionId)
         )
@@ -233,7 +235,9 @@ nonisolated final class ContentDatabase {
             try upsertServerDeckPreferences(bootstrap.assignments, selectedUserID: selectedUserID)
             try upsertServerUserSettings(bootstrap.userSettings, selectedUserID: selectedUserID)
             try upsertCards(bootstrap.content.cards, versionDeckIDs: versionDeckIDs)
+            try upsertSenses(bootstrap.content.senses)
             try upsertExamples(bootstrap.content.examples)
+            try upsertSentenceQuestions(bootstrap.content.sentenceQuestions)
             try upsertForms(bootstrap.content.forms)
             try upsertDistractors(bootstrap.content.distractors)
             try markContentVersionsImported(importedContentVersionIDs, versionDeckIDs: versionDeckIDs)
@@ -265,7 +269,9 @@ nonisolated final class ContentDatabase {
         )
         let importedContentVersionIDs = Set(
             changes.content.cards.map(\.deckVersionId)
+                + changes.content.senses.map(\.deckVersionId)
                 + changes.content.examples.map(\.deckVersionId)
+                + changes.content.sentenceQuestions.map(\.deckVersionId)
                 + changes.content.forms.map(\.deckVersionId)
                 + changes.content.distractors.map(\.deckVersionId)
         )
@@ -282,7 +288,9 @@ nonisolated final class ContentDatabase {
             try upsertServerDeckPreferences(changes.assignments, selectedUserID: selectedUserID)
             try upsertServerUserSettings(changes.userSettings, selectedUserID: selectedUserID)
             try upsertCards(changes.content.cards, versionDeckIDs: versionDeckIDs)
+            try upsertSenses(changes.content.senses)
             try upsertExamples(changes.content.examples)
+            try upsertSentenceQuestions(changes.content.sentenceQuestions)
             try upsertForms(changes.content.forms)
             try upsertDistractors(changes.content.distractors)
             try markContentVersionsImported(importedContentVersionIDs, versionDeckIDs: versionDeckIDs)
@@ -462,16 +470,14 @@ nonisolated final class ContentDatabase {
         FROM (
             SELECT avatar_media_id AS media_id FROM decks WHERE id = ?
             UNION
-            SELECT image_media_id AS media_id FROM cards WHERE deck_id = ?
-            UNION
             SELECT audio_word_media_id AS media_id FROM cards WHERE deck_id = ?
             UNION
-            SELECT card_examples.image_media_id AS media_id FROM card_examples
-            JOIN cards ON cards.id = card_examples.card_id
+            SELECT card_senses.image_media_id AS media_id FROM card_senses
+            JOIN cards ON cards.id = card_senses.card_id
             WHERE cards.deck_id = ?
             UNION
-            SELECT card_examples.audio_example_media_id AS media_id FROM card_examples
-            JOIN cards ON cards.id = card_examples.card_id
+            SELECT sentence_questions.audio_answer_media_id AS media_id FROM sentence_questions
+            JOIN cards ON cards.id = sentence_questions.card_id
             WHERE cards.deck_id = ?
         )
         WHERE media_id IS NOT NULL
@@ -481,7 +487,7 @@ nonisolated final class ContentDatabase {
             throw ContentDatabaseError.queryFailed
         }
         defer { sqlite3_finalize(statement) }
-        for index in 1...5 {
+        for index in 1...4 {
             try bind(statement, index: Int32(index), uuid: deckID)
         }
         var ids: Set<UUID> = []
@@ -536,8 +542,8 @@ nonisolated final class ContentDatabase {
 
     func progressMap(deckID: UUID) throws -> [UUID: CardProgress] {
         let sql = """
-        SELECT card_id, fsrs_data, updated_at
-        FROM card_progress
+        SELECT sense_id, fsrs_data, updated_at
+        FROM sense_progress
         WHERE user_id = ? AND deck_id = ?
         """
         var statement: OpaquePointer?
@@ -550,17 +556,17 @@ nonisolated final class ContentDatabase {
         var map: [UUID: CardProgress] = [:]
         var repairs: [CardProgress] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            guard let cardID = uuidColumn(statement, index: 0),
+            guard let senseID = uuidColumn(statement, index: 0),
                   let blob = sqlite3_column_blob(statement, 1) else { continue }
             let length = Int(sqlite3_column_bytes(statement, 1))
             let data = Data(bytes: blob, count: length)
             let updatedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 2))
             do {
                 let fsrsCard = try JSONDecoder().decode(Card.self, from: data)
-                map[cardID] = CardProgress(cardID: cardID, fsrsCard: fsrsCard, updatedAt: updatedAt)
+                map[senseID] = CardProgress(senseID: senseID, fsrsCard: fsrsCard, updatedAt: updatedAt)
             } catch {
-                let repaired = CardProgress.newCard(cardID: cardID, now: .now)
-                map[cardID] = repaired
+                let repaired = CardProgress.newSense(senseID: senseID, now: .now)
+                map[senseID] = repaired
                 repairs.append(repaired)
             }
         }
@@ -607,9 +613,12 @@ nonisolated final class ContentDatabase {
     func saveProgress(deckID: UUID, progress: CardProgress) throws {
         let fsrsData = try JSONEncoder().encode(progress.fsrsCard)
         let sql = """
-        INSERT INTO card_progress (user_id, card_id, deck_id, fsrs_data, updated_at, synced_at)
-        VALUES (?, ?, ?, ?, ?, NULL)
-        ON CONFLICT(user_id, card_id) DO UPDATE SET
+        INSERT INTO sense_progress (user_id, sense_id, card_id, deck_id, fsrs_data, updated_at, synced_at)
+        SELECT ?, ?, card_id, ?, ?, ?, NULL
+        FROM card_senses
+        WHERE id = ?
+        ON CONFLICT(user_id, sense_id) DO UPDATE SET
+            card_id = excluded.card_id,
             deck_id = excluded.deck_id,
             fsrs_data = excluded.fsrs_data,
             updated_at = excluded.updated_at,
@@ -621,13 +630,14 @@ nonisolated final class ContentDatabase {
         }
         defer { sqlite3_finalize(statement) }
         try bind(statement, index: 1, uuid: userID)
-        try bind(statement, index: 2, uuid: progress.cardID)
+        try bind(statement, index: 2, uuid: progress.senseID)
         try bind(statement, index: 3, uuid: deckID)
         try fsrsData.withUnsafeBytes { raw in
             guard sqlite3_bind_blob(statement, 4, raw.baseAddress, Int32(fsrsData.count), sqliteTransient) == SQLITE_OK else {
                 throw ContentDatabaseError.queryFailed
             }
         }
+        try bind(statement, index: 6, uuid: progress.senseID)
         guard sqlite3_bind_double(statement, 5, progress.updatedAt.timeIntervalSince1970) == SQLITE_OK,
               sqlite3_step(statement) == SQLITE_DONE else {
             throw ContentDatabaseError.queryFailed
@@ -659,9 +669,9 @@ nonisolated final class ContentDatabase {
         let deckVersionID = try event.deckVersionID ?? contentVersionID(deckID: event.deckID)
         let sql = """
         INSERT INTO study_reviews (
-            id, user_id, card_id, deck_id, deck_version_id, mode, outcome, source, reviewed_at,
+            id, user_id, card_id, sense_id, deck_id, deck_version_id, mode, outcome, source, reviewed_at,
             duration_ms, was_new, previous_state, new_state, synced_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -671,28 +681,29 @@ nonisolated final class ContentDatabase {
         try bind(statement, index: 1, uuid: event.id)
         try bind(statement, index: 2, uuid: userID)
         try bind(statement, index: 3, uuid: event.cardID)
-        try bind(statement, index: 4, uuid: event.deckID)
-        try bind(statement, index: 5, uuid: deckVersionID)
-        try bind(statement, index: 6, text: event.mode.rawValue)
-        try bind(statement, index: 7, text: event.outcome.databaseValue)
-        try bind(statement, index: 8, text: event.source.rawValue)
-        guard sqlite3_bind_double(statement, 9, event.reviewedAt.timeIntervalSince1970) == SQLITE_OK else {
+        try bind(statement, index: 4, uuid: event.senseID)
+        try bind(statement, index: 5, uuid: event.deckID)
+        try bind(statement, index: 6, uuid: deckVersionID)
+        try bind(statement, index: 7, text: event.mode.rawValue)
+        try bind(statement, index: 8, text: event.outcome.databaseValue)
+        try bind(statement, index: 9, text: event.source.rawValue)
+        guard sqlite3_bind_double(statement, 10, event.reviewedAt.timeIntervalSince1970) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
         if let durationMS = event.durationMS {
-            guard sqlite3_bind_int(statement, 10, Int32(durationMS)) == SQLITE_OK else {
+            guard sqlite3_bind_int(statement, 11, Int32(durationMS)) == SQLITE_OK else {
                 throw ContentDatabaseError.queryFailed
             }
         } else {
-            guard sqlite3_bind_null(statement, 10) == SQLITE_OK else {
+            guard sqlite3_bind_null(statement, 11) == SQLITE_OK else {
                 throw ContentDatabaseError.queryFailed
             }
         }
-        guard sqlite3_bind_int(statement, 11, event.wasNew ? 1 : 0) == SQLITE_OK else {
+        guard sqlite3_bind_int(statement, 12, event.wasNew ? 1 : 0) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
-        try bind(statement, index: 12, text: event.previousState)
-        try bind(statement, index: 13, text: event.newState)
+        try bind(statement, index: 13, text: event.previousState)
+        try bind(statement, index: 14, text: event.newState)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw ContentDatabaseError.queryFailed
         }
@@ -703,8 +714,8 @@ nonisolated final class ContentDatabase {
         let deckVersionID = try event.deckVersionID ?? contentVersionID(deckID: event.deckID)
         let sql = """
         INSERT INTO practice_reviews (
-            id, user_id, card_id, deck_id, deck_version_id, mode, outcome, source, practiced_at, duration_ms, synced_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            id, user_id, card_id, sense_id, deck_id, deck_version_id, mode, outcome, source, practiced_at, duration_ms, synced_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
         ON CONFLICT(id) DO NOTHING
         """
         var statement: OpaquePointer?
@@ -715,21 +726,22 @@ nonisolated final class ContentDatabase {
         try bind(statement, index: 1, uuid: event.id)
         try bind(statement, index: 2, uuid: userID)
         try bind(statement, index: 3, uuid: event.cardID)
-        try bind(statement, index: 4, uuid: event.deckID)
-        try bind(statement, index: 5, uuid: deckVersionID)
-        try bind(statement, index: 6, text: event.mode.rawValue)
-        try bind(statement, index: 7, text: event.outcome.databaseValue)
-        try bind(statement, index: 8, text: event.source.rawValue)
-        guard sqlite3_bind_double(statement, 9, event.practicedAt.timeIntervalSince1970) == SQLITE_OK else {
+        try bind(statement, index: 4, uuid: event.senseID)
+        try bind(statement, index: 5, uuid: event.deckID)
+        try bind(statement, index: 6, uuid: deckVersionID)
+        try bind(statement, index: 7, text: event.mode.rawValue)
+        try bind(statement, index: 8, text: event.outcome.databaseValue)
+        try bind(statement, index: 9, text: event.source.rawValue)
+        guard sqlite3_bind_double(statement, 10, event.practicedAt.timeIntervalSince1970) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
-        try bind(statement, index: 10, int: event.durationMS)
+        try bind(statement, index: 11, int: event.durationMS)
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw ContentDatabaseError.queryFailed
         }
     }
 
-    func reviewedCardIDs(
+    func reviewedSenseIDs(
         day: Date = .now,
         deckID: UUID? = nil,
         source: StudyReviewSource? = nil,
@@ -738,7 +750,7 @@ nonisolated final class ContentDatabase {
         let start = StudyDay.start(for: day, calendar: calendar)
         let end = StudyDay.end(for: day, calendar: calendar)
         var sql = """
-        SELECT card_id, MAX(reviewed_at) AS last_reviewed_at
+        SELECT sense_id, MAX(reviewed_at) AS last_reviewed_at
         FROM study_reviews
         WHERE user_id = ? AND reviewed_at >= ? AND reviewed_at < ?
         """
@@ -752,7 +764,7 @@ nonisolated final class ContentDatabase {
         }
         sql += """
 
-        GROUP BY card_id
+        GROUP BY sense_id
         ORDER BY last_reviewed_at DESC
         """
 
@@ -773,12 +785,12 @@ nonisolated final class ContentDatabase {
             try bind(statement, index: nextIndex, text: source.rawValue)
         }
 
-        var cardIDs: [UUID] = []
+        var senseIDs: [UUID] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            guard let cardID = uuidColumn(statement, index: 0) else { continue }
-            cardIDs.append(cardID)
+            guard let senseID = uuidColumn(statement, index: 0) else { continue }
+            senseIDs.append(senseID)
         }
-        return cardIDs
+        return senseIDs
     }
 
     func studyActivity(since startDate: Date) throws -> [StudyActivityDay] {
@@ -968,28 +980,34 @@ nonisolated final class ContentDatabase {
         let sql = """
         SELECT
             cards.id,
+            study_reviews.sense_id,
             cards.deck_id,
-            cards.display_word,
-            cards.translation,
+            COALESCE(reviewed_sense.display_pattern, cards.display_word) AS display_word,
+            reviewed_sense.translation,
             SUM(CASE WHEN study_reviews.outcome IN ('forgot', 'incorrect') THEN 1 ELSE 0 END) AS failed_count,
             COUNT(study_reviews.id) AS reviewed_count,
             MAX(CASE WHEN study_reviews.outcome IN ('forgot', 'incorrect') THEN study_reviews.reviewed_at ELSE NULL END) AS last_failed_at,
-            card_progress.fsrs_data
+            sense_progress.fsrs_data
         FROM study_reviews
         JOIN cards ON cards.id = study_reviews.card_id
         JOIN decks ON decks.id = study_reviews.deck_id
         JOIN user_deck_assignments ON user_deck_assignments.user_id = study_reviews.user_id
             AND user_deck_assignments.deck_id = study_reviews.deck_id
             AND user_deck_assignments.status = 'active'
-        LEFT JOIN card_progress ON card_progress.user_id = study_reviews.user_id
-            AND card_progress.card_id = cards.id
-            AND card_progress.deck_id = cards.deck_id
+        JOIN card_senses AS reviewed_sense
+            ON reviewed_sense.id = study_reviews.sense_id
+            AND reviewed_sense.card_id = cards.id
+            AND reviewed_sense.status = 'active'
+        LEFT JOIN sense_progress ON sense_progress.user_id = study_reviews.user_id
+            AND sense_progress.sense_id = study_reviews.sense_id
+            AND sense_progress.card_id = cards.id
+            AND sense_progress.deck_id = cards.deck_id
         LEFT JOIN user_deck_preferences ON user_deck_preferences.user_id = study_reviews.user_id
             AND user_deck_preferences.deck_id = study_reviews.deck_id
         WHERE study_reviews.user_id = ? AND cards.status = 'active' AND decks.status = 'active'
           AND COALESCE(user_deck_preferences.is_enabled, 1) = 1
           \(deckFilter)
-        GROUP BY cards.id, cards.deck_id, cards.display_word, cards.translation
+        GROUP BY cards.id, study_reviews.sense_id, cards.deck_id, display_word, reviewed_sense.translation
         HAVING failed_count > 0
         ORDER BY failed_count DESC, CAST(failed_count AS REAL) / reviewed_count DESC, last_failed_at DESC
         """
@@ -1005,27 +1023,29 @@ nonisolated final class ContentDatabase {
 
         var cards: [WeakCardStat] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            let failedCount = Int(sqlite3_column_int(statement, 4))
-            let reviewedCount = Int(sqlite3_column_int(statement, 5))
+            let failedCount = Int(sqlite3_column_int(statement, 5))
+            let reviewedCount = Int(sqlite3_column_int(statement, 6))
             guard try isCurrentWeakCard(
                 statement,
-                fsrsDataIndex: 7,
+                fsrsDataIndex: 8,
                 failedCount: failedCount,
                 reviewedCount: reviewedCount
             ) else { continue }
             guard let cardID = uuidColumn(statement, index: 0),
-                  let deckID = uuidColumn(statement, index: 1),
-                  let word = textColumn(statement, index: 2),
-                  let translation = textColumn(statement, index: 3) else { continue }
+                  let senseID = uuidColumn(statement, index: 1),
+                  let deckID = uuidColumn(statement, index: 2),
+                  let word = textColumn(statement, index: 3),
+                  let translation = textColumn(statement, index: 4) else { continue }
             let lastFailedAt: Date?
-            if sqlite3_column_type(statement, 6) == SQLITE_NULL {
+            if sqlite3_column_type(statement, 7) == SQLITE_NULL {
                 lastFailedAt = nil
             } else {
-                lastFailedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 6))
+                lastFailedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 7))
             }
             cards.append(
                 WeakCardStat(
                     cardID: cardID,
+                    senseID: senseID,
                     deckID: deckID,
                     word: word,
                     translation: translation,
@@ -1149,7 +1169,7 @@ nonisolated final class ContentDatabase {
             ),
             reviewIDs: reviews.ids,
             practiceReviewIDs: practiceReviews.snapshots.map(\.id),
-            progressCardIDs: progress.snapshots.map(\.cardID),
+            progressSenseIDs: progress.snapshots.map(\.senseID),
             matchingDeckIDs: matchingRecords.snapshots.map(\.deckID),
             matchingAttemptIDs: matchingAttempts.snapshots.map(\.id),
             deckPreferenceDeckIDs: deckPreferences.snapshots.map(\.deckID),
@@ -1173,6 +1193,9 @@ nonisolated final class ContentDatabase {
             let practiceReviewIDs = response.map {
                 Set($0.acceptedPracticeReviewIds + $0.duplicatePracticeReviewIds + $0.rejectedPracticeReviewIds)
             }
+            let progressSenseIDs = response.map {
+                Set($0.progressSenseIds + $0.rejectedProgressSenseIds)
+            }
             let matchingAttemptIDs = response.map {
                 Set($0.acceptedMatchingAttemptIds + $0.duplicateMatchingAttemptIds + $0.rejectedMatchingAttemptIds)
             }
@@ -1183,7 +1206,7 @@ nonisolated final class ContentDatabase {
             for snapshot in batch.practiceReviewSnapshots where practiceReviewIDs?.contains(snapshot.id) ?? true {
                 try markPracticeReviewSynced(snapshot: snapshot, syncedAt: timestamp)
             }
-            for snapshot in batch.progressSnapshots {
+            for snapshot in batch.progressSnapshots where progressSenseIDs?.contains(snapshot.senseID) ?? true {
                 try markProgressSynced(snapshot: snapshot, syncedAt: timestamp)
             }
             for snapshot in batch.matchingSnapshots {
@@ -1208,7 +1231,7 @@ nonisolated final class ContentDatabase {
     private func pendingReviewEvents(limit: Int) throws -> (payload: [ServerReviewEventPayload], ids: [UUID]) {
         let sql = """
         SELECT study_reviews.id, study_reviews.deck_id, study_reviews.deck_version_id,
-               study_reviews.card_id, study_reviews.mode,
+               study_reviews.card_id, study_reviews.sense_id, study_reviews.mode,
                study_reviews.outcome, study_reviews.source, study_reviews.reviewed_at, study_reviews.duration_ms,
                study_reviews.was_new, study_reviews.previous_state, study_reviews.new_state
         FROM study_reviews
@@ -1231,14 +1254,15 @@ nonisolated final class ContentDatabase {
             guard let id = uuidColumn(statement, index: 0),
                   let deckID = uuidColumn(statement, index: 1),
                   let cardID = uuidColumn(statement, index: 3),
-                  let mode = textColumn(statement, index: 4),
-                  let outcome = textColumn(statement, index: 5) else { continue }
-            let source = textColumn(statement, index: 6) ?? StudyReviewSource.deckSession.rawValue
+                  let senseID = uuidColumn(statement, index: 4),
+                  let mode = textColumn(statement, index: 5),
+                  let outcome = textColumn(statement, index: 6) else { continue }
+            let source = textColumn(statement, index: 7) ?? StudyReviewSource.deckSession.rawValue
             let durationMS: Int?
-            if sqlite3_column_type(statement, 8) == SQLITE_NULL {
+            if sqlite3_column_type(statement, 9) == SQLITE_NULL {
                 durationMS = nil
             } else {
-                durationMS = Int(sqlite3_column_int(statement, 8))
+                durationMS = Int(sqlite3_column_int(statement, 9))
             }
             ids.append(id)
             payload.append(
@@ -1247,14 +1271,15 @@ nonisolated final class ContentDatabase {
                     deckId: deckID,
                     deckVersionId: uuidColumn(statement, index: 2),
                     cardId: cardID,
+                    senseId: senseID,
                     mode: mode,
                     outcome: outcome,
                     source: source,
-                    reviewedAt: isoString(Date(timeIntervalSince1970: sqlite3_column_double(statement, 7))),
+                    reviewedAt: isoString(Date(timeIntervalSince1970: sqlite3_column_double(statement, 8))),
                     durationMs: durationMS,
-                    wasNew: sqlite3_column_int(statement, 9) != 0,
-                    previousState: textColumn(statement, index: 10),
-                    newState: textColumn(statement, index: 11)
+                    wasNew: sqlite3_column_int(statement, 10) != 0,
+                    previousState: textColumn(statement, index: 11),
+                    newState: textColumn(statement, index: 12)
                 )
             )
         }
@@ -1267,7 +1292,7 @@ nonisolated final class ContentDatabase {
     ) {
         let sql = """
         SELECT practice_reviews.id, practice_reviews.deck_id, practice_reviews.deck_version_id,
-               practice_reviews.card_id,
+               practice_reviews.card_id, practice_reviews.sense_id,
                practice_reviews.mode, practice_reviews.outcome, practice_reviews.source,
                practice_reviews.practiced_at, practice_reviews.duration_ms
         FROM practice_reviews
@@ -1290,14 +1315,15 @@ nonisolated final class ContentDatabase {
             guard let id = uuidColumn(statement, index: 0),
                   let deckID = uuidColumn(statement, index: 1),
                   let cardID = uuidColumn(statement, index: 3),
-                  let mode = textColumn(statement, index: 4),
-                  let outcome = textColumn(statement, index: 5),
-                  let source = textColumn(statement, index: 6) else { continue }
+                  let senseID = uuidColumn(statement, index: 4),
+                  let mode = textColumn(statement, index: 5),
+                  let outcome = textColumn(statement, index: 6),
+                  let source = textColumn(statement, index: 7) else { continue }
             let durationMS: Int?
-            if sqlite3_column_type(statement, 8) == SQLITE_NULL {
+            if sqlite3_column_type(statement, 9) == SQLITE_NULL {
                 durationMS = nil
             } else {
-                durationMS = Int(sqlite3_column_int(statement, 8))
+                durationMS = Int(sqlite3_column_int(statement, 9))
             }
             snapshots.append(PendingPracticeReviewSnapshot(id: id))
             payload.append(
@@ -1306,10 +1332,11 @@ nonisolated final class ContentDatabase {
                     deckId: deckID,
                     deckVersionId: uuidColumn(statement, index: 2),
                     cardId: cardID,
+                    senseId: senseID,
                     mode: mode,
                     outcome: outcome,
                     source: source,
-                    practicedAt: isoString(Date(timeIntervalSince1970: sqlite3_column_double(statement, 7))),
+                    practicedAt: isoString(Date(timeIntervalSince1970: sqlite3_column_double(statement, 8))),
                     durationMs: durationMS
                 )
             )
@@ -1319,11 +1346,12 @@ nonisolated final class ContentDatabase {
 
     private func pendingProgressItems(limit: Int) throws -> (payload: [ServerProgressPayload], snapshots: [PendingProgressSnapshot]) {
         let sql = """
-        SELECT card_progress.card_id, card_progress.deck_id, card_progress.fsrs_data, card_progress.updated_at
-        FROM card_progress
-        WHERE card_progress.user_id = ?
-          AND card_progress.synced_at IS NULL
-        ORDER BY card_progress.updated_at
+        SELECT sense_progress.sense_id, sense_progress.card_id, sense_progress.deck_id,
+               sense_progress.fsrs_data, sense_progress.updated_at
+        FROM sense_progress
+        WHERE sense_progress.user_id = ?
+          AND sense_progress.synced_at IS NULL
+        ORDER BY sense_progress.updated_at
         LIMIT ?
         """
         var statement: OpaquePointer?
@@ -1337,26 +1365,28 @@ nonisolated final class ContentDatabase {
         var snapshots: [PendingProgressSnapshot] = []
         var repairs: [(deckID: UUID, progress: CardProgress)] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            guard let cardID = uuidColumn(statement, index: 0),
-                  let deckID = uuidColumn(statement, index: 1),
-                  let blob = sqlite3_column_blob(statement, 2) else { continue }
-            let length = Int(sqlite3_column_bytes(statement, 2))
+            guard let senseID = uuidColumn(statement, index: 0),
+                  let cardID = uuidColumn(statement, index: 1),
+                  let deckID = uuidColumn(statement, index: 2),
+                  let blob = sqlite3_column_blob(statement, 3) else { continue }
+            let length = Int(sqlite3_column_bytes(statement, 3))
             let data = Data(bytes: blob, count: length)
             let fsrsCard: Card
             do {
                 fsrsCard = try JSONDecoder().decode(Card.self, from: data)
             } catch {
-                repairs.append((deckID, CardProgress.newCard(cardID: cardID, now: .now)))
+                repairs.append((deckID, CardProgress.newSense(senseID: senseID, now: .now)))
                 continue
             }
             let jsonObject = try JSONSerialization.jsonObject(with: data)
             guard let fsrsJSON = JSONValue(jsonObject: jsonObject) else {
                 throw ContentDatabaseError.queryFailed
             }
-            let updatedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 3))
-            snapshots.append(PendingProgressSnapshot(cardID: cardID, updatedAt: updatedAt))
+            let updatedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))
+            snapshots.append(PendingProgressSnapshot(senseID: senseID, updatedAt: updatedAt))
             payload.append(
                 ServerProgressPayload(
+                    senseId: senseID,
                     cardId: cardID,
                     deckId: deckID,
                     fsrsData: fsrsJSON,
@@ -1513,8 +1543,8 @@ nonisolated final class ContentDatabase {
 
     private func markProgressSynced(snapshot: PendingProgressSnapshot, syncedAt: Double) throws {
         try markSynced(
-            sql: "UPDATE card_progress SET synced_at = ? WHERE user_id = ? AND card_id = ? AND updated_at = ?",
-            id: snapshot.cardID,
+            sql: "UPDATE sense_progress SET synced_at = ? WHERE user_id = ? AND sense_id = ? AND updated_at = ?",
+            id: snapshot.senseID,
             syncedAt: syncedAt,
             unchangedAt: snapshot.updatedAt.timeIntervalSince1970
         )
@@ -1741,11 +1771,11 @@ nonisolated final class ContentDatabase {
         let deckID = deckID.databaseString
         let statements = [
             """
-            DELETE FROM example_distractors
-            WHERE example_id IN (
-                SELECT card_examples.id
-                FROM card_examples
-                JOIN cards ON cards.id = card_examples.card_id
+            DELETE FROM question_distractors
+            WHERE sense_id IN (
+                SELECT sentence_questions.sense_id
+                FROM sentence_questions
+                JOIN cards ON cards.id = sentence_questions.card_id
                 WHERE cards.deck_id = '\(deckID)'
             )
             """,
@@ -1755,6 +1785,14 @@ nonisolated final class ContentDatabase {
             """,
             """
             DELETE FROM card_examples
+            WHERE card_id IN (SELECT id FROM cards WHERE deck_id = '\(deckID)')
+            """,
+            """
+            DELETE FROM sentence_questions
+            WHERE card_id IN (SELECT id FROM cards WHERE deck_id = '\(deckID)')
+            """,
+            """
+            DELETE FROM card_senses
             WHERE card_id IN (SELECT id FROM cards WHERE deck_id = '\(deckID)')
             """,
             "UPDATE cards SET status = 'inactive' WHERE deck_id = '\(deckID)'",
@@ -1799,13 +1837,15 @@ nonisolated final class ContentDatabase {
         )
         """
         let orphanCards = "SELECT cards.id FROM cards WHERE cards.deck_id IN (\(orphanDecks))"
-        let orphanExamples = "SELECT card_examples.id FROM card_examples WHERE card_examples.card_id IN (\(orphanCards))"
+        let orphanSenses = "SELECT card_senses.id FROM card_senses WHERE card_senses.card_id IN (\(orphanCards))"
         let statements = [
-            "DELETE FROM example_distractors WHERE example_id IN (\(orphanExamples))",
-            "DELETE FROM example_distractors WHERE source_card_id IN (\(orphanCards))",
+            "DELETE FROM question_distractors WHERE sense_id IN (\(orphanSenses))",
+            "DELETE FROM question_distractors WHERE source_card_id IN (\(orphanCards))",
             "DELETE FROM word_forms WHERE card_id IN (\(orphanCards))",
             "DELETE FROM card_examples WHERE card_id IN (\(orphanCards))",
-            "DELETE FROM card_progress WHERE deck_id IN (\(orphanDecks))",
+            "DELETE FROM sentence_questions WHERE card_id IN (\(orphanCards))",
+            "DELETE FROM card_senses WHERE card_id IN (\(orphanCards))",
+            "DELETE FROM sense_progress WHERE deck_id IN (\(orphanDecks))",
             "DELETE FROM deck_daily_usage WHERE deck_id IN (\(orphanDecks))",
             "DELETE FROM deck_matching_records WHERE deck_id IN (\(orphanDecks))",
             "DELETE FROM user_deck_preferences WHERE deck_id IN (\(orphanDecks))",
@@ -1821,13 +1861,11 @@ nonisolated final class ContentDatabase {
         WHERE id NOT IN (
             SELECT avatar_media_id FROM decks WHERE avatar_media_id IS NOT NULL
             UNION
-            SELECT image_media_id FROM cards WHERE image_media_id IS NOT NULL
-            UNION
             SELECT audio_word_media_id FROM cards WHERE audio_word_media_id IS NOT NULL
             UNION
-            SELECT image_media_id FROM card_examples WHERE image_media_id IS NOT NULL
+            SELECT image_media_id FROM card_senses WHERE image_media_id IS NOT NULL
             UNION
-            SELECT audio_example_media_id FROM card_examples WHERE audio_example_media_id IS NOT NULL
+            SELECT audio_answer_media_id FROM sentence_questions WHERE audio_answer_media_id IS NOT NULL
         )
         """
         try exec(sql)
@@ -1838,26 +1876,19 @@ nonisolated final class ContentDatabase {
             guard let deckID = versionDeckIDs[card.deckVersionId] else { continue }
             let sql = """
             INSERT INTO cards (
-                id, deck_id, status, lemma, display_word, part_of_speech, translation,
-                short_definition, memory_hint, etymology, usage_note, synonym_note,
-                grammar_note, notes, image_media_id, audio_word_media_id
+                id, deck_id, status, lemma, display_word, part_of_speech, etymology,
+                notes, primary_sense_id, audio_word_media_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 deck_id = excluded.deck_id,
                 status = excluded.status,
                 lemma = excluded.lemma,
                 display_word = excluded.display_word,
                 part_of_speech = excluded.part_of_speech,
-                translation = excluded.translation,
-                short_definition = excluded.short_definition,
-                memory_hint = excluded.memory_hint,
                 etymology = excluded.etymology,
-                usage_note = excluded.usage_note,
-                synonym_note = excluded.synonym_note,
-                grammar_note = excluded.grammar_note,
                 notes = excluded.notes,
-                image_media_id = excluded.image_media_id,
+                primary_sense_id = excluded.primary_sense_id,
                 audio_word_media_id = excluded.audio_word_media_id
             """
             var statement: OpaquePointer?
@@ -1871,16 +1902,45 @@ nonisolated final class ContentDatabase {
             try bind(statement, index: 4, text: card.lemma)
             try bind(statement, index: 5, text: card.displayWord)
             try bind(statement, index: 6, text: card.partOfSpeech)
-            try bind(statement, index: 7, text: card.translation)
-            try bind(statement, index: 8, text: card.shortDefinition)
-            try bind(statement, index: 9, text: card.memoryHint)
-            try bind(statement, index: 10, text: card.etymology)
-            try bind(statement, index: 11, text: card.usageNote)
-            try bind(statement, index: 12, text: card.synonymNote)
-            try bind(statement, index: 13, text: card.grammarNote)
-            try bind(statement, index: 14, text: card.notes)
-            try bind(statement, index: 15, uuid: card.imageMediaId)
-            try bind(statement, index: 16, uuid: card.audioWordMediaId)
+            try bind(statement, index: 7, text: card.etymology)
+            try bind(statement, index: 8, text: card.notes)
+            try bind(statement, index: 9, uuid: card.primarySenseId)
+            try bind(statement, index: 10, uuid: card.audioWordMediaId)
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw ContentDatabaseError.queryFailed
+            }
+        }
+    }
+
+    private func upsertSenses(_ senses: [ServerSenseContent]) throws {
+        for sense in senses {
+            let sql = """
+            INSERT INTO card_senses (
+                id, card_id, status, display_pattern, translation, note, image_media_id, sort_order
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                card_id = excluded.card_id,
+                status = excluded.status,
+                display_pattern = excluded.display_pattern,
+                translation = excluded.translation,
+                note = excluded.note,
+                image_media_id = excluded.image_media_id,
+                sort_order = excluded.sort_order
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            defer { sqlite3_finalize(statement) }
+            try bind(statement, index: 1, uuid: sense.senseId)
+            try bind(statement, index: 2, uuid: sense.cardId)
+            try bind(statement, index: 3, text: localStatus(sense.status).rawValue)
+            try bind(statement, index: 4, text: sense.displayPattern)
+            try bind(statement, index: 5, text: sense.translation)
+            try bind(statement, index: 6, text: sense.note)
+            try bind(statement, index: 7, uuid: sense.imageMediaId)
+            try bind(statement, index: 8, int: sense.sortOrder ?? 0)
             guard sqlite3_step(statement) == SQLITE_DONE else {
                 throw ContentDatabaseError.queryFailed
             }
@@ -1891,19 +1951,15 @@ nonisolated final class ContentDatabase {
         for example in examples {
             let sql = """
             INSERT INTO card_examples (
-                id, card_id, template, answer, answer_form_key, translation, note,
-                image_media_id, audio_example_media_id, sort_order
+                sense_id, card_id, text, translation, note,
+                sort_order
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(sense_id) DO UPDATE SET
                 card_id = excluded.card_id,
-                template = excluded.template,
-                answer = excluded.answer,
-                answer_form_key = excluded.answer_form_key,
+                text = excluded.text,
                 translation = excluded.translation,
                 note = excluded.note,
-                image_media_id = excluded.image_media_id,
-                audio_example_media_id = excluded.audio_example_media_id,
                 sort_order = excluded.sort_order
             """
             var statement: OpaquePointer?
@@ -1911,16 +1967,43 @@ nonisolated final class ContentDatabase {
                 throw ContentDatabaseError.queryFailed
             }
             defer { sqlite3_finalize(statement) }
-            try bind(statement, index: 1, uuid: example.exampleId)
+            try bind(statement, index: 1, uuid: example.senseId)
             try bind(statement, index: 2, uuid: example.cardId)
-            try bind(statement, index: 3, text: example.template)
-            try bind(statement, index: 4, text: example.answer)
-            try bind(statement, index: 5, text: example.answerFormKey)
-            try bind(statement, index: 6, text: example.translation)
-            try bind(statement, index: 7, text: example.note)
-            try bind(statement, index: 8, uuid: example.imageMediaId)
-            try bind(statement, index: 9, uuid: example.audioExampleMediaId)
-            try bind(statement, index: 10, int: example.sortOrder ?? 0)
+            try bind(statement, index: 3, text: example.text)
+            try bind(statement, index: 4, text: example.translation)
+            try bind(statement, index: 5, text: example.note)
+            try bind(statement, index: 6, int: example.sortOrder ?? 0)
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                throw ContentDatabaseError.queryFailed
+            }
+        }
+    }
+
+    private func upsertSentenceQuestions(_ questions: [ServerSentenceQuestionContent]) throws {
+        for question in questions {
+            let sql = """
+            INSERT INTO sentence_questions (sense_id, card_id, template, answer, answer_form_key, audio_answer_media_id, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(sense_id) DO UPDATE SET
+                card_id = excluded.card_id,
+                template = excluded.template,
+                answer = excluded.answer,
+                answer_form_key = excluded.answer_form_key,
+                audio_answer_media_id = excluded.audio_answer_media_id,
+                sort_order = excluded.sort_order
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw ContentDatabaseError.queryFailed
+            }
+            defer { sqlite3_finalize(statement) }
+            try bind(statement, index: 1, uuid: question.senseId)
+            try bind(statement, index: 2, uuid: question.cardId)
+            try bind(statement, index: 3, text: question.template)
+            try bind(statement, index: 4, text: question.answer)
+            try bind(statement, index: 5, text: question.answerFormKey)
+            try bind(statement, index: 6, uuid: question.audioAnswerMediaId)
+            try bind(statement, index: 7, int: question.sortOrder ?? 0)
             guard sqlite3_step(statement) == SQLITE_DONE else {
                 throw ContentDatabaseError.queryFailed
             }
@@ -1953,10 +2036,10 @@ nonisolated final class ContentDatabase {
     private func upsertDistractors(_ distractors: [ServerDistractorContent]) throws {
         for distractor in distractors {
             let sql = """
-            INSERT INTO example_distractors (id, example_id, text, source_card_id, priority)
+            INSERT INTO question_distractors (id, sense_id, text, source_card_id, priority)
             VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
-                example_id = excluded.example_id,
+                sense_id = excluded.sense_id,
                 text = excluded.text,
                 source_card_id = excluded.source_card_id,
                 priority = excluded.priority
@@ -1967,7 +2050,7 @@ nonisolated final class ContentDatabase {
             }
             defer { sqlite3_finalize(statement) }
             try bind(statement, index: 1, uuid: distractor.id)
-            try bind(statement, index: 2, uuid: distractor.exampleId)
+            try bind(statement, index: 2, uuid: distractor.senseId)
             try bind(statement, index: 3, text: distractor.text)
             try bind(statement, index: 4, uuid: distractor.sourceCardId)
             try bind(statement, index: 5, int: distractor.priority ?? 0)
@@ -2000,15 +2083,16 @@ nonisolated final class ContentDatabase {
             let data = try JSONEncoder().encode(progress.fsrsData)
             let updatedAt = parseServerDate(progress.updatedAt)?.timeIntervalSince1970 ?? syncedAt
             let sql = """
-            INSERT INTO card_progress (user_id, card_id, deck_id, fsrs_data, updated_at, synced_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(user_id, card_id) DO UPDATE SET
+            INSERT INTO sense_progress (user_id, sense_id, card_id, deck_id, fsrs_data, updated_at, synced_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, sense_id) DO UPDATE SET
+                card_id = excluded.card_id,
                 deck_id = excluded.deck_id,
                 fsrs_data = excluded.fsrs_data,
                 updated_at = excluded.updated_at,
                 synced_at = excluded.synced_at
-            WHERE card_progress.synced_at IS NOT NULL
-               OR excluded.updated_at >= card_progress.updated_at
+            WHERE sense_progress.synced_at IS NOT NULL
+               OR excluded.updated_at >= sense_progress.updated_at
             """
             var statement: OpaquePointer?
             guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -2016,15 +2100,16 @@ nonisolated final class ContentDatabase {
             }
             defer { sqlite3_finalize(statement) }
             try bind(statement, index: 1, uuid: userID)
-            try bind(statement, index: 2, uuid: progress.cardId)
-            try bind(statement, index: 3, uuid: progress.deckId)
+            try bind(statement, index: 2, uuid: progress.senseId)
+            try bind(statement, index: 3, uuid: progress.cardId)
+            try bind(statement, index: 4, uuid: progress.deckId)
             try data.withUnsafeBytes { raw in
-                guard sqlite3_bind_blob(statement, 4, raw.baseAddress, Int32(data.count), sqliteTransient) == SQLITE_OK else {
+                guard sqlite3_bind_blob(statement, 5, raw.baseAddress, Int32(data.count), sqliteTransient) == SQLITE_OK else {
                     throw ContentDatabaseError.queryFailed
                 }
             }
-            guard sqlite3_bind_double(statement, 5, updatedAt) == SQLITE_OK,
-                  sqlite3_bind_double(statement, 6, syncedAt) == SQLITE_OK,
+            guard sqlite3_bind_double(statement, 6, updatedAt) == SQLITE_OK,
+                  sqlite3_bind_double(statement, 7, syncedAt) == SQLITE_OK,
                   sqlite3_step(statement) == SQLITE_DONE else {
                 throw ContentDatabaseError.queryFailed
             }
@@ -2032,17 +2117,17 @@ nonisolated final class ContentDatabase {
     }
 
     private func deleteSyncedProgressMissingFromServerSnapshot(_ progressItems: [ServerProgressPayload]) throws {
-        let cardIDs = Array(Set(progressItems.map(\.cardId))).sorted { $0.uuidString < $1.uuidString }
-        let placeholders = cardIDs.map { _ in "?" }.joined(separator: ", ")
+        let senseIDs = Array(Set(progressItems.map(\.senseId))).sorted { $0.uuidString < $1.uuidString }
+        let placeholders = senseIDs.map { _ in "?" }.joined(separator: ", ")
         let sql: String
-        if cardIDs.isEmpty {
-            sql = "DELETE FROM card_progress WHERE user_id = ? AND synced_at IS NOT NULL"
+        if senseIDs.isEmpty {
+            sql = "DELETE FROM sense_progress WHERE user_id = ? AND synced_at IS NOT NULL"
         } else {
             sql = """
-            DELETE FROM card_progress
+            DELETE FROM sense_progress
             WHERE user_id = ?
               AND synced_at IS NOT NULL
-              AND card_id NOT IN (\(placeholders))
+              AND sense_id NOT IN (\(placeholders))
             """
         }
         var statement: OpaquePointer?
@@ -2051,8 +2136,8 @@ nonisolated final class ContentDatabase {
         }
         defer { sqlite3_finalize(statement) }
         try bind(statement, index: 1, uuid: userID)
-        for (offset, cardID) in cardIDs.enumerated() {
-            try bind(statement, index: Int32(offset + 2), uuid: cardID)
+        for (offset, senseID) in senseIDs.enumerated() {
+            try bind(statement, index: Int32(offset + 2), uuid: senseID)
         }
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw ContentDatabaseError.queryFailed
@@ -2068,7 +2153,7 @@ nonisolated final class ContentDatabase {
     private func deleteSyncedStudyData(deckID: UUID?) throws {
         try deleteSyncedRows(table: "study_reviews", deckID: deckID)
         try deleteSyncedRows(table: "practice_reviews", deckID: deckID)
-        try deleteSyncedRows(table: "card_progress", deckID: deckID)
+        try deleteSyncedRows(table: "sense_progress", deckID: deckID)
         try deleteSyncedRows(table: "deck_matching_records", deckID: deckID)
         try deleteSyncedRows(table: "matching_attempts", deckID: deckID)
     }
@@ -2102,12 +2187,13 @@ nonisolated final class ContentDatabase {
             }
             let sql = """
             INSERT INTO study_reviews (
-                id, user_id, card_id, deck_id, deck_version_id, mode, outcome, source, reviewed_at,
+                id, user_id, card_id, sense_id, deck_id, deck_version_id, mode, outcome, source, reviewed_at,
                 duration_ms, was_new, previous_state, new_state, synced_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 user_id = excluded.user_id,
                 card_id = excluded.card_id,
+                sense_id = excluded.sense_id,
                 deck_id = excluded.deck_id,
                 deck_version_id = excluded.deck_version_id,
                 mode = excluded.mode,
@@ -2128,21 +2214,22 @@ nonisolated final class ContentDatabase {
             try bind(statement, index: 1, uuid: review.clientEventId)
             try bind(statement, index: 2, uuid: selectedUserID)
             try bind(statement, index: 3, uuid: review.cardId)
-            try bind(statement, index: 4, uuid: review.deckId)
-            try bind(statement, index: 5, uuid: review.deckVersionId)
-            try bind(statement, index: 6, text: review.mode)
-            try bind(statement, index: 7, text: review.outcome)
-            try bind(statement, index: 8, text: review.source ?? StudyReviewSource.deckSession.rawValue)
-            guard sqlite3_bind_double(statement, 9, reviewedAt.timeIntervalSince1970) == SQLITE_OK else {
+            try bind(statement, index: 4, uuid: review.senseId)
+            try bind(statement, index: 5, uuid: review.deckId)
+            try bind(statement, index: 6, uuid: review.deckVersionId)
+            try bind(statement, index: 7, text: review.mode)
+            try bind(statement, index: 8, text: review.outcome)
+            try bind(statement, index: 9, text: review.source ?? StudyReviewSource.deckSession.rawValue)
+            guard sqlite3_bind_double(statement, 10, reviewedAt.timeIntervalSince1970) == SQLITE_OK else {
                 throw ContentDatabaseError.queryFailed
             }
-            try bind(statement, index: 10, int: review.durationMs)
-            guard sqlite3_bind_int(statement, 11, review.wasNew ? 1 : 0) == SQLITE_OK else {
+            try bind(statement, index: 11, int: review.durationMs)
+            guard sqlite3_bind_int(statement, 12, review.wasNew ? 1 : 0) == SQLITE_OK else {
                 throw ContentDatabaseError.queryFailed
             }
-            try bind(statement, index: 12, text: review.previousState)
-            try bind(statement, index: 13, text: review.newState)
-            guard sqlite3_bind_double(statement, 14, syncedAt) == SQLITE_OK,
+            try bind(statement, index: 13, text: review.previousState)
+            try bind(statement, index: 14, text: review.newState)
+            guard sqlite3_bind_double(statement, 15, syncedAt) == SQLITE_OK,
                   sqlite3_step(statement) == SQLITE_DONE else {
                 throw ContentDatabaseError.queryFailed
             }
@@ -2160,11 +2247,12 @@ nonisolated final class ContentDatabase {
             }
             let sql = """
             INSERT INTO practice_reviews (
-                id, user_id, card_id, deck_id, deck_version_id, mode, outcome, source, practiced_at, duration_ms, synced_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, user_id, card_id, sense_id, deck_id, deck_version_id, mode, outcome, source, practiced_at, duration_ms, synced_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 user_id = excluded.user_id,
                 card_id = excluded.card_id,
+                sense_id = excluded.sense_id,
                 deck_id = excluded.deck_id,
                 deck_version_id = excluded.deck_version_id,
                 mode = excluded.mode,
@@ -2182,16 +2270,17 @@ nonisolated final class ContentDatabase {
             try bind(statement, index: 1, uuid: review.clientEventId)
             try bind(statement, index: 2, uuid: selectedUserID)
             try bind(statement, index: 3, uuid: review.cardId)
-            try bind(statement, index: 4, uuid: review.deckId)
-            try bind(statement, index: 5, uuid: review.deckVersionId)
-            try bind(statement, index: 6, text: localStudyModeRawValue(review.mode))
-            try bind(statement, index: 7, text: review.outcome)
-            try bind(statement, index: 8, text: review.source)
-            guard sqlite3_bind_double(statement, 9, practicedAt.timeIntervalSince1970) == SQLITE_OK else {
+            try bind(statement, index: 4, uuid: review.senseId)
+            try bind(statement, index: 5, uuid: review.deckId)
+            try bind(statement, index: 6, uuid: review.deckVersionId)
+            try bind(statement, index: 7, text: localStudyModeRawValue(review.mode))
+            try bind(statement, index: 8, text: review.outcome)
+            try bind(statement, index: 9, text: review.source)
+            guard sqlite3_bind_double(statement, 10, practicedAt.timeIntervalSince1970) == SQLITE_OK else {
                 throw ContentDatabaseError.queryFailed
             }
-            try bind(statement, index: 10, int: review.durationMs)
-            guard sqlite3_bind_double(statement, 11, syncedAt) == SQLITE_OK,
+            try bind(statement, index: 11, int: review.durationMs)
+            guard sqlite3_bind_double(statement, 12, syncedAt) == SQLITE_OK,
                   sqlite3_step(statement) == SQLITE_DONE else {
                 throw ContentDatabaseError.queryFailed
             }
@@ -2440,33 +2529,48 @@ nonisolated final class ContentDatabase {
             lemma TEXT NOT NULL,
             display_word TEXT NOT NULL,
             part_of_speech TEXT,
-            translation TEXT NOT NULL,
-            short_definition TEXT,
-            memory_hint TEXT,
             etymology TEXT,
-            usage_note TEXT,
-            synonym_note TEXT,
-            grammar_note TEXT,
             notes TEXT,
-            image_media_id TEXT,
+            primary_sense_id TEXT,
             audio_word_media_id TEXT,
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
         CREATE INDEX IF NOT EXISTS idx_cards_deck_id ON cards(deck_id);
-        CREATE TABLE IF NOT EXISTS card_examples (
+        CREATE TABLE IF NOT EXISTS card_senses (
             id TEXT PRIMARY KEY NOT NULL,
+            card_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+            display_pattern TEXT,
+            translation TEXT NOT NULL,
+            note TEXT,
+            image_media_id TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (card_id) REFERENCES cards(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_card_senses_card_id ON card_senses(card_id);
+        CREATE TABLE IF NOT EXISTS card_examples (
+            sense_id TEXT PRIMARY KEY NOT NULL,
+            card_id TEXT NOT NULL,
+            text TEXT NOT NULL,
+            translation TEXT,
+            note TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (card_id) REFERENCES cards(id),
+            FOREIGN KEY (sense_id) REFERENCES card_senses(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_card_examples_card_id ON card_examples(card_id);
+        CREATE TABLE IF NOT EXISTS sentence_questions (
+            sense_id TEXT PRIMARY KEY NOT NULL,
             card_id TEXT NOT NULL,
             template TEXT NOT NULL,
             answer TEXT NOT NULL,
             answer_form_key TEXT,
-            translation TEXT,
-            note TEXT,
-            image_media_id TEXT,
-            audio_example_media_id TEXT,
+            audio_answer_media_id TEXT,
             sort_order INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (card_id) REFERENCES cards(id)
+            FOREIGN KEY (card_id) REFERENCES cards(id),
+            FOREIGN KEY (sense_id) REFERENCES card_senses(id)
         );
-        CREATE INDEX IF NOT EXISTS idx_card_examples_card_id ON card_examples(card_id);
+        CREATE INDEX IF NOT EXISTS idx_sentence_questions_card_id ON sentence_questions(card_id);
         CREATE TABLE IF NOT EXISTS word_forms (
             card_id TEXT NOT NULL,
             form_key TEXT NOT NULL,
@@ -2476,27 +2580,30 @@ nonisolated final class ContentDatabase {
             FOREIGN KEY (card_id) REFERENCES cards(id)
         );
         CREATE INDEX IF NOT EXISTS idx_word_forms_form_key ON word_forms(form_key);
-        CREATE TABLE IF NOT EXISTS example_distractors (
+        CREATE TABLE IF NOT EXISTS question_distractors (
             id TEXT PRIMARY KEY NOT NULL,
-            example_id TEXT NOT NULL,
+            sense_id TEXT NOT NULL,
             text TEXT NOT NULL,
             source_card_id TEXT,
             priority INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (example_id) REFERENCES card_examples(id),
+            FOREIGN KEY (sense_id) REFERENCES sentence_questions(sense_id),
             FOREIGN KEY (source_card_id) REFERENCES cards(id)
         );
-        CREATE INDEX IF NOT EXISTS idx_example_distractors_example_id ON example_distractors(example_id);
-        CREATE TABLE IF NOT EXISTS card_progress (
+        CREATE INDEX IF NOT EXISTS idx_question_distractors_sense_id ON question_distractors(sense_id);
+        CREATE TABLE IF NOT EXISTS sense_progress (
             user_id TEXT NOT NULL,
+            sense_id TEXT NOT NULL,
             card_id TEXT NOT NULL,
             deck_id TEXT NOT NULL,
             fsrs_data BLOB NOT NULL,
             updated_at REAL NOT NULL,
             synced_at REAL,
-            PRIMARY KEY (user_id, card_id),
+            PRIMARY KEY (user_id, sense_id),
+            FOREIGN KEY (sense_id) REFERENCES card_senses(id),
+            FOREIGN KEY (card_id) REFERENCES cards(id),
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
-        CREATE INDEX IF NOT EXISTS idx_card_progress_deck_id ON card_progress(deck_id);
+        CREATE INDEX IF NOT EXISTS idx_sense_progress_deck_id ON sense_progress(deck_id);
         CREATE TABLE IF NOT EXISTS deck_daily_usage (
             user_id TEXT NOT NULL,
             deck_id TEXT NOT NULL,
@@ -2543,6 +2650,7 @@ nonisolated final class ContentDatabase {
             id TEXT PRIMARY KEY NOT NULL,
             user_id TEXT NOT NULL,
             card_id TEXT NOT NULL,
+            sense_id TEXT NOT NULL,
             deck_id TEXT NOT NULL,
             deck_version_id TEXT,
             mode TEXT NOT NULL,
@@ -2555,15 +2663,18 @@ nonisolated final class ContentDatabase {
             new_state TEXT,
             synced_at REAL,
             FOREIGN KEY (card_id) REFERENCES cards(id),
+            FOREIGN KEY (sense_id) REFERENCES card_senses(id),
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
         CREATE INDEX IF NOT EXISTS idx_study_reviews_card_id ON study_reviews(card_id);
+        CREATE INDEX IF NOT EXISTS idx_study_reviews_sense_id ON study_reviews(sense_id);
         CREATE INDEX IF NOT EXISTS idx_study_reviews_reviewed_at ON study_reviews(reviewed_at);
         CREATE INDEX IF NOT EXISTS idx_study_reviews_deck_reviewed ON study_reviews(deck_id, reviewed_at);
         CREATE TABLE IF NOT EXISTS practice_reviews (
             id TEXT PRIMARY KEY NOT NULL,
             user_id TEXT NOT NULL,
             card_id TEXT NOT NULL,
+            sense_id TEXT NOT NULL,
             deck_id TEXT NOT NULL,
             deck_version_id TEXT,
             mode TEXT NOT NULL,
@@ -2573,9 +2684,11 @@ nonisolated final class ContentDatabase {
             duration_ms INTEGER,
             synced_at REAL,
             FOREIGN KEY (card_id) REFERENCES cards(id),
+            FOREIGN KEY (sense_id) REFERENCES card_senses(id),
             FOREIGN KEY (deck_id) REFERENCES decks(id)
         );
         CREATE INDEX IF NOT EXISTS idx_practice_reviews_card_id ON practice_reviews(card_id);
+        CREATE INDEX IF NOT EXISTS idx_practice_reviews_sense_id ON practice_reviews(sense_id);
         CREATE INDEX IF NOT EXISTS idx_practice_reviews_practiced_at ON practice_reviews(practiced_at);
         CREATE INDEX IF NOT EXISTS idx_practice_reviews_deck_practiced ON practice_reviews(deck_id, practiced_at);
         """
@@ -2588,11 +2701,10 @@ nonisolated final class ContentDatabase {
         try addColumnIfMissing(table: "user_deck_assignments", column: "deck_group_title", definition: "TEXT")
         try addColumnIfMissing(table: "user_deck_assignments", column: "deck_group_sort_order", definition: "INTEGER")
         try addColumnIfMissing(table: "user_deck_assignments", column: "deck_sort_order", definition: "INTEGER NOT NULL DEFAULT 0")
-        try addColumnIfMissing(table: "cards", column: "image_media_id", definition: "TEXT")
         try addColumnIfMissing(table: "cards", column: "audio_word_media_id", definition: "TEXT")
-        try addColumnIfMissing(table: "card_examples", column: "image_media_id", definition: "TEXT")
-        try addColumnIfMissing(table: "card_examples", column: "audio_example_media_id", definition: "TEXT")
-        try addColumnIfMissing(table: "card_progress", column: "synced_at", definition: "REAL")
+        try addColumnIfMissing(table: "card_senses", column: "image_media_id", definition: "TEXT")
+        try addColumnIfMissing(table: "sentence_questions", column: "audio_answer_media_id", definition: "TEXT")
+        try addColumnIfMissing(table: "sense_progress", column: "synced_at", definition: "REAL")
         try addColumnIfMissing(table: "deck_matching_records", column: "synced_at", definition: "REAL")
         try addColumnIfMissing(table: "deck_matching_records", column: "deck_version_id", definition: "TEXT")
         try addColumnIfMissing(table: "matching_attempts", column: "deck_version_id", definition: "TEXT")
@@ -2644,19 +2756,20 @@ nonisolated final class ContentDatabase {
             "UPDATE media_objects SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
             "UPDATE cards SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
             "UPDATE cards SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
-            "UPDATE cards SET image_media_id = lower(image_media_id) WHERE image_media_id GLOB '*[A-Z]*'",
             "UPDATE cards SET audio_word_media_id = lower(audio_word_media_id) WHERE audio_word_media_id GLOB '*[A-Z]*'",
-            "UPDATE card_examples SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
+            "UPDATE card_senses SET image_media_id = lower(image_media_id) WHERE image_media_id GLOB '*[A-Z]*'",
+            "UPDATE card_examples SET sense_id = lower(sense_id) WHERE sense_id GLOB '*[A-Z]*'",
             "UPDATE card_examples SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
-            "UPDATE card_examples SET image_media_id = lower(image_media_id) WHERE image_media_id GLOB '*[A-Z]*'",
-            "UPDATE card_examples SET audio_example_media_id = lower(audio_example_media_id) WHERE audio_example_media_id GLOB '*[A-Z]*'",
+            "UPDATE sentence_questions SET sense_id = lower(sense_id) WHERE sense_id GLOB '*[A-Z]*'",
+            "UPDATE sentence_questions SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
+            "UPDATE sentence_questions SET audio_answer_media_id = lower(audio_answer_media_id) WHERE audio_answer_media_id GLOB '*[A-Z]*'",
             "UPDATE word_forms SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
-            "UPDATE example_distractors SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
-            "UPDATE example_distractors SET example_id = lower(example_id) WHERE example_id GLOB '*[A-Z]*'",
-            "UPDATE example_distractors SET source_card_id = lower(source_card_id) WHERE source_card_id GLOB '*[A-Z]*'",
-            "UPDATE card_progress SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
-            "UPDATE card_progress SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
-            "UPDATE card_progress SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
+            "UPDATE question_distractors SET id = lower(id) WHERE id GLOB '*[A-Z]*'",
+            "UPDATE question_distractors SET sense_id = lower(sense_id) WHERE sense_id GLOB '*[A-Z]*'",
+            "UPDATE question_distractors SET source_card_id = lower(source_card_id) WHERE source_card_id GLOB '*[A-Z]*'",
+            "UPDATE sense_progress SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
+            "UPDATE sense_progress SET card_id = lower(card_id) WHERE card_id GLOB '*[A-Z]*'",
+            "UPDATE sense_progress SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
             "UPDATE deck_daily_usage SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
             "UPDATE deck_daily_usage SET deck_id = lower(deck_id) WHERE deck_id GLOB '*[A-Z]*'",
             "UPDATE user_deck_preferences SET user_id = lower(user_id) WHERE user_id GLOB '*[A-Z]*'",
@@ -2762,12 +2875,16 @@ nonisolated final class ContentDatabase {
     private func fetchCards(deckID: UUID) throws -> [WordCardContent] {
         let rows = try fetchCardRows(deckID: deckID)
         let cardIDs = rows.map(\.id)
-        let examplesByCardID = try fetchPrimaryExamples(cardIDs: cardIDs)
+        let sensesByCardID = try fetchSenses(cardIDs: cardIDs)
+        let senseIDs = sensesByCardID.values.flatMap { $0.map(\.id) }
+        let examplesBySenseID = try fetchExamples(senseIDs: senseIDs)
+        let questionsBySenseID = try fetchSentenceQuestions(senseIDs: senseIDs)
         let formsByCardID = try fetchForms(cardIDs: cardIDs)
-        let distractorsByExampleID = try fetchDistractors(exampleIDs: examplesByCardID.values.map(\.id))
+        let distractorsBySenseID = try fetchDistractors(senseIDs: senseIDs)
         let mediaIDs = Set(
-            rows.flatMap { [$0.imageMediaID, $0.audioWordMediaID] }
-                + examplesByCardID.values.flatMap { [$0.imageMediaID, $0.audioExampleMediaID] }
+            rows.map(\.audioWordMediaID)
+                + sensesByCardID.values.flatMap { $0.map(\.imageMediaID) }
+                + questionsBySenseID.values.map(\.audioAnswerMediaID)
         ).compactMap { $0 }
         let mediaURLs = try fetchMediaURLMap(deckID: deckID, mediaIDs: mediaIDs)
         func mediaURL(_ id: UUID?) -> URL? {
@@ -2776,32 +2893,45 @@ nonisolated final class ContentDatabase {
         }
 
         return rows.compactMap { row in
-            guard let example = examplesByCardID[row.id] else { return nil }
+            let forms = formsByCardID[row.id] ?? []
+            let senses = (sensesByCardID[row.id] ?? []).compactMap { senseRow -> WordSenseContent? in
+                guard let example = examplesBySenseID[senseRow.id] else { return nil }
+                guard let question = questionsBySenseID[senseRow.id] else { return nil }
+                return WordSenseContent(
+                    id: senseRow.id,
+                    cardID: row.id,
+                    status: senseRow.status,
+                    displayPattern: senseRow.displayPattern,
+                    translation: senseRow.translation,
+                    note: senseRow.note,
+                    imageURL: mediaURL(senseRow.imageMediaID),
+                    example: SenseExampleContent(
+                        text: example.text,
+                        translation: example.translation,
+                        note: nil
+                    ),
+                    sentenceQuestion: SentenceQuestionContent(
+                        template: question.template,
+                        answer: question.answer,
+                        answerFormKey: question.answerFormKey,
+                        audioAnswerURL: mediaURL(question.audioAnswerMediaID)
+                    ),
+                    distractors: distractorsBySenseID[senseRow.id] ?? []
+                )
+            }
+            guard !senses.isEmpty else { return nil }
             return WordCardContent(
                 id: row.id,
                 status: row.status,
                 word: row.displayWord,
                 lemma: row.lemma,
                 partOfSpeech: row.partOfSpeech,
-                translation: row.translation,
-                clozePrompt: example.template,
-                clozeTemplate: example.template,
-                clozeAnswer: example.answer,
-                clozeExampleTranslation: example.translation,
-                clozeExampleImageURL: mediaURL(example.imageMediaID ?? row.imageMediaID),
-                answerFormKey: example.answerFormKey,
-                shortDefinition: row.shortDefinition,
-                memoryHint: row.memoryHint,
                 etymology: row.etymology,
-                usageNote: row.usageNote,
-                synonymNote: row.synonymNote,
-                grammarNote: row.grammarNote,
                 explanation: row.notes,
-                imageURL: mediaURL(row.imageMediaID),
                 audioWordURL: mediaURL(row.audioWordMediaID),
-                audioExampleURL: mediaURL(example.audioExampleMediaID),
-                distractors: distractorsByExampleID[example.id] ?? [],
-                forms: formsByCardID[row.id] ?? []
+                forms: forms,
+                primarySenseID: row.primarySenseID,
+                senses: senses
             )
         }
     }
@@ -2812,23 +2942,16 @@ nonisolated final class ContentDatabase {
         let lemma: String
         let displayWord: String
         let partOfSpeech: String?
-        let translation: String
-        let shortDefinition: String?
-        let memoryHint: String?
         let etymology: String?
-        let usageNote: String?
-        let synonymNote: String?
-        let grammarNote: String?
         let notes: String?
-        let imageMediaID: UUID?
+        let primarySenseID: UUID?
         let audioWordMediaID: UUID?
     }
 
     private func fetchCardRows(deckID: UUID) throws -> [CardRow] {
         let sql = """
-        SELECT id, status, lemma, display_word, part_of_speech, translation,
-               short_definition, memory_hint, etymology, usage_note, synonym_note,
-               grammar_note, notes, image_media_id, audio_word_media_id
+        SELECT id, status, lemma, display_word, part_of_speech, etymology,
+               notes, primary_sense_id, audio_word_media_id
         FROM cards
         WHERE deck_id = ?
         ORDER BY display_word
@@ -2844,8 +2967,7 @@ nonisolated final class ContentDatabase {
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let id = uuidColumn(statement, index: 0),
                   let lemma = textColumn(statement, index: 2),
-                  let displayWord = textColumn(statement, index: 3),
-                  let translation = textColumn(statement, index: 5) else { continue }
+                  let displayWord = textColumn(statement, index: 3) else { continue }
             rows.append(
                 CardRow(
                     id: id,
@@ -2853,37 +2975,31 @@ nonisolated final class ContentDatabase {
                     lemma: lemma,
                     displayWord: displayWord,
                     partOfSpeech: textColumn(statement, index: 4),
-                    translation: translation,
-                    shortDefinition: textColumn(statement, index: 6),
-                    memoryHint: textColumn(statement, index: 7),
-                    etymology: textColumn(statement, index: 8),
-                    usageNote: textColumn(statement, index: 9),
-                    synonymNote: textColumn(statement, index: 10),
-                    grammarNote: textColumn(statement, index: 11),
-                    notes: textColumn(statement, index: 12),
-                    imageMediaID: uuidColumn(statement, index: 13),
-                    audioWordMediaID: uuidColumn(statement, index: 14)
+                    etymology: textColumn(statement, index: 5),
+                    notes: textColumn(statement, index: 6),
+                    primarySenseID: uuidColumn(statement, index: 7),
+                    audioWordMediaID: uuidColumn(statement, index: 8)
                 )
             )
         }
         return rows
     }
 
-    private struct ExampleRow {
+    private struct SenseRow {
         let id: UUID
-        let template: String
-        let answer: String
-        let answerFormKey: String?
-        let translation: String?
+        let cardID: UUID
+        let status: ContentStatus
+        let displayPattern: String?
+        let translation: String
+        let note: String?
         let imageMediaID: UUID?
-        let audioExampleMediaID: UUID?
     }
 
-    private func fetchPrimaryExamples(cardIDs: [UUID]) throws -> [UUID: ExampleRow] {
+    private func fetchSenses(cardIDs: [UUID]) throws -> [UUID: [SenseRow]] {
         guard !cardIDs.isEmpty else { return [:] }
         let sql = """
-        SELECT card_id, id, template, answer, answer_form_key, translation, image_media_id, audio_example_media_id
-        FROM card_examples
+        SELECT card_id, id, status, display_pattern, translation, note, image_media_id
+        FROM card_senses
         WHERE card_id IN (\(placeholders(count: cardIDs.count)))
         ORDER BY card_id, sort_order, id
         """
@@ -2894,22 +3010,94 @@ nonisolated final class ContentDatabase {
         defer { sqlite3_finalize(statement) }
         try bindUUIDs(cardIDs, to: statement)
 
-        var rows: [UUID: ExampleRow] = [:]
+        var rows: [UUID: [SenseRow]] = [:]
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let cardID = uuidColumn(statement, index: 0),
-                  rows[cardID] == nil,
                   let id = uuidColumn(statement, index: 1),
-                  let template = textColumn(statement, index: 2),
-                  let answer = textColumn(statement, index: 3)
+                  let translation = textColumn(statement, index: 4) else { continue }
+            rows[cardID, default: []].append(
+                SenseRow(
+                    id: id,
+                    cardID: cardID,
+                    status: statusColumn(statement, index: 2),
+                    displayPattern: textColumn(statement, index: 3),
+                    translation: translation,
+                    note: textColumn(statement, index: 5),
+                    imageMediaID: uuidColumn(statement, index: 6)
+                )
+            )
+        }
+        return rows
+    }
+
+    private struct ExampleRow {
+        let text: String
+        let translation: String?
+    }
+
+    private func fetchExamples(senseIDs: [UUID]) throws -> [UUID: ExampleRow] {
+        guard !senseIDs.isEmpty else { return [:] }
+        let sql = """
+        SELECT sense_id, text, translation
+        FROM card_examples
+        WHERE sense_id IN (\(placeholders(count: senseIDs.count)))
+        ORDER BY sense_id, sort_order
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bindUUIDs(senseIDs, to: statement)
+
+        var rows: [UUID: ExampleRow] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let senseID = uuidColumn(statement, index: 0),
+                  rows[senseID] == nil,
+                  let text = textColumn(statement, index: 1)
             else { continue }
-            rows[cardID] = ExampleRow(
-                id: id,
+            rows[senseID] = ExampleRow(
+                text: text,
+                translation: textColumn(statement, index: 2)
+            )
+        }
+        return rows
+    }
+
+    private struct SentenceQuestionRow {
+        let template: String
+        let answer: String
+        let answerFormKey: String?
+        let audioAnswerMediaID: UUID?
+    }
+
+    private func fetchSentenceQuestions(senseIDs: [UUID]) throws -> [UUID: SentenceQuestionRow] {
+        guard !senseIDs.isEmpty else { return [:] }
+        let sql = """
+        SELECT sense_id, template, answer, answer_form_key, audio_answer_media_id
+        FROM sentence_questions
+        WHERE sense_id IN (\(placeholders(count: senseIDs.count)))
+        ORDER BY sense_id, sort_order
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bindUUIDs(senseIDs, to: statement)
+
+        var rows: [UUID: SentenceQuestionRow] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let senseID = uuidColumn(statement, index: 0),
+                  rows[senseID] == nil,
+                  let template = textColumn(statement, index: 1),
+                  let answer = textColumn(statement, index: 2)
+            else { continue }
+            rows[senseID] = SentenceQuestionRow(
                 template: template,
                 answer: answer,
-                answerFormKey: textColumn(statement, index: 4),
-                translation: textColumn(statement, index: 5),
-                imageMediaID: uuidColumn(statement, index: 6),
-                audioExampleMediaID: uuidColumn(statement, index: 7)
+                answerFormKey: textColumn(statement, index: 3),
+                audioAnswerMediaID: uuidColumn(statement, index: 4)
             )
         }
         return rows
@@ -2940,26 +3128,26 @@ nonisolated final class ContentDatabase {
         return forms
     }
 
-    private func fetchDistractors(exampleIDs: [UUID]) throws -> [UUID: [String]] {
-        guard !exampleIDs.isEmpty else { return [:] }
+    private func fetchDistractors(senseIDs: [UUID]) throws -> [UUID: [String]] {
+        guard !senseIDs.isEmpty else { return [:] }
         let sql = """
-        SELECT example_id, text
-        FROM example_distractors
-        WHERE example_id IN (\(placeholders(count: exampleIDs.count)))
-        ORDER BY example_id, priority, text
+        SELECT sense_id, text
+        FROM question_distractors
+        WHERE sense_id IN (\(placeholders(count: senseIDs.count)))
+        ORDER BY sense_id, priority, text
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
         }
         defer { sqlite3_finalize(statement) }
-        try bindUUIDs(exampleIDs, to: statement)
+        try bindUUIDs(senseIDs, to: statement)
 
         var distractors: [UUID: [String]] = [:]
         while sqlite3_step(statement) == SQLITE_ROW {
-            guard let exampleID = uuidColumn(statement, index: 0),
+            guard let senseID = uuidColumn(statement, index: 0),
                   let text = textColumn(statement, index: 1) else { continue }
-            distractors[exampleID, default: []].append(text)
+            distractors[senseID, default: []].append(text)
         }
         return distractors
     }

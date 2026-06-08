@@ -1625,7 +1625,7 @@ struct DeckDetailView: View {
 
     private var fullDeckMatchingPairCount: Int {
         studyCards.reduce(0) { count, card in
-            count + MatchingPair.pairs(from: StudyQueueItem(card: card, progress: CardProgress.newCard(cardID: card.id))).count
+            count + card.activeSenses.count
         }
     }
 

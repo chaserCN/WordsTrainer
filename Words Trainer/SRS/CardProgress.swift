@@ -2,18 +2,18 @@ import Foundation
 import FSRS
 
 nonisolated struct CardProgress: Codable, Hashable, Sendable {
-    let cardID: UUID
+    let senseID: UUID
     var fsrsCard: Card
     var updatedAt: Date
 
-    init(cardID: UUID, fsrsCard: Card, updatedAt: Date = .now) {
-        self.cardID = cardID
+    init(senseID: UUID, fsrsCard: Card, updatedAt: Date = .now) {
+        self.senseID = senseID
         self.fsrsCard = fsrsCard
         self.updatedAt = updatedAt
     }
 
-    static func newCard(cardID: UUID, now: Date = .now) -> CardProgress {
-        CardProgress(cardID: cardID, fsrsCard: Card(due: now), updatedAt: now)
+    static func newSense(senseID: UUID, now: Date = .now) -> CardProgress {
+        CardProgress(senseID: senseID, fsrsCard: Card(due: now), updatedAt: now)
     }
 }
 

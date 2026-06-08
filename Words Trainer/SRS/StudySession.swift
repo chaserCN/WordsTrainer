@@ -111,7 +111,7 @@ final class StudySession {
         }
         let updated: CardProgress
         if mode == .recall, outcome == .forgot {
-            updated = CardProgress.newCard(cardID: item.progress.cardID, now: reviewedAt)
+            updated = CardProgress.newSense(senseID: item.senseID, now: reviewedAt)
         } else {
             updated = try engine.applyReview(progress: item.progress, outcome: outcome, now: reviewedAt)
         }
@@ -121,7 +121,8 @@ final class StudySession {
             if mode.recordsStudyReview {
                 try onReview?(
                     StudyReviewEvent(
-                        cardID: item.card.id,
+                        cardID: item.cardID,
+                        senseID: item.senseID,
                         deckID: eventDeckID,
                         mode: mode,
                         outcome: outcome,
@@ -135,7 +136,7 @@ final class StudySession {
                 )
             }
             if let additionalFailureProgress,
-               additionalFailureProgress.cardID != item.progress.cardID {
+               additionalFailureProgress.senseID != item.progress.senseID {
                 let updatedAdditional = try engine.applyReview(
                     progress: additionalFailureProgress,
                     outcome: .incorrect,
@@ -147,7 +148,8 @@ final class StudySession {
             let eventDeckID = item.deckID ?? deckID
             try onPracticeReview?(
                 PracticeReviewEvent(
-                    cardID: item.card.id,
+                    cardID: item.cardID,
+                    senseID: item.senseID,
                     deckID: eventDeckID,
                     mode: mode,
                     outcome: outcome,

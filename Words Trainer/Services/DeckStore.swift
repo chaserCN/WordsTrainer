@@ -158,10 +158,12 @@ final class DeckStore {
             if progressByDeckID[weakCard.deckID] == nil {
                 progressByDeckID[weakCard.deckID] = try database.progressMap(deckID: weakCard.deckID)
             }
+            guard let sense = card.activeSenses.first(where: { $0.id == weakCard.senseID }) else { return nil }
             return StudyQueueItem(
                 card: card,
-                progress: progressByDeckID[weakCard.deckID]?[weakCard.cardID]
-                    ?? CardProgress.newCard(cardID: weakCard.cardID),
+                sense: sense,
+                progress: progressByDeckID[weakCard.deckID]?[weakCard.senseID]
+                    ?? CardProgress.newSense(senseID: weakCard.senseID),
                 deckID: weakCard.deckID
             )
         }
@@ -256,7 +258,7 @@ final class DeckStore {
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
         return DeckStatsCalculator.compute(
             deck: deck,
-            progressByCardID: progress,
+            progressBySenseID: progress,
             dailyUsage: usage
         )
     }
@@ -267,26 +269,16 @@ final class DeckStore {
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
         let queue: [StudyQueueItem]
         if mode.isMatching || mode == .recall {
-            let items = studyCards.map { card in
-                StudyQueueItem(
-                    card: card,
-                    progress: progress[card.id] ?? CardProgress.newCard(cardID: card.id)
-                )
-            }
+            let items = StudyQueueBuilder.allItems(cards: studyCards, progressBySenseID: progress)
             queue = mode == .recall ? items.shuffled() : items
         } else {
             var built = StudyQueueBuilder.build(
                 deck: deck,
-                progressByCardID: progress,
+                progressBySenseID: progress,
                 dailyUsage: usage
             )
             if built.isEmpty {
-                built = studyCards.map { card in
-                    StudyQueueItem(
-                        card: card,
-                        progress: progress[card.id] ?? CardProgress.newCard(cardID: card.id)
-                    )
-                }.shuffled()
+                built = StudyQueueBuilder.allItems(cards: studyCards, progressBySenseID: progress).shuffled()
             }
             queue = built
         }
@@ -307,7 +299,7 @@ final class DeckStore {
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
         let queue = StudyQueueBuilder.build(
             deck: deck,
-            progressByCardID: progress,
+            progressBySenseID: progress,
             dailyUsage: usage
         )
 
@@ -345,12 +337,7 @@ final class DeckStore {
         let studyCards = deck.isActive ? deck.activeCards : []
         let progress = try database.progressMap(deckID: deck.id)
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
-        let items = studyCards.map { card in
-            StudyQueueItem(
-                card: card,
-                progress: progress[card.id] ?? CardProgress.newCard(cardID: card.id)
-            )
-        }
+        let items = StudyQueueBuilder.allItems(cards: studyCards, progressBySenseID: progress)
         let queue = (mode == .recall || mode == .clozeMultipleChoice) ? items.shuffled() : items
 
         return StudySession(
@@ -399,12 +386,7 @@ final class DeckStore {
 
         let progress = try database.progressMap(deckID: deck.id)
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
-        let items = studyCards.map { card in
-            StudyQueueItem(
-                card: card,
-                progress: progress[card.id] ?? CardProgress.newCard(cardID: card.id)
-            )
-        }
+        let items = StudyQueueBuilder.allItems(cards: studyCards, progressBySenseID: progress)
         let queue = (mode == .recall || mode == .clozeMultipleChoice) ? items.shuffled() : items
 
         return StudySession(
@@ -433,10 +415,6 @@ final class DeckStore {
             let updated = engine.recordNewCardStudied(previous: usage)
             try database.saveDailyUsage(deckID: deckID, usage: updated)
         }
-    }
-
-    func progress(deckID: UUID, cardID: UUID) throws -> CardProgress {
-        try database.progressMap(deckID: deckID)[cardID] ?? CardProgress.newCard(cardID: cardID)
     }
 
     func deckID(forCardID cardID: UUID) throws -> UUID? {
@@ -583,7 +561,7 @@ final class DeckStore {
             todayStudyCardsByDeckID[deck.id] = uniqueCards(deckQueueCards.isEmpty ? deckPracticeCards : deckQueueCards)
             statsByDeckID[deck.id] = DeckStatsCalculator.compute(
                 deck: deck,
-                progressByCardID: snapshot.progressByCardID,
+                progressBySenseID: snapshot.progressBySenseID,
                 dailyUsage: snapshot.dailyUsage
             )
             todayPracticeCount += deckPracticeCards.count
@@ -646,7 +624,7 @@ final class DeckStore {
         return DeckDetailSnapshot(
             stats: DeckStatsCalculator.compute(
                 deck: deck,
-                progressByCardID: progress,
+                progressBySenseID: progress,
                 dailyUsage: usage
             ),
             matchingRecord: try database.matchingRecord(deckID: deck.id),
@@ -672,32 +650,39 @@ final class DeckStore {
     ) throws -> TodayStudyDeckSnapshot {
         try TodayStudyDeckSnapshot(
             deck: deck,
-            progressByCardID: database.progressMap(deckID: deck.id),
+            progressBySenseID: database.progressMap(deckID: deck.id),
             dailyUsage: database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey()),
-            reviewedCardIDs: database.reviewedCardIDs(deckID: deck.id, source: .todayQueue)
+            reviewedSenseIDs: database.reviewedSenseIDs(deckID: deck.id, source: .todayQueue)
         )
     }
 
     nonisolated private static func todayPracticeCardCount(snapshot: TodayStudyDeckSnapshot) -> Int {
-        guard snapshot.deck.isActive, !snapshot.reviewedCardIDs.isEmpty else { return 0 }
-        let activeCardIDs = Set(snapshot.deck.activeCards.map(\.id))
-        return snapshot.reviewedCardIDs.reduce(0) { count, cardID in
-            activeCardIDs.contains(cardID) ? count + 1 : count
+        guard snapshot.deck.isActive, !snapshot.reviewedSenseIDs.isEmpty else { return 0 }
+        let activeSenseIDs = Set(snapshot.deck.activeCards.flatMap { $0.activeSenses.map(\.id) })
+        return snapshot.reviewedSenseIDs.reduce(0) { count, senseID in
+            activeSenseIDs.contains(senseID) ? count + 1 : count
         }
     }
 
     nonisolated private static func todayQueueCards(snapshot: TodayStudyDeckSnapshot) -> [WordCardContent] {
         StudyQueueBuilder.build(
             deck: snapshot.deck,
-            progressByCardID: snapshot.progressByCardID,
+            progressBySenseID: snapshot.progressBySenseID,
             dailyUsage: snapshot.dailyUsage
         ).map(\.card)
     }
 
     nonisolated private static func todayPracticeCards(snapshot: TodayStudyDeckSnapshot) -> [WordCardContent] {
-        guard snapshot.deck.isActive, !snapshot.reviewedCardIDs.isEmpty else { return [] }
-        let activeCardsByID = Dictionary(uniqueKeysWithValues: snapshot.deck.activeCards.map { ($0.id, $0) })
-        return snapshot.reviewedCardIDs.compactMap { activeCardsByID[$0] }
+        guard snapshot.deck.isActive, !snapshot.reviewedSenseIDs.isEmpty else { return [] }
+        let reviewedSenseIDs = Set(snapshot.reviewedSenseIDs)
+        var cards: [WordCardContent] = []
+        var seenCardIDs: Set<UUID> = []
+        for card in snapshot.deck.activeCards where card.activeSenses.contains(where: { reviewedSenseIDs.contains($0.id) }) {
+            if seenCardIDs.insert(card.id).inserted {
+                cards.append(card)
+            }
+        }
+        return cards
     }
 
     nonisolated private static func uniqueCards(_ cards: [WordCardContent]) -> [WordCardContent] {
@@ -739,20 +724,13 @@ extension StudySession {
     ) throws {
         let shouldNotify = savesProgress && !(mode == .recall && outcome == .remembered)
         let progressDeckID = current?.deckID ?? deckID
-        let additionalFailure = try additionalFailureContext(
-            outcome: outcome,
-            cardID: additionalFailureCardID,
-            currentDeckID: progressDeckID,
-            store: store
-        )
         try advanceAfterReview(
             outcome: outcome,
-            additionalFailureProgress: additionalFailure?.progress
+            additionalFailureProgress: nil
         ) { progress, wasNew in
             try store.saveProgress(deckID: progressDeckID, progress: progress, wasNew: wasNew)
         } onAdditionalFailureSave: { progress in
-            guard let additionalFailure else { return }
-            try store.saveProgress(deckID: additionalFailure.deckID, progress: progress, wasNew: false)
+            try store.saveProgress(deckID: progressDeckID, progress: progress, wasNew: false)
         } onReview: { event in
             try store.saveStudyReview(event)
         } onPracticeReview: { event in
@@ -760,27 +738,5 @@ extension StudySession {
         }
         guard shouldNotify else { return }
         store.notifyLocalDataDidChange(deckID: progressDeckID)
-        if let additionalFailure, additionalFailure.deckID != progressDeckID {
-            store.notifyLocalDataDidChange(deckID: additionalFailure.deckID)
-        }
-    }
-
-    private func additionalFailureContext(
-        outcome: ReviewOutcome,
-        cardID: UUID?,
-        currentDeckID: UUID,
-        store: DeckStore
-    ) throws -> (deckID: UUID, progress: CardProgress)? {
-        guard savesProgress,
-              mode == .clozeMultipleChoice,
-              outcome == .incorrect,
-              let cardID,
-              cardID != current?.card.id else {
-            return nil
-        }
-
-        let selectedDeckID = try store.deckID(forCardID: cardID) ?? currentDeckID
-        let progress = try store.progress(deckID: selectedDeckID, cardID: cardID)
-        return (selectedDeckID, progress)
     }
 }

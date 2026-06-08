@@ -2,20 +2,20 @@ import Foundation
 
 nonisolated struct TodayStudyDeckSnapshot: Sendable {
     let deck: DeckContent
-    let progressByCardID: [UUID: CardProgress]
+    let progressBySenseID: [UUID: CardProgress]
     let dailyUsage: DeckDailyUsage?
-    let reviewedCardIDs: [UUID]
+    let reviewedSenseIDs: [UUID]
 
     init(
         deck: DeckContent,
-        progressByCardID: [UUID: CardProgress],
+        progressBySenseID: [UUID: CardProgress],
         dailyUsage: DeckDailyUsage?,
-        reviewedCardIDs: [UUID] = []
+        reviewedSenseIDs: [UUID] = []
     ) {
         self.deck = deck
-        self.progressByCardID = progressByCardID
+        self.progressBySenseID = progressBySenseID
         self.dailyUsage = dailyUsage
-        self.reviewedCardIDs = reviewedCardIDs
+        self.reviewedSenseIDs = reviewedSenseIDs
     }
 }
 
@@ -55,7 +55,7 @@ enum TodayStudySessionBuilder {
         for snapshot in snapshots where snapshot.deck.isActive {
             let deckQueue = StudyQueueBuilder.build(
                 deck: snapshot.deck,
-                progressByCardID: snapshot.progressByCardID,
+                progressBySenseID: snapshot.progressBySenseID,
                 dailyUsage: snapshot.dailyUsage,
                 using: &rng
             ).map { $0.withDeckID(snapshot.deck.id) }
@@ -139,17 +139,20 @@ enum TodayStudySessionBuilder {
     }
 
     private static func todayPracticeItems(snapshot: TodayStudyDeckSnapshot) -> [StudyQueueItem] {
-        guard snapshot.deck.isActive, !snapshot.reviewedCardIDs.isEmpty else { return [] }
-        let reviewedIDSet = Set(snapshot.reviewedCardIDs)
-        var itemByCardID: [UUID: StudyQueueItem] = [:]
-        for card in snapshot.deck.activeCards where reviewedIDSet.contains(card.id) {
-            itemByCardID[card.id] = StudyQueueItem(
-                card: card,
-                progress: snapshot.progressByCardID[card.id] ?? CardProgress.newCard(cardID: card.id),
-                deckID: snapshot.deck.id
-            )
+        guard snapshot.deck.isActive, !snapshot.reviewedSenseIDs.isEmpty else { return [] }
+        let reviewedIDSet = Set(snapshot.reviewedSenseIDs)
+        var itemBySenseID: [UUID: StudyQueueItem] = [:]
+        for card in snapshot.deck.activeCards {
+            for sense in card.activeSenses where reviewedIDSet.contains(sense.id) {
+                itemBySenseID[sense.id] = StudyQueueItem(
+                    card: card,
+                    sense: sense,
+                    progress: snapshot.progressBySenseID[sense.id] ?? CardProgress.newSense(senseID: sense.id),
+                    deckID: snapshot.deck.id
+                )
+            }
         }
-        return snapshot.reviewedCardIDs.compactMap { itemByCardID[$0] }
+        return snapshot.reviewedSenseIDs.compactMap { itemBySenseID[$0] }
     }
 
     private static func practiceQueue(_ items: [StudyQueueItem], for mode: StudyMode) -> [StudyQueueItem] {
@@ -216,22 +219,25 @@ enum RandomStudySessionBuilder {
     ) -> StudySession? {
         let activeSnapshots = snapshots.filter { $0.deck.isActive }
         let requestedCardIDs = Set(cards.map(\.id))
-        var itemByCardID: [UUID: StudyQueueItem] = [:]
+        var itemBySenseID: [UUID: StudyQueueItem] = [:]
         var queue: [StudyQueueItem] = []
         var choicePool: [WordCardContent] = []
 
         for snapshot in activeSnapshots {
             choicePool.append(contentsOf: snapshot.deck.activeCards)
             for card in snapshot.deck.activeCards where requestedCardIDs.contains(card.id) {
-                itemByCardID[card.id] = StudyQueueItem(
-                    card: card,
-                    progress: snapshot.progressByCardID[card.id] ?? CardProgress.newCard(cardID: card.id),
-                    deckID: snapshot.deck.id
-                )
+                for sense in card.activeSenses {
+                    itemBySenseID[sense.id] = StudyQueueItem(
+                        card: card,
+                        sense: sense,
+                        progress: snapshot.progressBySenseID[sense.id] ?? CardProgress.newSense(senseID: sense.id),
+                        deckID: snapshot.deck.id
+                    )
+                }
             }
         }
 
-        queue = cards.compactMap { itemByCardID[$0.id] }
+        queue = cards.flatMap { card in card.activeSenses.compactMap { itemBySenseID[$0.id] } }
         guard !queue.isEmpty else { return nil }
 
         return StudySession(

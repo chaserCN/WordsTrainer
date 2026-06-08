@@ -12,9 +12,8 @@ struct ContentDatabaseTests {
     private let cardID = UUID(uuidString: "44444444-4444-4444-8444-444444444444")!
     private let mediaID = UUID(uuidString: "77777777-7777-4777-8777-777777777777")!
     private let audioWordMediaID = UUID(uuidString: "88888888-8888-4888-8888-888888888888")!
-    private let exampleImageMediaID = UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!
-    private let audioExampleMediaID = UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!
-    private let exampleID = UUID(uuidString: "99999999-9999-4999-8999-999999999999")!
+    private let audioAnswerMediaID = UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!
+    private let senseID = UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-cccccccccccc")!
 
     @Test("server user settings update random card count")
     func serverUserSettingsUpdateRandomCardCount() throws {
@@ -76,8 +75,8 @@ struct ContentDatabaseTests {
         }
     }
 
-    @Test("reviewed card IDs return cards reviewed during requested day")
-    func reviewedCardIDsReturnCardsReviewedDuringRequestedDay() throws {
+    @Test("reviewed sense IDs return senses reviewed during requested day")
+    func reviewedSenseIDsReturnSensesReviewedDuringRequestedDay() throws {
         try withIsolatedDatabase { database in
             try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
             var calendar = Calendar(identifier: .gregorian)
@@ -89,6 +88,7 @@ struct ContentDatabaseTests {
                 StudyReviewEvent(
                     id: UUID(uuidString: "55555555-5555-4555-8555-555555555555")!,
                     cardID: cardID,
+                    senseID: senseID,
                     deckID: deckID,
                     mode: .flashcards,
                     outcome: .remembered,
@@ -103,6 +103,7 @@ struct ContentDatabaseTests {
                 StudyReviewEvent(
                     id: UUID(uuidString: "66666666-6666-4666-8666-666666666666")!,
                     cardID: cardID,
+                    senseID: senseID,
                     deckID: deckID,
                     mode: .clozeMultipleChoice,
                     outcome: .correct,
@@ -115,13 +116,13 @@ struct ContentDatabaseTests {
                 )
             )
 
-            #expect(try database.reviewedCardIDs(day: reviewedAt, calendar: calendar) == [cardID])
-            #expect(try database.reviewedCardIDs(day: reviewedAt, deckID: deckID, calendar: calendar) == [cardID])
-            #expect(try database.reviewedCardIDs(day: reviewedAt, deckID: deckID, source: .todayQueue, calendar: calendar) == [cardID])
-            #expect(try database.reviewedCardIDs(day: reviewedAt, deckID: deckID, source: .deckSession, calendar: calendar).isEmpty)
-            #expect(try database.reviewedCardIDs(day: reviewedAt, deckID: UUID(), calendar: calendar).isEmpty)
+            #expect(try database.reviewedSenseIDs(day: reviewedAt, calendar: calendar) == [senseID])
+            #expect(try database.reviewedSenseIDs(day: reviewedAt, deckID: deckID, calendar: calendar) == [senseID])
+            #expect(try database.reviewedSenseIDs(day: reviewedAt, deckID: deckID, source: .todayQueue, calendar: calendar) == [senseID])
+            #expect(try database.reviewedSenseIDs(day: reviewedAt, deckID: deckID, source: .deckSession, calendar: calendar).isEmpty)
+            #expect(try database.reviewedSenseIDs(day: reviewedAt, deckID: UUID(), calendar: calendar).isEmpty)
             #expect(
-                try database.reviewedCardIDs(
+                try database.reviewedSenseIDs(
                     day: reviewedAt.addingTimeInterval(24 * 60 * 60),
                     calendar: calendar
                 ).isEmpty
@@ -280,6 +281,7 @@ struct ContentDatabaseTests {
                 StudyReviewEvent(
                     id: UUID(uuidString: "55555555-5555-4555-8555-555555555555")!,
                     cardID: cardID,
+                    senseID: senseID,
                     deckID: deckID,
                     mode: .flashcards,
                     outcome: .remembered,
@@ -294,6 +296,7 @@ struct ContentDatabaseTests {
                 PracticeReviewEvent(
                     id: UUID(uuidString: "66666666-6666-4666-8666-666666666666")!,
                     cardID: cardID,
+                    senseID: senseID,
                     deckID: deckID,
                     mode: .clozeTyping,
                     outcome: .correct,
@@ -306,6 +309,7 @@ struct ContentDatabaseTests {
                 StudyReviewEvent(
                     id: UUID(uuidString: "77777777-7777-4777-8777-777777777777")!,
                     cardID: cardID,
+                    senseID: senseID,
                     deckID: deckID,
                     mode: .flashcards,
                     outcome: .remembered,
@@ -400,7 +404,7 @@ struct ContentDatabaseTests {
             try database.saveProgress(
                 deckID: deckID,
                 progress: CardProgress(
-                    cardID: cardID,
+                    senseID: senseID,
                     fsrsCard: Card(due: updatedAt, state: .review),
                     updatedAt: updatedAt
                 )
@@ -430,14 +434,14 @@ struct ContentDatabaseTests {
             try database.saveProgress(
                 deckID: deckID,
                 progress: CardProgress(
-                    cardID: cardID,
+                    senseID: senseID,
                     fsrsCard: Card(due: updatedAt, state: .review),
                     updatedAt: updatedAt
                 )
             )
 
-            #expect(try database.weakCards(limit: 10).map(\.cardID) == [cardID])
-            #expect(try database.weakCards(limit: 10, deckID: deckID).map(\.cardID) == [cardID])
+            #expect(try database.weakCards(limit: 10).map(\.senseID) == [senseID])
+            #expect(try database.weakCards(limit: 10, deckID: deckID).map(\.senseID) == [senseID])
         }
     }
 
@@ -465,14 +469,14 @@ struct ContentDatabaseTests {
             try database.saveProgress(
                 deckID: deckID,
                 progress: CardProgress(
-                    cardID: cardID,
+                    senseID: senseID,
                     fsrsCard: Card(due: updatedAt, state: .learning),
                     updatedAt: updatedAt
                 )
             )
 
-            #expect(try database.weakCards(limit: 10).map(\.cardID) == [cardID])
-            #expect(try database.weakCards(limit: 10, deckID: deckID).map(\.cardID) == [cardID])
+            #expect(try database.weakCards(limit: 10).map(\.senseID) == [senseID])
+            #expect(try database.weakCards(limit: 10, deckID: deckID).map(\.senseID) == [senseID])
         }
     }
 
@@ -481,7 +485,7 @@ struct ContentDatabaseTests {
         try withIsolatedDatabase { database in
             try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
             let localDate = try #require(Self.isoDate("2026-06-03T12:00:00.000Z"))
-            let localProgress = CardProgress.newCard(cardID: cardID, now: localDate)
+            let localProgress = CardProgress.newSense(senseID: senseID, now: localDate)
             try database.saveProgress(deckID: deckID, progress: localProgress)
 
             try database.importServerBootstrap(
@@ -496,7 +500,7 @@ struct ContentDatabaseTests {
                 selectedUserID: userID
             )
 
-            let progress = try #require(database.progressMap(deckID: deckID)[cardID])
+            let progress = try #require(database.progressMap(deckID: deckID)[senseID])
             #expect(progress.updatedAt == localDate)
             #expect(progress.fsrsCard.due == localDate)
         }
@@ -509,7 +513,7 @@ struct ContentDatabaseTests {
             let localDate = try #require(Self.isoDate("2026-06-01T12:00:00.000Z"))
             try database.saveProgress(
                 deckID: deckID,
-                progress: CardProgress.newCard(cardID: cardID, now: localDate)
+                progress: CardProgress.newSense(senseID: senseID, now: localDate)
             )
 
             try database.importServerBootstrap(
@@ -524,7 +528,7 @@ struct ContentDatabaseTests {
                 selectedUserID: userID
             )
 
-            let progress = try #require(database.progressMap(deckID: deckID)[cardID])
+            let progress = try #require(database.progressMap(deckID: deckID)[senseID])
             #expect(progress.updatedAt == Self.isoDate("2026-06-02T12:00:00.000Z"))
             #expect(progress.fsrsCard.due == Self.isoDate("2026-06-04T12:00:00.000Z"))
         }
@@ -544,11 +548,11 @@ struct ContentDatabaseTests {
                 ),
                 selectedUserID: userID
             )
-            #expect(try database.progressMap(deckID: deckID)[cardID] != nil)
+            #expect(try database.progressMap(deckID: deckID)[senseID] != nil)
 
             try database.importServerBootstrap(bootstrap(progress: []), selectedUserID: userID)
 
-            #expect(try database.progressMap(deckID: deckID)[cardID] == nil)
+            #expect(try database.progressMap(deckID: deckID)[senseID] == nil)
         }
     }
 
@@ -566,7 +570,7 @@ struct ContentDatabaseTests {
                 ),
                 selectedUserID: userID
             )
-            #expect(try database.progressMap(deckID: deckID)[cardID] != nil)
+            #expect(try database.progressMap(deckID: deckID)[senseID] != nil)
 
             try database.importServerBootstrap(
                 bootstrap(progress: []),
@@ -574,7 +578,7 @@ struct ContentDatabaseTests {
                 progressSnapshotIsComplete: false
             )
 
-            #expect(try database.progressMap(deckID: deckID)[cardID] != nil)
+            #expect(try database.progressMap(deckID: deckID)[senseID] != nil)
         }
     }
 
@@ -593,7 +597,7 @@ struct ContentDatabaseTests {
                 ),
                 selectedUserID: userID
             )
-            #expect(try database.progressMap(deckID: deckID)[cardID] != nil)
+            #expect(try database.progressMap(deckID: deckID)[senseID] != nil)
             #expect(try database.matchingRecord(deckID: deckID) != nil)
 
             try database.importServerBootstrap(
@@ -602,7 +606,7 @@ struct ContentDatabaseTests {
                 progressSnapshotIsComplete: false
             )
 
-            #expect(try database.progressMap(deckID: deckID)[cardID] == nil)
+            #expect(try database.progressMap(deckID: deckID)[senseID] == nil)
             #expect(try database.matchingRecord(deckID: deckID) == nil)
         }
     }
@@ -614,7 +618,7 @@ struct ContentDatabaseTests {
             let localDate = try #require(Self.isoDate("2026-06-03T12:00:00.000Z"))
             try database.saveProgress(
                 deckID: deckID,
-                progress: CardProgress.newCard(cardID: cardID, now: localDate)
+                progress: CardProgress.newSense(senseID: senseID, now: localDate)
             )
 
             try database.importServerBootstrap(
@@ -623,9 +627,9 @@ struct ContentDatabaseTests {
                 progressSnapshotIsComplete: false
             )
 
-            let progress = try #require(database.progressMap(deckID: deckID)[cardID])
+            let progress = try #require(database.progressMap(deckID: deckID)[senseID])
             #expect(progress.updatedAt == localDate)
-            #expect(try database.pendingServerSyncBatch().progressCardIDs == [cardID])
+            #expect(try database.pendingServerSyncBatch().progressSenseIDs == [senseID])
         }
     }
 
@@ -636,12 +640,12 @@ struct ContentDatabaseTests {
             let localDate = try #require(Self.isoDate("2026-06-03T12:00:00.000Z"))
             try database.saveProgress(
                 deckID: deckID,
-                progress: CardProgress.newCard(cardID: cardID, now: localDate)
+                progress: CardProgress.newSense(senseID: senseID, now: localDate)
             )
 
             try database.importServerBootstrap(bootstrap(progress: []), selectedUserID: userID)
 
-            let progress = try #require(database.progressMap(deckID: deckID)[cardID])
+            let progress = try #require(database.progressMap(deckID: deckID)[senseID])
             #expect(progress.updatedAt == localDate)
         }
     }
@@ -658,6 +662,7 @@ struct ContentDatabaseTests {
                 StudyReviewEvent(
                     id: reviewID,
                     cardID: cardID,
+                    senseID: senseID,
                     deckID: deckID,
                     mode: .flashcards,
                     outcome: .remembered,
@@ -670,13 +675,14 @@ struct ContentDatabaseTests {
             )
             try database.saveProgress(
                 deckID: deckID,
-                progress: CardProgress.newCard(cardID: cardID, now: dueAt)
+                progress: CardProgress.newSense(senseID: senseID, now: dueAt)
             )
             let practiceReviewID = UUID(uuidString: "cccccccc-cccc-4ccc-8ccc-cccccccccccc")!
             try database.savePracticeReview(
                 PracticeReviewEvent(
                     id: practiceReviewID,
                     cardID: cardID,
+                    senseID: senseID,
                     deckID: deckID,
                     mode: .clozeMultipleChoice,
                     outcome: .correct,
@@ -709,7 +715,7 @@ struct ContentDatabaseTests {
             let batch = try database.pendingServerSyncBatch()
             #expect(batch.reviewIDs == [reviewID])
             #expect(batch.practiceReviewIDs == [practiceReviewID])
-            #expect(batch.progressCardIDs == [cardID])
+            #expect(batch.progressSenseIDs == [senseID])
             #expect(batch.matchingDeckIDs == [deckID])
             #expect(batch.matchingAttemptIDs == [matchingAttemptID])
             #expect(batch.payload.reviews.map(\.clientEventId) == [reviewID])
@@ -717,6 +723,7 @@ struct ContentDatabaseTests {
             #expect(batch.payload.practiceReviews[0].mode == "clozeMultipleChoice")
             #expect(batch.payload.practiceReviews[0].source == "today_practice")
             #expect(batch.payload.practiceReviews[0].deckVersionId == versionID)
+            #expect(batch.payload.progress.map(\.senseId) == [senseID])
             #expect(batch.payload.progress.map(\.cardId) == [cardID])
             #expect(batch.payload.matchingRecords.map(\.deckId) == [deckID])
             #expect(batch.payload.matchingRecords[0].deckVersionId == versionID)
@@ -747,6 +754,7 @@ struct ContentDatabaseTests {
                 StudyReviewEvent(
                     id: reviewID,
                     cardID: cardID,
+                    senseID: senseID,
                     deckID: deckID,
                     mode: .flashcards,
                     outcome: .remembered,
@@ -783,6 +791,7 @@ struct ContentDatabaseTests {
                 StudyReviewEvent(
                     id: acceptedReviewID,
                     cardID: cardID,
+                    senseID: senseID,
                     deckID: deckID,
                     mode: .flashcards,
                     outcome: .remembered,
@@ -797,6 +806,7 @@ struct ContentDatabaseTests {
                 StudyReviewEvent(
                     id: rejectedReviewID,
                     cardID: cardID,
+                    senseID: senseID,
                     deckID: deckID,
                     mode: .flashcards,
                     outcome: .forgot,
@@ -811,6 +821,7 @@ struct ContentDatabaseTests {
                 PracticeReviewEvent(
                     id: duplicatePracticeID,
                     cardID: cardID,
+                    senseID: senseID,
                     deckID: deckID,
                     mode: .clozeMultipleChoice,
                     outcome: .correct,
@@ -850,7 +861,7 @@ struct ContentDatabaseTests {
                     duplicateReviewIds: [],
                     acceptedPracticeReviewIds: [],
                     duplicatePracticeReviewIds: [duplicatePracticeID],
-                    progressCardIds: [],
+                    progressSenseIds: [],
                     matchingRecordDeckIds: [],
                     acceptedMatchingAttemptIds: [acceptedAttemptID],
                     duplicateMatchingAttemptIds: [],
@@ -880,12 +891,13 @@ struct ContentDatabaseTests {
 
             try database.saveProgress(
                 deckID: deckID,
-                progress: CardProgress.newCard(cardID: cardID, now: date)
+                progress: CardProgress.newSense(senseID: senseID, now: date)
             )
             try database.savePracticeReview(
                 PracticeReviewEvent(
                     id: practiceReviewID,
                     cardID: cardID,
+                    senseID: senseID,
                     deckID: deckID,
                     mode: .clozeMultipleChoice,
                     outcome: .correct,
@@ -920,10 +932,11 @@ struct ContentDatabaseTests {
             )
 
             let batch = try database.pendingServerSyncBatch()
-            #expect(batch.progressCardIDs == [cardID])
+            #expect(batch.progressSenseIDs == [senseID])
             #expect(batch.practiceReviewIDs == [practiceReviewID])
             #expect(batch.matchingDeckIDs == [deckID])
             #expect(batch.matchingAttemptIDs == [matchingAttemptID])
+            #expect(batch.payload.progress.map(\.senseId) == [senseID])
             #expect(batch.payload.progress.map(\.cardId) == [cardID])
             #expect(batch.payload.practiceReviews.map(\.clientEventId) == [practiceReviewID])
             #expect(batch.payload.matchingRecords.map(\.deckId) == [deckID])
@@ -940,12 +953,13 @@ struct ContentDatabaseTests {
 
             try database.saveProgress(
                 deckID: deckID,
-                progress: CardProgress.newCard(cardID: cardID, now: date)
+                progress: CardProgress.newSense(senseID: senseID, now: date)
             )
             try database.savePracticeReview(
                 PracticeReviewEvent(
                     id: practiceReviewID,
                     cardID: cardID,
+                    senseID: senseID,
                     deckID: deckID,
                     mode: .clozeMultipleChoice,
                     outcome: .correct,
@@ -962,8 +976,9 @@ struct ContentDatabaseTests {
             )
 
             let batch = try database.pendingServerSyncBatch()
-            #expect(batch.progressCardIDs == [cardID])
+            #expect(batch.progressSenseIDs == [senseID])
             #expect(batch.practiceReviewIDs == [practiceReviewID])
+            #expect(batch.payload.progress.map(\.senseId) == [senseID])
             #expect(batch.payload.progress.map(\.cardId) == [cardID])
             #expect(batch.payload.practiceReviews.map(\.clientEventId) == [practiceReviewID])
         }
@@ -977,20 +992,20 @@ struct ContentDatabaseTests {
             let secondDate = try #require(Self.isoDate("2026-06-02T12:01:00.000Z"))
             try database.saveProgress(
                 deckID: deckID,
-                progress: CardProgress.newCard(cardID: cardID, now: firstDate)
+                progress: CardProgress.newSense(senseID: senseID, now: firstDate)
             )
 
             let inFlightBatch = try database.pendingServerSyncBatch()
-            #expect(inFlightBatch.progressCardIDs == [cardID])
+            #expect(inFlightBatch.progressSenseIDs == [senseID])
             try database.saveProgress(
                 deckID: deckID,
-                progress: CardProgress.newCard(cardID: cardID, now: secondDate)
+                progress: CardProgress.newSense(senseID: senseID, now: secondDate)
             )
             try database.markServerSyncBatchUploaded(inFlightBatch, syncedAt: firstDate)
 
             let nextBatch = try database.pendingServerSyncBatch()
             let progressPayload = try #require(nextBatch.payload.progress.first)
-            #expect(nextBatch.progressCardIDs == [cardID])
+            #expect(nextBatch.progressSenseIDs == [senseID])
             #expect(progressPayload.updatedAt == "2026-06-02T12:01:00.000Z")
         }
     }
@@ -1153,6 +1168,7 @@ struct ContentDatabaseTests {
                 ],
                 "content": {
                   "cards": [],
+                  "senses": [],
                   "examples": [],
                   "forms": [],
                   "distractors": []
@@ -1185,7 +1201,7 @@ struct ContentDatabaseTests {
             let dueAt = try #require(Self.isoDate("2026-06-05T12:00:00.000Z"))
             try database.saveProgress(
                 deckID: deckID,
-                progress: CardProgress.newCard(cardID: cardID, now: dueAt)
+                progress: CardProgress.newSense(senseID: senseID, now: dueAt)
             )
 
             let batch = try database.pendingServerSyncBatch()
@@ -1204,21 +1220,21 @@ struct ContentDatabaseTests {
             let date = try #require(Self.isoDate("2026-06-05T12:00:00.000Z"))
             try database.saveProgress(
                 deckID: deckID,
-                progress: CardProgress.newCard(cardID: cardID, now: date)
+                progress: CardProgress.newSense(senseID: senseID, now: date)
             )
             try executeRawSQL(
                 """
-                UPDATE card_progress
+                UPDATE sense_progress
                 SET fsrs_data = X'7b'
                 WHERE user_id = '\(userID.databaseString)' AND card_id = '\(cardID.databaseString)'
                 """
             )
 
-            let progress = try #require(database.progressMap(deckID: deckID)[cardID])
-            #expect(progress.cardID == cardID)
+            let progress = try #require(database.progressMap(deckID: deckID)[senseID])
+            #expect(progress.senseID == senseID)
 
             let batch = try database.pendingServerSyncBatch()
-            #expect(batch.progressCardIDs == [cardID])
+            #expect(batch.progressSenseIDs == [senseID])
         }
     }
 
@@ -1302,6 +1318,7 @@ struct ContentDatabaseTests {
                 StudyReviewEvent(
                     id: UUID(uuidString: "88888888-8888-4888-8888-888888888888")!,
                     cardID: cardID,
+                    senseID: senseID,
                     deckID: deckID,
                     mode: .flashcards,
                     outcome: .forgot,
@@ -1312,7 +1329,7 @@ struct ContentDatabaseTests {
                     newState: "review"
                 )
             )
-            #expect(try database.weakCards(limit: 10).map(\.cardID) == [cardID])
+            #expect(try database.weakCards(limit: 10).map(\.senseID) == [senseID])
 
             try database.importServerBootstrap(
                 bootstrap(includeAssignment: false, includeContent: false),
@@ -1348,7 +1365,7 @@ struct ContentDatabaseTests {
                 ),
                 selectedUserID: userID
             )
-            #expect(try database.weakCards(limit: 10).map(\.cardID) == [cardID])
+            #expect(try database.weakCards(limit: 10).map(\.senseID) == [senseID])
 
             try database.importServerBootstrap(
                 bootstrap(
@@ -1389,16 +1406,15 @@ struct ContentDatabaseTests {
         }
     }
 
-    @Test("loadDecks resolves card and example media through bulk media lookup")
-    func loadDecksResolvesCardAndExampleMediaThroughBulkLookup() throws {
+    @Test("loadDecks resolves sense image and answer audio through bulk media lookup")
+    func loadDecksResolvesSenseImageAndAnswerAudioThroughBulkLookup() throws {
         try withIsolatedDatabase { database in
-            let mediaIDs = [mediaID, audioWordMediaID, exampleImageMediaID, audioExampleMediaID]
+            let mediaIDs = [mediaID, audioWordMediaID, audioAnswerMediaID]
             try database.importServerBootstrap(
                 bootstrap(
                     cardImageMediaID: mediaID,
                     audioWordMediaID: audioWordMediaID,
-                    exampleImageMediaID: exampleImageMediaID,
-                    audioExampleMediaID: audioExampleMediaID,
+                    audioExampleMediaID: audioAnswerMediaID,
                     media: mediaIDs.map { mediaJSON(id: $0) }
                 ),
                 selectedUserID: userID
@@ -1414,8 +1430,8 @@ struct ContentDatabaseTests {
             let card = try #require(deck.cards.first)
             #expect(card.imageURL?.lastPathComponent == "\(mediaID.databaseString).png")
             #expect(card.audioWordURL?.lastPathComponent == "\(audioWordMediaID.databaseString).png")
-            #expect(card.clozeExampleImageURL?.lastPathComponent == "\(exampleImageMediaID.databaseString).png")
-            #expect(card.audioExampleURL?.lastPathComponent == "\(audioExampleMediaID.databaseString).png")
+            #expect(card.clozeExampleImageURL?.lastPathComponent == "\(mediaID.databaseString).png")
+            #expect(card.audioAnswerURL?.lastPathComponent == "\(audioAnswerMediaID.databaseString).png")
         }
     }
 
@@ -1723,7 +1739,8 @@ struct ContentDatabaseTests {
             "assignments": [],
             "content": {
               "cards": [],
-              "examples": [],
+              "senses": [],
+                  "examples": [],
               "forms": [],
               "distractors": []
             },
@@ -1825,7 +1842,8 @@ struct ContentDatabaseTests {
             "assignments": [],
             "content": {
               "cards": [],
-              "examples": [],
+              "senses": [],
+                  "examples": [],
               "forms": [],
               "distractors": []
             },
@@ -1901,7 +1919,8 @@ struct ContentDatabaseTests {
             "assignments": [],
             "content": {
               "cards": [],
-              "examples": [],
+              "senses": [],
+                  "examples": [],
               "forms": [],
               "distractors": []
             },
@@ -1983,7 +2002,8 @@ struct ContentDatabaseTests {
             "assignments": [],
             "content": {
               "cards": [],
-              "examples": [],
+              "senses": [],
+                  "examples": [],
               "forms": [],
               "distractors": []
             },
@@ -2043,34 +2063,49 @@ struct ContentDatabaseTests {
                   "deck_version_id": "\(versionID.databaseString)",
                   "card_id": "\(cardID.databaseString)",
                   "status": "active",
-                  "lemma": "test",
-                  "display_word": "test",
-                  "part_of_speech": "noun",
-                  "translation": "test translation",
-                  "short_definition": null,
-                  "memory_hint": null,
-                  "etymology": null,
-                  "usage_note": null,
-                  "synonym_note": null,
-                  "grammar_note": null,
-                  "notes": null,
-                  "image_media_id": null,
-                  "audio_word_media_id": "\(audioMediaID.databaseString)",
+                          "lemma": "test",
+                          "display_word": "test",
+                          "part_of_speech": "noun",
+                          "etymology": null,
+                          "notes": null,
+                          "primary_sense_id": "\(senseID.databaseString)",
+                          "audio_word_media_id": "\(audioMediaID.databaseString)",
+                          "sort_order": 1
+                        }
+                      ],
+                      "senses": [
+                        {
+                          "deck_version_id": "\(versionID.databaseString)",
+                          "sense_id": "\(senseID.databaseString)",
+                          "card_id": "\(cardID.databaseString)",
+                          "status": "active",
+                          "display_pattern": null,
+                          "translation": "test translation",
+                          "note": null,
+                          "image_media_id": null,
+                          "sort_order": 1
+                        }
+                      ],
+                      "examples": [
+                        {
+                          "deck_version_id": "\(versionID.databaseString)",
+                          "card_id": "\(cardID.databaseString)",
+                          "sense_id": "\(senseID.databaseString)",
+                          "text": "This is a test.",
+                  "translation": "Это тест.",
+                  "note": null,
                   "sort_order": 1
                 }
               ],
-              "examples": [
+              "sentenceQuestions": [
                 {
                   "deck_version_id": "\(versionID.databaseString)",
-                  "example_id": "\(exampleID.databaseString)",
                   "card_id": "\(cardID.databaseString)",
+                  "sense_id": "\(senseID.databaseString)",
                   "template": "This is a {{blank}}.",
                   "answer": "test",
                   "answer_form_key": null,
-                  "translation": "Это тест.",
-                  "note": null,
-                  "image_media_id": null,
-                  "audio_example_media_id": null,
+                  "audio_answer_media_id": null,
                   "sort_order": 1
                 }
               ],
@@ -2107,7 +2142,8 @@ struct ContentDatabaseTests {
         "assignments": [],
         "content": {
           "cards": [],
-          "examples": [],
+          "senses": [],
+                  "examples": [],
           "forms": [],
           "distractors": []
         },
@@ -2141,7 +2177,6 @@ struct ContentDatabaseTests {
         cardStatus: String = "active",
         cardImageMediaID: UUID? = nil,
         audioWordMediaID: UUID? = nil,
-        exampleImageMediaID: UUID? = nil,
         audioExampleMediaID: UUID? = nil,
         media: [String] = [],
         userEnabled: Bool = true,
@@ -2152,7 +2187,6 @@ struct ContentDatabaseTests {
     ) throws -> ServerBootstrap {
         let cardImageMediaValue = cardImageMediaID.map { #"""# + $0.databaseString + #"""# } ?? "null"
         let audioWordMediaValue = audioWordMediaID.map { #"""# + $0.databaseString + #"""# } ?? "null"
-        let exampleImageMediaValue = exampleImageMediaID.map { #"""# + $0.databaseString + #"""# } ?? "null"
         let audioExampleMediaValue = audioExampleMediaID.map { #"""# + $0.databaseString + #"""# } ?? "null"
         let preferenceUpdatedAtValue = preferenceUpdatedAt.map { #"""# + $0 + #"""# } ?? "null"
         let contentJSON = includeContent
@@ -2163,34 +2197,49 @@ struct ContentDatabaseTests {
                     "deck_version_id": "\(versionID.databaseString)",
                     "card_id": "\(cardID.databaseString)",
                     "status": "\(cardStatus)",
-                    "lemma": "test",
-                    "display_word": "test",
-                    "part_of_speech": "noun",
-                    "translation": "test translation",
-                    "short_definition": null,
-                    "memory_hint": null,
-                    "etymology": null,
-                    "usage_note": null,
-                    "synonym_note": null,
-                    "grammar_note": null,
-                    "notes": null,
-                    "image_media_id": \(cardImageMediaValue),
-                    "audio_word_media_id": \(audioWordMediaValue),
+                            "lemma": "test",
+                            "display_word": "test",
+                            "part_of_speech": "noun",
+                            "etymology": null,
+                            "notes": null,
+                            "primary_sense_id": "\(senseID.databaseString)",
+                            "audio_word_media_id": \(audioWordMediaValue),
+                            "sort_order": 1
+                          }
+                        ],
+                        "senses": [
+                          {
+                            "deck_version_id": "\(versionID.databaseString)",
+                            "sense_id": "\(senseID.databaseString)",
+                            "card_id": "\(cardID.databaseString)",
+                            "status": "\(cardStatus)",
+                            "display_pattern": null,
+                            "translation": "test translation",
+                            "note": null,
+                            "image_media_id": \(cardImageMediaValue),
+                            "sort_order": 1
+                          }
+                        ],
+                        "examples": [
+                          {
+                            "deck_version_id": "\(versionID.databaseString)",
+                            "card_id": "\(cardID.databaseString)",
+                            "sense_id": "\(senseID.databaseString)",
+                            "text": "This is a test.",
+                    "translation": "Это тест.",
+                    "note": null,
                     "sort_order": 1
                   }
                 ],
-                "examples": [
+                "sentenceQuestions": [
                   {
                     "deck_version_id": "\(versionID.databaseString)",
-                    "example_id": "\(exampleID.databaseString)",
                     "card_id": "\(cardID.databaseString)",
+                    "sense_id": "\(senseID.databaseString)",
                     "template": "This is a {{blank}}.",
                     "answer": "test",
                     "answer_form_key": null,
-                    "translation": "Это тест.",
-                    "note": null,
-                    "image_media_id": \(exampleImageMediaValue),
-                    "audio_example_media_id": \(audioExampleMediaValue),
+                    "audio_answer_media_id": \(audioExampleMediaValue),
                     "sort_order": 1
                   }
                 ],
@@ -2199,9 +2248,11 @@ struct ContentDatabaseTests {
               }
               """
             : """
-              {
-                "cards": [],
-                "examples": [],
+                      {
+                        "cards": [],
+                        "senses": [],
+                        "examples": [],
+                "sentenceQuestions": [],
                 "forms": [],
                 "distractors": []
               }
@@ -2276,7 +2327,8 @@ struct ContentDatabaseTests {
             "assignments": [],
             "content": {
               "cards": [],
-              "examples": [],
+              "senses": [],
+                  "examples": [],
               "forms": [],
               "distractors": []
             },
@@ -2316,10 +2368,11 @@ struct ContentDatabaseTests {
         """
         {
           "client_event_id": "\(id.databaseString)",
-          "deck_id": "\(deckID.databaseString)",
-          "deck_version_id": "\(versionID.databaseString)",
-          "card_id": "\(cardID.databaseString)",
-          "mode": "flashcards",
+                  "deck_id": "\(deckID.databaseString)",
+                  "deck_version_id": "\(versionID.databaseString)",
+                  "card_id": "\(cardID.databaseString)",
+                  "sense_id": "\(senseID.databaseString)",
+                  "mode": "flashcards",
           "outcome": "\(outcome)",
           "reviewed_at": "\(reviewedAt)",
           "duration_ms": 1000,
@@ -2347,10 +2400,11 @@ struct ContentDatabaseTests {
         """
         {
           "client_event_id": "\(id.databaseString)",
-          "deck_id": "\(deckID.databaseString)",
-          "deck_version_id": "\(versionID.databaseString)",
-          "card_id": "\(cardID.databaseString)",
-          "mode": "\(mode)",
+                  "deck_id": "\(deckID.databaseString)",
+                  "deck_version_id": "\(versionID.databaseString)",
+                  "card_id": "\(cardID.databaseString)",
+                  "sense_id": "\(senseID.databaseString)",
+                  "mode": "\(mode)",
           "outcome": "correct",
           "source": "today_practice",
           "practiced_at": "\(practicedAt)",
@@ -2436,14 +2490,15 @@ struct ContentDatabaseTests {
         updatedAt: String
     ) throws -> String {
         let dueDate = try #require(Self.isoDate(dueAt))
-        let progress = CardProgress.newCard(cardID: cardID, now: dueDate)
+        let progress = CardProgress.newSense(senseID: senseID, now: dueDate)
         let fsrsObject = try JSONSerialization.jsonObject(with: JSONEncoder().encode(progress.fsrsCard))
         let fsrsData = try JSONSerialization.data(withJSONObject: fsrsObject)
         let fsrsJSON = String(decoding: fsrsData, as: UTF8.self)
         return """
         {
-          "card_id": "\(cardID.databaseString)",
-          "deck_id": "\(deckID.databaseString)",
+                  "card_id": "\(cardID.databaseString)",
+                  "sense_id": "\(senseID.databaseString)",
+                  "deck_id": "\(deckID.databaseString)",
           "fsrs_data": \(fsrsJSON),
           "due_at": "\(dueAt)",
           "state": "review",

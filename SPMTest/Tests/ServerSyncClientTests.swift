@@ -118,6 +118,7 @@ struct ServerSyncClientTests {
         let selectedUserID = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
         let deviceID = UUID(uuidString: "77777777-7777-4777-8777-777777777777")!
         let cardID = UUID(uuidString: "22222222-2222-4222-8222-222222222222")!
+        let senseID = UUID(uuidString: "77777777-7777-4777-8777-777777777777")!
         let deckID = UUID(uuidString: "33333333-3333-4333-8333-333333333333")!
         let rejectedReviewID = UUID(uuidString: "44444444-4444-4444-8444-444444444444")!
         let rejectedMatchingDeckID = UUID(uuidString: "55555555-5555-4555-8555-555555555555")!
@@ -136,7 +137,7 @@ struct ServerSyncClientTests {
               "mode": "events",
               "accepted": {
                 "reviewIds": [],
-                "progressCardIds": [],
+                "progressSenseIds": [],
                 "matchingRecordDeckIds": [],
                 "deckPreferenceDeckIds": []
               },
@@ -145,7 +146,7 @@ struct ServerSyncClientTests {
               },
               "rejected": {
                 "reviewIds": ["\(rejectedReviewID.uuidString)"],
-                "progressCardIds": ["\(cardID.uuidString)"],
+                "progressSenseIds": ["\(senseID.uuidString)"],
                 "matchingRecordDeckIds": ["\(rejectedMatchingDeckID.uuidString)"],
                 "deckPreferenceDeckIds": ["\(rejectedPreferenceDeckID.uuidString)"]
               },
@@ -161,6 +162,7 @@ struct ServerSyncClientTests {
             ServerSyncEventsPayload(
                 progress: [
                     ServerProgressPayload(
+                        senseId: senseID,
                         cardId: cardID,
                         deckId: deckID,
                         fsrsData: .object(["state": .string("review")]),
@@ -181,7 +183,7 @@ struct ServerSyncClientTests {
         #expect(request.value(forHTTPHeaderField: "X-FlashGame-User-Id") == selectedUserID.databaseString)
         #expect(request.value(forHTTPHeaderField: "X-FlashGame-Device-Id") == deviceID.databaseString)
         #expect(response.rejectedReviewIds == [rejectedReviewID])
-        #expect(response.rejectedProgressCardIds == [cardID])
+        #expect(response.rejectedProgressSenseIds == [senseID])
         #expect(response.rejectedMatchingRecordDeckIds == [rejectedMatchingDeckID])
         #expect(response.rejectedDeckPreferenceDeckIds == [rejectedPreferenceDeckID])
         #expect(response.serverRevision == "42")
@@ -202,7 +204,9 @@ struct ServerSyncClientTests {
         "assignments": [],
         "content": {
           "cards": [],
+          "senses": [],
           "examples": [],
+          "sentenceQuestions": [],
           "forms": [],
           "distractors": []
         },

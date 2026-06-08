@@ -10,7 +10,7 @@ struct RecallSessionTests {
     func recallForgotResetsToNew() throws {
         let engine = StudySessionEngine()
         let cardID = UUID()
-        var progress = CardProgress.newCard(cardID: cardID)
+        var progress = CardProgress.newSense(senseID: cardID)
         progress = try engine.applyReview(progress: progress, outcome: .remembered)
         #expect(progress.fsrsCard.state != .new)
 
@@ -36,7 +36,7 @@ struct RecallSessionTests {
     func flashcardsForgotDoesNotResetToNew() throws {
         let engine = StudySessionEngine()
         let cardID = UUID()
-        var progress = CardProgress.newCard(cardID: cardID)
+        var progress = CardProgress.newSense(senseID: cardID)
         progress = try engine.applyReview(progress: progress, outcome: .remembered)
         #expect(progress.fsrsCard.state != .new)
 
@@ -64,7 +64,8 @@ struct RecallSessionTests {
         let currentID = UUID()
         let selectedID = UUID()
         let current = TestFixtures.card(id: currentID, word: "cat", translation: "кот")
-        let selectedProgress = CardProgress.newCard(cardID: selectedID)
+        let currentSense = try #require(current.primarySense)
+        let selectedProgress = CardProgress.newSense(senseID: selectedID)
         let session = StudySession(
             deckID: UUID(),
             mode: .clozeMultipleChoice,
@@ -84,8 +85,8 @@ struct RecallSessionTests {
             savedSelected = progress
         }
 
-        #expect(savedCurrent?.cardID == currentID)
-        #expect(savedSelected?.cardID == selectedID)
+        #expect(savedCurrent?.senseID == currentSense.id)
+        #expect(savedSelected?.senseID == selectedID)
         #expect(savedSelected?.fsrsCard.reps ?? 0 > selectedProgress.fsrsCard.reps)
     }
 
@@ -94,7 +95,9 @@ struct RecallSessionTests {
     func recallForgotCountsAsNew() throws {
         let engine = StudySessionEngine()
         let cardID = UUID()
-        var progress = CardProgress.newCard(cardID: cardID)
+        let card = TestFixtures.card(id: cardID, word: "cat", translation: "кот")
+        let senseID = card.primarySense!.id
+        var progress = CardProgress.newSense(senseID: senseID)
         progress = try engine.applyReview(progress: progress, outcome: .remembered)
 
         let deck = DeckContent(
@@ -104,13 +107,12 @@ struct RecallSessionTests {
             languageCode: "en",
             newCardsPerDay: 20,
             reviewCardsPerDay: 200,
-            cards: [TestFixtures.card(id: cardID, word: "cat", translation: "кот")]
+            cards: [card]
         )
 
-        let before = DeckStatsCalculator.compute(deck: deck, progressByCardID: [cardID: progress], dailyUsage: nil)
+        let before = DeckStatsCalculator.compute(deck: deck, progressBySenseID: [senseID: progress], dailyUsage: nil)
         #expect(before.newAvailable == 0)
 
-        let card = deck.cards[0]
         let session = StudySession(
             deckID: deck.id,
             mode: .recall,
@@ -126,7 +128,7 @@ struct RecallSessionTests {
 
         let after = DeckStatsCalculator.compute(
             deck: deck,
-            progressByCardID: [cardID: saved!],
+            progressBySenseID: [senseID: saved!],
             dailyUsage: nil
         )
         #expect(after.newAvailable == 1)
@@ -137,7 +139,7 @@ struct RecallSessionTests {
     func recallRememberedDoesNotUpdateProgress() throws {
         let engine = StudySessionEngine()
         let cardID = UUID()
-        let progress = CardProgress.newCard(cardID: cardID)
+        let progress = CardProgress.newSense(senseID: cardID)
         let card = TestFixtures.card(id: cardID, word: "cat", translation: "кот")
         let session = StudySession(
             deckID: UUID(),
@@ -248,9 +250,11 @@ struct RecallSessionTests {
         let sourceDeckID = UUID()
         let cardID = UUID()
         let card = TestFixtures.card(id: cardID, word: "cat", translation: "кот")
+        let sense = try #require(card.primarySense)
         let item = StudyQueueItem(
             card: card,
-            progress: CardProgress.newCard(cardID: cardID),
+            sense: sense,
+            progress: CardProgress.newSense(senseID: sense.id),
             deckID: sourceDeckID
         )
         let session = StudySession(

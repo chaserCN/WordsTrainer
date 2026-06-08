@@ -4,86 +4,97 @@ import FSRS
 nonisolated struct StudyQueueItem: Identifiable, Sendable {
     let id: UUID
     let deckID: UUID?
+    let cardID: UUID
+    let senseID: UUID
     let card: WordCardContent
+    let sense: WordSenseContent
     let progress: CardProgress
 
-    init(card: WordCardContent, progress: CardProgress, deckID: UUID? = nil) {
-        self.id = card.id
+    init(card: WordCardContent, sense: WordSenseContent, progress: CardProgress, deckID: UUID? = nil) {
+        self.id = sense.id
         self.deckID = deckID
-        self.card = card
+        self.cardID = sense.cardID
+        self.senseID = sense.id
+        self.sense = sense
+        self.card = card.focused(on: sense)
         self.progress = progress
     }
 
     func withDeckID(_ deckID: UUID) -> StudyQueueItem {
-        StudyQueueItem(card: card, progress: progress, deckID: deckID)
+        StudyQueueItem(card: card, sense: sense, progress: progress, deckID: deckID)
     }
 }
 
 /// One word sense paired with one translation line in matching columns.
 struct MatchingPair: Identifiable, Sendable, Hashable {
     let cardID: UUID
+    let senseID: UUID
     let deckID: UUID?
     let card: WordCardContent
-    let senseIndex: Int
     let translation: String
     var progress: CardProgress
 
-    var id: String { "\(cardID.uuidString)-\(senseIndex)" }
+    var id: String { senseID.uuidString }
 
     init(
         cardID: UUID,
+        senseID: UUID,
         deckID: UUID? = nil,
         card: WordCardContent,
-        senseIndex: Int,
         translation: String,
         progress: CardProgress? = nil
     ) {
         self.cardID = cardID
+        self.senseID = senseID
         self.deckID = deckID
         self.card = card
-        self.senseIndex = senseIndex
         self.translation = translation
-        self.progress = progress ?? CardProgress.newCard(cardID: cardID)
+        self.progress = progress ?? CardProgress.newSense(senseID: senseID)
     }
 
     static func pairs(from item: StudyQueueItem) -> [MatchingPair] {
-        let senses = WordCardContent.translationSenses(item.card.translation)
-        if senses.isEmpty {
-            return [
-                MatchingPair(
-                    cardID: item.card.id,
-                    deckID: item.deckID,
-                    card: item.card,
-                    senseIndex: 0,
-                    translation: item.card.translation,
-                    progress: item.progress
-                ),
-            ]
-        }
-        return senses.enumerated().map { index, sense in
+        [
             MatchingPair(
-                cardID: item.card.id,
+                cardID: item.cardID,
+                senseID: item.senseID,
                 deckID: item.deckID,
                 card: item.card,
-                senseIndex: index,
-                translation: sense,
+                translation: item.sense.translation,
                 progress: item.progress
-            )
-        }
+            ),
+        ]
     }
 }
 
 nonisolated enum StudyQueueBuilder {
+    static func allItems(
+        cards: [WordCardContent],
+        progressBySenseID: [UUID: CardProgress],
+        deckID: UUID? = nil,
+        now: Date = .now
+    ) -> [StudyQueueItem] {
+        cards.flatMap { card in
+            card.activeSenses.map { sense in
+                StudyQueueItem(
+                    card: card,
+                    sense: sense,
+                    progress: progressBySenseID[sense.id] ?? CardProgress.newSense(senseID: sense.id, now: now),
+                    deckID: deckID
+                )
+            }
+        }
+    }
+
     static func build(
         deck: DeckContent,
-        progressByCardID: [UUID: CardProgress],
+        progressBySenseID: [UUID: CardProgress],
         dailyUsage: DeckDailyUsage?,
         now: Date = .now
     ) -> [StudyQueueItem] {
         var rng = SystemRandomNumberGenerator()
         return build(
             deck: deck,
-            progressByCardID: progressByCardID,
+            progressBySenseID: progressBySenseID,
             dailyUsage: dailyUsage,
             now: now,
             using: &rng
@@ -92,7 +103,7 @@ nonisolated enum StudyQueueBuilder {
 
     static func build<RNG: RandomNumberGenerator>(
         deck: DeckContent,
-        progressByCardID: [UUID: CardProgress],
+        progressBySenseID: [UUID: CardProgress],
         dailyUsage: DeckDailyUsage?,
         now: Date = .now,
         using rng: inout RNG
@@ -107,24 +118,26 @@ nonisolated enum StudyQueueBuilder {
         let newSlotsLeft = max(0, deck.newCardsPerDay - studiedToday)
 
         for content in deck.activeCards {
-            let progress = progressByCardID[content.id]
-                ?? CardProgress.newCard(cardID: content.id, now: now)
-            let fsrs = progress.fsrsCard
-            let due = ReviewSchedule.availableDate(for: fsrs.due)
-            let item = StudyQueueItem(card: content, progress: progress)
+            for sense in content.activeSenses {
+                let progress = progressBySenseID[sense.id]
+                    ?? CardProgress.newSense(senseID: sense.id, now: now)
+                let fsrs = progress.fsrsCard
+                let due = ReviewSchedule.availableDate(for: fsrs.due)
+                let item = StudyQueueItem(card: content, sense: sense, progress: progress)
 
-            switch fsrs.state {
-            case .new:
-                if newSlotsLeft > 0 {
-                    newCards.append(item)
-                }
-            case .learning, .relearning:
-                if due <= now {
-                    learning.append(item)
-                }
-            case .review:
-                if due <= now {
-                    review.append(item)
+                switch fsrs.state {
+                case .new:
+                    if newSlotsLeft > 0 {
+                        newCards.append(item)
+                    }
+                case .learning, .relearning:
+                    if due <= now {
+                        learning.append(item)
+                    }
+                case .review:
+                    if due <= now {
+                        review.append(item)
+                    }
                 }
             }
         }
@@ -158,7 +171,7 @@ final class StudySessionEngine: @unchecked Sendable {
             now: now
         )
         updated.due = ReviewSchedule.availableDate(for: updated.due)
-        return CardProgress(cardID: progress.cardID, fsrsCard: updated, updatedAt: now)
+        return CardProgress(senseID: progress.senseID, fsrsCard: updated, updatedAt: now)
     }
 
     func recordNewCardStudied(previous: DeckDailyUsage?) -> DeckDailyUsage {

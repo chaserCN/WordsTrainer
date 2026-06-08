@@ -405,11 +405,21 @@ struct StudySessionMatchingTests {
     func practiceMatchingDoesNotMutateProgress() throws {
         let deckID = UUID()
         let card = TestFixtures.card(word: "cast", translation: "бросать; кидать")
-        let progress = CardProgress.newCard(cardID: card.id)
+        let sense = try #require(card.primarySense)
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        let progress = CardProgress.newSense(senseID: sense.id, now: now)
+        let progressBySenseID = Dictionary(
+            uniqueKeysWithValues: card.activeSenses.map { ($0.id, CardProgress.newSense(senseID: $0.id, now: now)) }
+        )
+        let queue = StudyQueueBuilder.allItems(
+            cards: [card],
+            progressBySenseID: progressBySenseID,
+            deckID: deckID
+        )
         let session = StudySession(
             deckID: UUID(),
             mode: .matching,
-            queue: [StudyQueueItem(card: card, progress: progress, deckID: deckID)],
+            queue: queue,
             dailyUsage: nil,
             engine: StudySessionEngine(),
             savesProgress: false

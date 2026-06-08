@@ -36,11 +36,11 @@ struct MatchingPairScheduler: Sendable {
             ?? pool.first(where: { $0.id == id })
     }
 
-    mutating func updateProgress(cardID: UUID, progress: CardProgress) {
-        for index in visible.indices where visible[index].cardID == cardID {
+    mutating func updateProgress(senseID: UUID, progress: CardProgress) {
+        for index in visible.indices where visible[index].senseID == senseID {
             visible[index].progress = progress
         }
-        for index in pool.indices where pool[index].cardID == cardID {
+        for index in pool.indices where pool[index].senseID == senseID {
             pool[index].progress = progress
         }
     }

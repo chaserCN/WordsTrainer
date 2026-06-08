@@ -22,7 +22,7 @@ nonisolated struct DeckStats: Equatable, Sendable {
 nonisolated enum DeckStatsCalculator {
     static func compute(
         deck: DeckContent,
-        progressByCardID: [UUID: CardProgress],
+        progressBySenseID: [UUID: CardProgress],
         dailyUsage: DeckDailyUsage?,
         now: Date = .now,
         calendar: Calendar = .current
@@ -38,26 +38,28 @@ nonisolated enum DeckStatsCalculator {
         let newSlotsLeft = max(0, deck.newCardsPerDay - studiedToday)
 
         for card in deck.activeCards {
-            guard let progress = progressByCardID[card.id] else {
-                newCount += 1
-                continue
-            }
-            let fsrs = progress.fsrsCard
-            let due = ReviewSchedule.availableDate(for: fsrs.due, calendar: calendar)
-            switch fsrs.state {
-            case .new:
-                newCount += 1
-            case .learning, .relearning:
-                if due <= now {
-                    learningDue += 1
-                } else if StudyDay.isDate(due, inSameStudyDayAs: now, calendar: calendar) {
-                    learningLaterToday += 1
+            for sense in card.activeSenses {
+                guard let progress = progressBySenseID[sense.id] else {
+                    newCount += 1
+                    continue
                 }
-            case .review:
-                if due <= now {
-                    reviewDue += 1
-                } else if StudyDay.isDate(due, inSameStudyDayAs: now, calendar: calendar) {
-                    reviewLaterToday += 1
+                let fsrs = progress.fsrsCard
+                let due = ReviewSchedule.availableDate(for: fsrs.due, calendar: calendar)
+                switch fsrs.state {
+                case .new:
+                    newCount += 1
+                case .learning, .relearning:
+                    if due <= now {
+                        learningDue += 1
+                    } else if StudyDay.isDate(due, inSameStudyDayAs: now, calendar: calendar) {
+                        learningLaterToday += 1
+                    }
+                case .review:
+                    if due <= now {
+                        reviewDue += 1
+                    } else if StudyDay.isDate(due, inSameStudyDayAs: now, calendar: calendar) {
+                        reviewLaterToday += 1
+                    }
                 }
             }
         }
@@ -90,11 +92,11 @@ nonisolated enum StudyPlanForecastCalculator {
         var countsByOffset = Array(repeating: 0, count: days)
 
         for deck in decks where deck.isActive {
-            let progressByCardID = progressByDeckID[deck.id] ?? [:]
+            let progressBySenseID = progressByDeckID[deck.id] ?? [:]
             let dailyUsage = dailyUsageByDeckID[deck.id]
             let todayStats = DeckStatsCalculator.compute(
                 deck: deck,
-                progressByCardID: progressByCardID,
+                progressBySenseID: progressBySenseID,
                 dailyUsage: dailyUsage,
                 now: now,
                 calendar: calendar
@@ -106,32 +108,34 @@ nonisolated enum StudyPlanForecastCalculator {
             var learningDueByOffset = Array(repeating: 0, count: days)
 
             for card in deck.activeCards {
-                guard let progress = progressByCardID[card.id] else {
-                    newCardsRemaining += 1
-                    continue
-                }
+                for sense in card.activeSenses {
+                    guard let progress = progressBySenseID[sense.id] else {
+                        newCardsRemaining += 1
+                        continue
+                    }
 
-                let fsrs = progress.fsrsCard
-                let due = ReviewSchedule.availableDate(for: fsrs.due, calendar: calendar)
-                switch fsrs.state {
-                case .new:
-                    newCardsRemaining += 1
-                case .learning, .relearning:
-                    guard let offset = studyDayOffset(
-                        for: due,
-                        today: today,
-                        days: days,
-                        calendar: calendar
-                    ) else { continue }
-                    learningDueByOffset[offset] += 1
-                case .review:
-                    guard let offset = studyDayOffset(
-                        for: due,
-                        today: today,
-                        days: days,
-                        calendar: calendar
-                    ) else { continue }
-                    reviewDueByOffset[offset] += 1
+                    let fsrs = progress.fsrsCard
+                    let due = ReviewSchedule.availableDate(for: fsrs.due, calendar: calendar)
+                    switch fsrs.state {
+                    case .new:
+                        newCardsRemaining += 1
+                    case .learning, .relearning:
+                        guard let offset = studyDayOffset(
+                            for: due,
+                            today: today,
+                            days: days,
+                            calendar: calendar
+                        ) else { continue }
+                        learningDueByOffset[offset] += 1
+                    case .review:
+                        guard let offset = studyDayOffset(
+                            for: due,
+                            today: today,
+                            days: days,
+                            calendar: calendar
+                        ) else { continue }
+                        reviewDueByOffset[offset] += 1
+                    }
                 }
             }
 

@@ -186,12 +186,52 @@ struct ServerDeckAssignment: Decodable, Sendable {
 }
 
 struct ServerContentPayload: Decodable, Sendable {
-    static let empty = ServerContentPayload(cards: [], examples: [], forms: [], distractors: [])
+    static let empty = ServerContentPayload(cards: [], senses: [], examples: [], sentenceQuestions: [], forms: [], distractors: [])
 
     let cards: [ServerCardContent]
+    let senses: [ServerSenseContent]
     let examples: [ServerExampleContent]
+    let sentenceQuestions: [ServerSentenceQuestionContent]
     let forms: [ServerWordFormContent]
     let distractors: [ServerDistractorContent]
+
+    init(
+        cards: [ServerCardContent],
+        senses: [ServerSenseContent],
+        examples: [ServerExampleContent],
+        sentenceQuestions: [ServerSentenceQuestionContent],
+        forms: [ServerWordFormContent],
+        distractors: [ServerDistractorContent]
+    ) {
+        self.cards = cards
+        self.senses = senses
+        self.examples = examples
+        self.sentenceQuestions = sentenceQuestions
+        self.forms = forms
+        self.distractors = distractors
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case cards
+        case senses
+        case examples
+        case sentenceQuestions
+        case forms
+        case distractors
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        cards = try container.decodeIfPresent([ServerCardContent].self, forKey: .cards) ?? []
+        senses = try container.decodeIfPresent([ServerSenseContent].self, forKey: .senses) ?? []
+        examples = try container.decodeIfPresent([ServerExampleContent].self, forKey: .examples) ?? []
+        sentenceQuestions = try container.decodeIfPresent(
+            [ServerSentenceQuestionContent].self,
+            forKey: .sentenceQuestions
+        ) ?? []
+        forms = try container.decodeIfPresent([ServerWordFormContent].self, forKey: .forms) ?? []
+        distractors = try container.decodeIfPresent([ServerDistractorContent].self, forKey: .distractors) ?? []
+    }
 }
 
 struct ServerCardContent: Decodable, Sendable {
@@ -201,30 +241,43 @@ struct ServerCardContent: Decodable, Sendable {
     let lemma: String
     let displayWord: String
     let partOfSpeech: String?
-    let translation: String
-    let shortDefinition: String?
-    let memoryHint: String?
     let etymology: String?
-    let usageNote: String?
-    let synonymNote: String?
-    let grammarNote: String?
     let notes: String?
-    let imageMediaId: UUID?
+    let primarySenseId: UUID?
     let audioWordMediaId: UUID?
+    let sortOrder: Int?
+}
+
+struct ServerSenseContent: Decodable, Sendable {
+    let deckVersionId: UUID
+    let senseId: UUID
+    let cardId: UUID
+    let status: String
+    let displayPattern: String?
+    let translation: String
+    let note: String?
+    let imageMediaId: UUID?
     let sortOrder: Int?
 }
 
 struct ServerExampleContent: Decodable, Sendable {
     let deckVersionId: UUID
-    let exampleId: UUID
     let cardId: UUID
+    let senseId: UUID
+    let text: String
+    let translation: String?
+    let note: String?
+    let sortOrder: Int?
+}
+
+struct ServerSentenceQuestionContent: Decodable, Sendable {
+    let deckVersionId: UUID
+    let cardId: UUID
+    let senseId: UUID
     let template: String
     let answer: String
     let answerFormKey: String?
-    let translation: String?
-    let note: String?
-    let imageMediaId: UUID?
-    let audioExampleMediaId: UUID?
+    let audioAnswerMediaId: UUID?
     let sortOrder: Int?
 }
 
@@ -239,7 +292,7 @@ struct ServerWordFormContent: Decodable, Sendable {
 struct ServerDistractorContent: Decodable, Sendable {
     let id: UUID
     let deckVersionId: UUID
-    let exampleId: UUID
+    let senseId: UUID
     let text: String
     let sourceCardId: UUID?
     let priority: Int?
@@ -336,6 +389,7 @@ struct ServerReviewEventPayload: Codable, Sendable {
     let deckId: UUID
     let deckVersionId: UUID?
     let cardId: UUID
+    let senseId: UUID
     let mode: String
     let outcome: String
     let source: String?
@@ -347,12 +401,31 @@ struct ServerReviewEventPayload: Codable, Sendable {
 }
 
 struct ServerProgressPayload: Codable, Sendable {
+    let senseId: UUID
     let cardId: UUID
     let deckId: UUID
     let fsrsData: JSONValue
     let dueAt: String?
     let state: String?
     let updatedAt: String?
+
+    init(
+        senseId: UUID,
+        cardId: UUID,
+        deckId: UUID,
+        fsrsData: JSONValue,
+        dueAt: String?,
+        state: String?,
+        updatedAt: String?
+    ) {
+        self.senseId = senseId
+        self.cardId = cardId
+        self.deckId = deckId
+        self.fsrsData = fsrsData
+        self.dueAt = dueAt
+        self.state = state
+        self.updatedAt = updatedAt
+    }
 }
 
 struct ServerPracticeReviewPayload: Codable, Sendable {
@@ -360,6 +433,7 @@ struct ServerPracticeReviewPayload: Codable, Sendable {
     let deckId: UUID
     let deckVersionId: UUID?
     let cardId: UUID
+    let senseId: UUID
     let mode: String
     let outcome: String
     let source: String
@@ -411,14 +485,14 @@ struct ServerSyncEventsResponse: Decodable, Sendable {
     let duplicateReviewIds: [UUID]
     let acceptedPracticeReviewIds: [UUID]
     let duplicatePracticeReviewIds: [UUID]
-    let progressCardIds: [UUID]
+    let progressSenseIds: [UUID]
     let matchingRecordDeckIds: [UUID]
     let acceptedMatchingAttemptIds: [UUID]
     let duplicateMatchingAttemptIds: [UUID]
     let deckPreferenceDeckIds: [UUID]
     let rejectedReviewIds: [UUID]
     let rejectedPracticeReviewIds: [UUID]
-    let rejectedProgressCardIds: [UUID]
+    let rejectedProgressSenseIds: [UUID]
     let rejectedMatchingRecordDeckIds: [UUID]
     let rejectedMatchingAttemptIds: [UUID]
     let rejectedDeckPreferenceDeckIds: [UUID]
@@ -429,14 +503,14 @@ struct ServerSyncEventsResponse: Decodable, Sendable {
         duplicateReviewIds: [UUID],
         acceptedPracticeReviewIds: [UUID] = [],
         duplicatePracticeReviewIds: [UUID] = [],
-        progressCardIds: [UUID],
+        progressSenseIds: [UUID],
         matchingRecordDeckIds: [UUID],
         acceptedMatchingAttemptIds: [UUID] = [],
         duplicateMatchingAttemptIds: [UUID] = [],
         deckPreferenceDeckIds: [UUID],
         rejectedReviewIds: [UUID] = [],
         rejectedPracticeReviewIds: [UUID] = [],
-        rejectedProgressCardIds: [UUID] = [],
+        rejectedProgressSenseIds: [UUID] = [],
         rejectedMatchingRecordDeckIds: [UUID] = [],
         rejectedMatchingAttemptIds: [UUID] = [],
         rejectedDeckPreferenceDeckIds: [UUID] = [],
@@ -446,14 +520,14 @@ struct ServerSyncEventsResponse: Decodable, Sendable {
         self.duplicateReviewIds = duplicateReviewIds
         self.acceptedPracticeReviewIds = acceptedPracticeReviewIds
         self.duplicatePracticeReviewIds = duplicatePracticeReviewIds
-        self.progressCardIds = progressCardIds
+        self.progressSenseIds = progressSenseIds
         self.matchingRecordDeckIds = matchingRecordDeckIds
         self.acceptedMatchingAttemptIds = acceptedMatchingAttemptIds
         self.duplicateMatchingAttemptIds = duplicateMatchingAttemptIds
         self.deckPreferenceDeckIds = deckPreferenceDeckIds
         self.rejectedReviewIds = rejectedReviewIds
         self.rejectedPracticeReviewIds = rejectedPracticeReviewIds
-        self.rejectedProgressCardIds = rejectedProgressCardIds
+        self.rejectedProgressSenseIds = rejectedProgressSenseIds
         self.rejectedMatchingRecordDeckIds = rejectedMatchingRecordDeckIds
         self.rejectedMatchingAttemptIds = rejectedMatchingAttemptIds
         self.rejectedDeckPreferenceDeckIds = rejectedDeckPreferenceDeckIds
@@ -470,7 +544,7 @@ struct ServerSyncEventsResponse: Decodable, Sendable {
     private enum GroupKeys: String, CodingKey {
         case reviewIds
         case practiceReviewIds
-        case progressCardIds
+        case progressSenseIds
         case matchingRecordDeckIds
         case matchingAttemptIds
         case deckPreferenceDeckIds
@@ -485,14 +559,14 @@ struct ServerSyncEventsResponse: Decodable, Sendable {
         duplicateReviewIds = try duplicates.decodeIfPresent([UUID].self, forKey: .reviewIds) ?? []
         acceptedPracticeReviewIds = try accepted.decodeIfPresent([UUID].self, forKey: .practiceReviewIds) ?? []
         duplicatePracticeReviewIds = try duplicates.decodeIfPresent([UUID].self, forKey: .practiceReviewIds) ?? []
-        progressCardIds = try accepted.decodeIfPresent([UUID].self, forKey: .progressCardIds) ?? []
+        progressSenseIds = try accepted.decodeIfPresent([UUID].self, forKey: .progressSenseIds) ?? []
         matchingRecordDeckIds = try accepted.decodeIfPresent([UUID].self, forKey: .matchingRecordDeckIds) ?? []
         acceptedMatchingAttemptIds = try accepted.decodeIfPresent([UUID].self, forKey: .matchingAttemptIds) ?? []
         duplicateMatchingAttemptIds = try duplicates.decodeIfPresent([UUID].self, forKey: .matchingAttemptIds) ?? []
         deckPreferenceDeckIds = try accepted.decodeIfPresent([UUID].self, forKey: .deckPreferenceDeckIds) ?? []
         rejectedReviewIds = try rejected.decodeIfPresent([UUID].self, forKey: .reviewIds) ?? []
         rejectedPracticeReviewIds = try rejected.decodeIfPresent([UUID].self, forKey: .practiceReviewIds) ?? []
-        rejectedProgressCardIds = try rejected.decodeIfPresent([UUID].self, forKey: .progressCardIds) ?? []
+        rejectedProgressSenseIds = try rejected.decodeIfPresent([UUID].self, forKey: .progressSenseIds) ?? []
         rejectedMatchingRecordDeckIds = try rejected.decodeIfPresent([UUID].self, forKey: .matchingRecordDeckIds) ?? []
         rejectedMatchingAttemptIds = try rejected.decodeIfPresent([UUID].self, forKey: .matchingAttemptIds) ?? []
         rejectedDeckPreferenceDeckIds = try rejected.decodeIfPresent([UUID].self, forKey: .deckPreferenceDeckIds) ?? []
@@ -762,7 +836,7 @@ struct ServerSyncClient: Sendable {
                 duplicateReviewIds: [],
                 acceptedPracticeReviewIds: [],
                 duplicatePracticeReviewIds: [],
-                progressCardIds: [],
+                progressSenseIds: [],
                 matchingRecordDeckIds: [],
                 acceptedMatchingAttemptIds: [],
                 duplicateMatchingAttemptIds: [],
