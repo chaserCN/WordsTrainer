@@ -82,7 +82,7 @@ final class StudySession {
         self.engine = engine
         sessionChoicePool = queue.map(\.card)
         flashcardWholeCardTotalCount = Self.uniqueCardGroupCount(in: queue)
-        deckChoicePool = deckCards
+        deckChoicePool = Self.focusedActiveCards(deckCards)
         if mode.isMatching {
             let pairs = queue.flatMap { MatchingPair.pairs(from: $0) }
             matchingTotalPairCount = pairs.count
@@ -212,6 +212,12 @@ final class StudySession {
 
     private static func uniqueCardGroupCount(in items: [StudyQueueItem]) -> Int {
         Set(items.map { StudyCardGroupKey(cardID: $0.cardID, deckID: $0.deckID) }).count
+    }
+
+    private static func focusedActiveCards(_ cards: [WordCardContent]) -> [WordCardContent] {
+        cards.flatMap { card in
+            card.activeSenses.map { card.focused(on: $0) }
+        }
     }
 }
 

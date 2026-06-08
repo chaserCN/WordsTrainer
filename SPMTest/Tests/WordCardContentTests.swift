@@ -369,4 +369,69 @@ struct MatchingPairTests {
         #expect(Set(pairs.map(\.cardID)).count == 1)
         #expect(Set(pairs.map(\.id)).count == 3)
     }
+
+    @Test("pair card keeps its sense-specific example")
+    func pairCardKeepsSenseSpecificExample() throws {
+        let cardID = UUID()
+        let noiseSenseID = UUID()
+        let nervesSenseID = UUID()
+        let card = WordCardContent(
+            id: cardID,
+            word: "to rattle",
+            lemma: "rattle",
+            partOfSpeech: "verb",
+            primarySenseID: noiseSenseID,
+            senses: [
+                WordSenseContent(
+                    id: noiseSenseID,
+                    cardID: cardID,
+                    status: .active,
+                    displayPattern: "to rattle",
+                    translation: "дребезжать",
+                    note: nil,
+                    imageURL: nil,
+                    example: SenseExampleContent(
+                        text: "The old windows rattle.",
+                        translation: "Старые окна дребезжат.",
+                        note: nil
+                    ),
+                    sentenceQuestion: SentenceQuestionContent(
+                        template: "The old windows {{blank}}.",
+                        answer: "rattle",
+                        answerFormKey: "base",
+                        audioAnswerURL: nil
+                    ),
+                    distractors: []
+                ),
+                WordSenseContent(
+                    id: nervesSenseID,
+                    cardID: cardID,
+                    status: .active,
+                    displayPattern: "to rattle someone",
+                    translation: "нервировать",
+                    note: nil,
+                    imageURL: nil,
+                    example: SenseExampleContent(
+                        text: "The sudden question rattled him.",
+                        translation: "Неожиданный вопрос выбил его из равновесия.",
+                        note: nil
+                    ),
+                    sentenceQuestion: SentenceQuestionContent(
+                        template: "The sudden question {{blank}} him.",
+                        answer: "rattled",
+                        answerFormKey: "past",
+                        audioAnswerURL: nil
+                    ),
+                    distractors: []
+                ),
+            ]
+        )
+
+        let pairs = StudyQueueBuilder.allItems(cards: [card], progressBySenseID: [:]).flatMap(MatchingPair.pairs)
+        let nervesPair = try #require(pairs.first { $0.senseID == nervesSenseID })
+
+        #expect(nervesPair.card.word == "to rattle someone")
+        #expect(nervesPair.translation == "нервировать")
+        #expect(nervesPair.card.clozeExamplePlainText == "The sudden question rattled him.")
+    }
 }

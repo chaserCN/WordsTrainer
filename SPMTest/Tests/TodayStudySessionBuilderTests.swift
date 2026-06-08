@@ -33,6 +33,83 @@ struct TodayStudySessionBuilderTests {
         #expect(Set(session.deckChoicePool.map(\.id)) == [firstCard.id, secondCard.id])
     }
 
+    @Test("deck choice pool keeps each sense example focused")
+    @MainActor
+    func deckChoicePoolKeepsSenseExamplesFocused() throws {
+        let cardID = UUID()
+        let noiseSenseID = UUID()
+        let nervesSenseID = UUID()
+        let card = WordCardContent(
+            id: cardID,
+            word: "to rattle",
+            lemma: "rattle",
+            partOfSpeech: "verb",
+            primarySenseID: noiseSenseID,
+            senses: [
+                WordSenseContent(
+                    id: noiseSenseID,
+                    cardID: cardID,
+                    status: .active,
+                    displayPattern: "to rattle",
+                    translation: "дребезжать",
+                    note: nil,
+                    imageURL: nil,
+                    example: SenseExampleContent(
+                        text: "The old windows rattle.",
+                        translation: "Старые окна дребезжат.",
+                        note: nil
+                    ),
+                    sentenceQuestion: SentenceQuestionContent(
+                        template: "The old windows {{blank}}.",
+                        answer: "rattle",
+                        answerFormKey: "base",
+                        audioAnswerURL: nil
+                    ),
+                    distractors: []
+                ),
+                WordSenseContent(
+                    id: nervesSenseID,
+                    cardID: cardID,
+                    status: .active,
+                    displayPattern: "to rattle someone",
+                    translation: "нервировать",
+                    note: nil,
+                    imageURL: nil,
+                    example: SenseExampleContent(
+                        text: "The sudden question rattled him.",
+                        translation: "Неожиданный вопрос выбил его из равновесия.",
+                        note: nil
+                    ),
+                    sentenceQuestion: SentenceQuestionContent(
+                        template: "The sudden question {{blank}} him.",
+                        answer: "rattled",
+                        answerFormKey: "past",
+                        audioAnswerURL: nil
+                    ),
+                    distractors: []
+                ),
+            ]
+        )
+        let session = StudySession(
+            deckID: UUID(),
+            mode: .clozeMultipleChoice,
+            queue: [StudyQueueBuilder.allItems(cards: [card], progressBySenseID: [:])[0]],
+            deckCards: [card],
+            dailyUsage: nil,
+            engine: StudySessionEngine()
+        )
+
+        let poolBySenseID = Dictionary(uniqueKeysWithValues: session.deckChoicePool.map { card in
+            (card.primarySenseID, card)
+        })
+
+        #expect(session.deckChoicePool.count == 2)
+        #expect(poolBySenseID[noiseSenseID]?.word == "to rattle")
+        #expect(poolBySenseID[noiseSenseID]?.clozeExamplePlainText == "The old windows rattle.")
+        #expect(poolBySenseID[nervesSenseID]?.word == "to rattle someone")
+        #expect(poolBySenseID[nervesSenseID]?.clozeExamplePlainText == "The sudden question rattled him.")
+    }
+
     @Test("today practice session uses only cards reviewed today")
     @MainActor
     func todayPracticeUsesReviewedCardsOnly() throws {
