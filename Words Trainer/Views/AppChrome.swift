@@ -101,9 +101,10 @@ struct LovableBackground: View {
     var body: some View {
         Group {
             if let image = LovableBackgroundImageCache.image(for: variant) {
+                // Растягиваем (а не scaledToFill): заполняет фрейм край-в-край без
+                // центрирования, иначе субпиксельный зазор даёт белую полоску у низа.
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFill()
             } else {
                 // Фолбэк (нулевой размер экрана и т.п.): живой рендер.
                 LovableBackgroundContent(variant: variant)
