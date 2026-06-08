@@ -14,7 +14,7 @@ final class StudySession {
     /// Matching-рекорд управляется отдельно через `matchingRecordScope`.
     let savesProgress: Bool
     let matchingTotalPairCount: Int
-    let matchingStartedAt: Date?
+    private(set) var matchingStartedAt: Date?
     private let flashcardWholeCardTotalCount: Int
     private(set) var queue: [StudyQueueItem]
     /// Cards queued at session start — stable MCQ distractor pool for the whole session.
@@ -24,6 +24,7 @@ final class StudySession {
     private var matchingScheduler: MatchingPairScheduler?
     private var dailyUsage: DeckDailyUsage?
     private var currentStartedAt: Date?
+    private var pausedAt: Date?
     private let engine: StudySessionEngine
 
     var current: StudyQueueItem? { queue.first }
@@ -204,6 +205,24 @@ final class StudySession {
     private func reviewDurationMS(endedAt: Date) -> Int? {
         guard let currentStartedAt else { return nil }
         return max(0, Int((endedAt.timeIntervalSince(currentStartedAt) * 1000).rounded()))
+    }
+
+    /// Freezes the active timers when the app leaves the foreground, so time
+    /// spent backgrounded or with the screen locked is not counted as study time.
+    func pauseTiming() {
+        guard pausedAt == nil else { return }
+        pausedAt = Date()
+    }
+
+    /// Resumes timing, shifting the start timestamps forward by the paused
+    /// interval so that gap is excluded from the next recorded duration.
+    func resumeTiming() {
+        guard let pausedAt else { return }
+        self.pausedAt = nil
+        let pausedInterval = Date().timeIntervalSince(pausedAt)
+        guard pausedInterval > 0 else { return }
+        currentStartedAt = currentStartedAt?.addingTimeInterval(pausedInterval)
+        matchingStartedAt = matchingStartedAt?.addingTimeInterval(pausedInterval)
     }
 
     private func startNextCurrentIfNeeded() {

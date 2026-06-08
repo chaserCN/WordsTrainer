@@ -2,6 +2,7 @@ import SwiftUI
 
 struct StudySessionView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(AppUserStore.self) private var userStore
     @Environment(AppSettings.self) private var settings
 
@@ -64,6 +65,16 @@ struct StudySessionView: View {
         .onChange(of: userStore.selectedUserID) { _, selectedUserID in
             guard selectedUserID != store.currentUserID else { return }
             dismiss()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active:
+                session.resumeTiming()
+            case .inactive, .background:
+                session.pauseTiming()
+            @unknown default:
+                break
+            }
         }
     }
 
