@@ -1168,6 +1168,14 @@ private struct DeckSearchWordRow: View {
     let item: DeckWordSearchItem
     let position: Position
 
+    private var translations: String {
+        let joined = item.card.activeSenses
+            .map(\.translation)
+            .filter { !$0.isEmpty }
+            .joined(separator: "; ")
+        return joined.isEmpty ? item.card.translation : joined
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -1185,7 +1193,7 @@ private struct DeckSearchWordRow: View {
                     .truncationMode(.tail)
             }
 
-            Text(item.card.translation)
+            Text(translations)
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(oklch(0.82, 0.03, 250, 0.65))
                 .lineLimit(2)
