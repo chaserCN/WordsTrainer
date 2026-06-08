@@ -38,29 +38,47 @@ nonisolated enum DeckStatsCalculator {
         let newSlotsLeft = max(0, deck.newCardsPerDay - studiedToday)
 
         for card in deck.activeCards {
+            var cardHasNew = false
+            var cardHasLearningDue = false
+            var cardHasLearningLaterToday = false
+            var cardHasReviewDue = false
+            var cardHasReviewLaterToday = false
+
             for sense in card.activeSenses {
                 guard let progress = progressBySenseID[sense.id] else {
-                    newCount += 1
+                    cardHasNew = true
                     continue
                 }
                 let fsrs = progress.fsrsCard
                 let due = ReviewSchedule.availableDate(for: fsrs.due, calendar: calendar)
                 switch fsrs.state {
                 case .new:
-                    newCount += 1
+                    cardHasNew = true
                 case .learning, .relearning:
                     if due <= now {
-                        learningDue += 1
+                        cardHasLearningDue = true
                     } else if StudyDay.isDate(due, inSameStudyDayAs: now, calendar: calendar) {
-                        learningLaterToday += 1
+                        cardHasLearningLaterToday = true
                     }
                 case .review:
                     if due <= now {
-                        reviewDue += 1
+                        cardHasReviewDue = true
                     } else if StudyDay.isDate(due, inSameStudyDayAs: now, calendar: calendar) {
-                        reviewLaterToday += 1
+                        cardHasReviewLaterToday = true
                     }
                 }
+            }
+
+            if cardHasLearningDue {
+                learningDue += 1
+            } else if cardHasReviewDue {
+                reviewDue += 1
+            } else if cardHasNew {
+                newCount += 1
+            } else if cardHasLearningLaterToday {
+                learningLaterToday += 1
+            } else if cardHasReviewLaterToday {
+                reviewLaterToday += 1
             }
         }
 
@@ -103,14 +121,18 @@ nonisolated enum StudyPlanForecastCalculator {
             )
             countsByOffset[0] += todayStats.studyTotal
 
-            var newCardsRemaining = 0
-            var reviewDueByOffset = Array(repeating: 0, count: days)
-            var learningDueByOffset = Array(repeating: 0, count: days)
+            var newCardIDs = Set<UUID>()
+            var reviewDueByOffset = Array(repeating: Set<UUID>(), count: days)
+            var learningDueByOffset = Array(repeating: Set<UUID>(), count: days)
 
             for card in deck.activeCards {
+                var cardHasNew = false
+                var learningOffsets = Set<Int>()
+                var reviewOffsets = Set<Int>()
+
                 for sense in card.activeSenses {
                     guard let progress = progressBySenseID[sense.id] else {
-                        newCardsRemaining += 1
+                        cardHasNew = true
                         continue
                     }
 
@@ -118,7 +140,7 @@ nonisolated enum StudyPlanForecastCalculator {
                     let due = ReviewSchedule.availableDate(for: fsrs.due, calendar: calendar)
                     switch fsrs.state {
                     case .new:
-                        newCardsRemaining += 1
+                        cardHasNew = true
                     case .learning, .relearning:
                         guard let offset = studyDayOffset(
                             for: due,
@@ -126,7 +148,7 @@ nonisolated enum StudyPlanForecastCalculator {
                             days: days,
                             calendar: calendar
                         ) else { continue }
-                        learningDueByOffset[offset] += 1
+                        learningOffsets.insert(offset)
                     case .review:
                         guard let offset = studyDayOffset(
                             for: due,
@@ -134,23 +156,41 @@ nonisolated enum StudyPlanForecastCalculator {
                             days: days,
                             calendar: calendar
                         ) else { continue }
-                        reviewDueByOffset[offset] += 1
+                        reviewOffsets.insert(offset)
                     }
+                }
+
+                if cardHasNew {
+                    newCardIDs.insert(card.id)
+                }
+                for offset in learningOffsets {
+                    learningDueByOffset[offset].insert(card.id)
+                }
+                for offset in reviewOffsets {
+                    reviewDueByOffset[offset].insert(card.id)
                 }
             }
 
-            newCardsRemaining = max(0, newCardsRemaining - todayStats.newAvailable)
+            var newCardsRemaining = newCardIDs
+            newCardsRemaining.subtract(sortedPrefix(newCardsRemaining, count: todayStats.newAvailable))
 
-            var reviewBacklog = max(0, reviewDueByOffset[0] - todayStats.reviewDue)
+            var reviewBacklog = reviewDueByOffset[0]
+            reviewBacklog.subtract(sortedPrefix(reviewBacklog, count: todayStats.reviewDue))
             for offset in 1..<days {
-                reviewBacklog += reviewDueByOffset[offset]
-                let plannedReviews = min(reviewBacklog, deck.reviewCardsPerDay)
-                reviewBacklog -= plannedReviews
+                var scheduledToday = learningDueByOffset[offset]
 
-                let plannedNewCards = min(newCardsRemaining, deck.newCardsPerDay)
-                newCardsRemaining -= plannedNewCards
+                reviewBacklog.formUnion(reviewDueByOffset[offset])
+                let reviewCandidates = reviewBacklog.subtracting(scheduledToday)
+                let plannedReviews = sortedPrefix(reviewCandidates, count: deck.reviewCardsPerDay)
+                scheduledToday.formUnion(plannedReviews)
+                reviewBacklog.subtract(plannedReviews)
 
-                countsByOffset[offset] += learningDueByOffset[offset] + plannedReviews + plannedNewCards
+                let newCandidates = newCardsRemaining.subtracting(scheduledToday)
+                let plannedNewCards = sortedPrefix(newCandidates, count: deck.newCardsPerDay)
+                scheduledToday.formUnion(plannedNewCards)
+                newCardsRemaining.subtract(plannedNewCards)
+
+                countsByOffset[offset] += scheduledToday.count
             }
         }
 
@@ -175,5 +215,10 @@ nonisolated enum StudyPlanForecastCalculator {
               offset >= 0,
               offset < days else { return nil }
         return offset
+    }
+
+    private static func sortedPrefix(_ ids: Set<UUID>, count: Int) -> Set<UUID> {
+        guard count > 0 else { return [] }
+        return Set(ids.sorted { $0.uuidString < $1.uuidString }.prefix(count))
     }
 }

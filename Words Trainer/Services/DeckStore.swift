@@ -720,13 +720,15 @@ extension StudySession {
     func advanceAfterReview(
         outcome: ReviewOutcome,
         additionalFailureCardID: UUID? = nil,
+        reviewsActiveCardSenses: Bool = false,
         store: DeckStore
     ) throws {
         let shouldNotify = savesProgress && !(mode == .recall && outcome == .remembered)
         let progressDeckID = current?.deckID ?? deckID
         try advanceAfterReview(
             outcome: outcome,
-            additionalFailureProgress: nil
+            additionalFailureProgress: nil,
+            reviewsActiveCardSenses: reviewsActiveCardSenses
         ) { progress, wasNew in
             try store.saveProgress(deckID: progressDeckID, progress: progress, wasNew: wasNew)
         } onAdditionalFailureSave: { progress in

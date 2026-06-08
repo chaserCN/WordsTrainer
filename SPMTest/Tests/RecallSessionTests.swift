@@ -57,6 +57,48 @@ struct RecallSessionTests {
         #expect(saved?.fsrsCard.state != .new)
     }
 
+    @Test("whole-card flashcard review updates queued sibling senses")
+    @MainActor
+    func wholeCardFlashcardReviewUpdatesQueuedSiblingSenses() throws {
+        let engine = StudySessionEngine()
+        let card = TestFixtures.card(word: "cast", translation: "бросать; гипс")
+        let other = TestFixtures.card(word: "load", translation: "груз")
+        let queue = StudyQueueBuilder.allItems(cards: [card, other], progressBySenseID: [:])
+        let session = StudySession(
+            deckID: UUID(),
+            mode: .flashcards,
+            queue: queue,
+            dailyUsage: nil,
+            engine: engine
+        )
+
+        #expect(session.displayTotalCount(flashcardDisplayMode: .oneSense) == 3)
+        #expect(session.displayRemainingCount(flashcardDisplayMode: .oneSense) == 3)
+        #expect(session.displayTotalCount(flashcardDisplayMode: .wholeCard) == 2)
+        #expect(session.displayRemainingCount(flashcardDisplayMode: .wholeCard) == 2)
+
+        var savedSenseIDs: [UUID] = []
+        var newCardStudyFlags: [Bool] = []
+        var reviewSenseIDs: [UUID] = []
+        try session.advanceAfterReview(
+            outcome: .remembered,
+            reviewsActiveCardSenses: true
+        ) { progress, wasNew in
+            savedSenseIDs.append(progress.senseID)
+            newCardStudyFlags.append(wasNew)
+        } onReview: { event in
+            reviewSenseIDs.append(event.senseID)
+        }
+
+        let cardSenseIDs = card.activeSenses.map(\.id)
+        #expect(savedSenseIDs == cardSenseIDs)
+        #expect(newCardStudyFlags == [true, false])
+        #expect(reviewSenseIDs == cardSenseIDs)
+        #expect(session.remainingCount == 1)
+        #expect(session.displayRemainingCount(flashcardDisplayMode: .wholeCard) == 1)
+        #expect(session.current?.cardID == other.id)
+    }
+
     @Test("cloze wrong answer can fail selected distractor progress too")
     @MainActor
     func clozeWrongAnswerFailsSelectedDistractorProgressToo() throws {

@@ -51,6 +51,47 @@ struct DeckStatsTests {
         #expect(stats.newAvailable == 1)
     }
 
+    @Test("deck stats merge sibling senses into one scheduled card")
+    func siblingSensesCountAsOneScheduledCard() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 12))!
+        let card = TestFixtures.card(word: "cast", translation: "бросать; гипс")
+        let deck = DeckContent(
+            id: UUID(),
+            title: "Test",
+            avatarSystemName: nil,
+            languageCode: "en",
+            newCardsPerDay: 20,
+            reviewCardsPerDay: 200,
+            cards: [card]
+        )
+        let dueCard = Card(
+            due: now.addingTimeInterval(-60),
+            stability: 1,
+            difficulty: 1,
+            reps: 1,
+            state: .review,
+            lastReview: now.addingTimeInterval(-86_400)
+        )
+        let progressBySenseID = Dictionary(
+            uniqueKeysWithValues: card.activeSenses.map {
+                ($0.id, CardProgress(senseID: $0.id, fsrsCard: dueCard))
+            }
+        )
+
+        let stats = DeckStatsCalculator.compute(
+            deck: deck,
+            progressBySenseID: progressBySenseID,
+            dailyUsage: nil,
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(stats.reviewDue == 1)
+        #expect(stats.studyTotal == 1)
+    }
+
     @Test("deck stats ignore inactive cards")
     func inactiveCardsAreSkippedInStats() {
         let activeID = UUID()
@@ -381,6 +422,45 @@ struct DeckStatsTests {
         )
 
         #expect(days.map(\.dueCount) == [1, 4, 2])
+    }
+
+    @Test("weekly study plan collapses sibling senses per future day")
+    func weeklyPlanCollapsesSiblingSensesPerFutureDay() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 6, day: 5, hour: 9))!
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: now)!
+        let dayAfterTomorrow = calendar.date(byAdding: .day, value: 2, to: now)!
+        let card = TestFixtures.card(word: "cast", translation: "бросать; гипс; состав; актёры; отливать")
+        let deck = DeckContent(
+            id: UUID(),
+            title: "Test",
+            avatarSystemName: nil,
+            languageCode: "en",
+            newCardsPerDay: 20,
+            reviewCardsPerDay: 200,
+            cards: [card]
+        )
+        let progressPairs = card.activeSenses.enumerated().map { index, sense in
+            (
+                sense.id,
+                CardProgress(
+                    senseID: sense.id,
+                    fsrsCard: reviewCard(due: index < 2 ? tomorrow : dayAfterTomorrow, now: now)
+                )
+            )
+        }
+
+        let days = StudyPlanForecastCalculator.compute(
+            days: 3,
+            decks: [deck],
+            progressByDeckID: [deck.id: Dictionary(uniqueKeysWithValues: progressPairs)],
+            dailyUsageByDeckID: [:],
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(days.map(\.dueCount) == [0, 1, 1])
     }
 
     @Test("cloze queue falls back to full deck when SRS queue is empty")

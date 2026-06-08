@@ -11,6 +11,7 @@ final class AppSettings {
         static let soundEnabled = "settings.soundEnabled"
         static let soundVolume = "settings.soundVolume"
         static let paceBarEnabled = "settings.paceBarEnabled"
+        static let flashcardDisplayMode = "settings.flashcardDisplayMode"
     }
 
     private static let defaultSoundVolume = 0.75
@@ -45,6 +46,12 @@ final class AppSettings {
         }
     }
 
+    var flashcardDisplayMode: FlashcardDisplayMode {
+        didSet {
+            UserDefaults.standard.set(flashcardDisplayMode.rawValue, forKey: Keys.flashcardDisplayMode)
+        }
+    }
+
     private init() {
         let defaults = UserDefaults.standard
         if let savedVolume = defaults.object(forKey: Keys.soundVolume) as? Double {
@@ -54,6 +61,12 @@ final class AppSettings {
             soundVolume = legacySoundEnabled ? Self.defaultSoundVolume : 0
         }
         isPaceBarEnabled = defaults.object(forKey: Keys.paceBarEnabled) as? Bool ?? true
+        if let rawMode = defaults.string(forKey: Keys.flashcardDisplayMode),
+           let mode = FlashcardDisplayMode(rawValue: rawMode) {
+            flashcardDisplayMode = mode
+        } else {
+            flashcardDisplayMode = .oneSense
+        }
         WordAudioPlayer.shared.applyVolume(soundVolume)
     }
 
@@ -66,6 +79,11 @@ final class AppSettings {
 struct SoundToggleButton: View {
     @Environment(AppSettings.self) private var settings
     @State private var isShowingVolume = false
+    let showsFlashcardMode: Bool
+
+    init(showsFlashcardMode: Bool = false) {
+        self.showsFlashcardMode = showsFlashcardMode
+    }
 
     var body: some View {
         Button {
@@ -76,7 +94,7 @@ struct SoundToggleButton: View {
         .accessibilityLabel("Громкость")
         .accessibilityValue(volumeAccessibilityValue)
         .popover(isPresented: $isShowingVolume) {
-            SoundSettingsPopover()
+            SoundSettingsPopover(showsFlashcardMode: showsFlashcardMode)
                 .presentationCompactAdaptation(.popover)
         }
     }
@@ -119,9 +137,11 @@ struct MatchingSettingsMenu: View {
 private struct SoundSettingsPopover: View {
     @Environment(AppSettings.self) private var settings
     let showsPaceBarToggle: Bool
+    let showsFlashcardMode: Bool
 
-    init(showsPaceBarToggle: Bool = false) {
+    init(showsPaceBarToggle: Bool = false, showsFlashcardMode: Bool = false) {
         self.showsPaceBarToggle = showsPaceBarToggle
+        self.showsFlashcardMode = showsFlashcardMode
     }
 
     var body: some View {
@@ -148,6 +168,15 @@ private struct SoundSettingsPopover: View {
                 }
             }
 
+            if showsFlashcardMode {
+                Divider()
+                Picker("Карточки", selection: $settings.flashcardDisplayMode) {
+                    Text("По значению").tag(FlashcardDisplayMode.oneSense)
+                    Text("Слово целиком").tag(FlashcardDisplayMode.wholeCard)
+                }
+                .pickerStyle(.segmented)
+            }
+
             if showsPaceBarToggle {
                 Divider()
                 Toggle(isOn: $settings.isPaceBarEnabled) {
@@ -157,6 +186,17 @@ private struct SoundSettingsPopover: View {
         }
         .padding(20)
         .frame(width: 300)
-        .presentationDetents([.height(showsPaceBarToggle ? 220 : 170)])
+        .presentationDetents([.height(popoverHeight)])
+    }
+
+    private var popoverHeight: CGFloat {
+        switch (showsPaceBarToggle, showsFlashcardMode) {
+        case (true, true):
+            return 280
+        case (true, false), (false, true):
+            return 220
+        case (false, false):
+            return 170
+        }
     }
 }

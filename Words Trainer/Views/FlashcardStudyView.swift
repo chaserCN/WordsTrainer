@@ -2,6 +2,7 @@ import SwiftUI
 
 struct FlashcardStudyView: View {
     let card: WordCardContent
+    let displayMode: FlashcardDisplayMode
     let totalCount: Int
     let remainingCount: Int
     let isAnswerEnabled: Bool
@@ -19,7 +20,7 @@ struct FlashcardStudyView: View {
     @State private var cardChangeDirection: StudyCardChangeDirection = .right
     @State private var isFlipAnimating = false
     @State private var flipGeneration = 0
-    @State private var renderedCardID: UUID?
+    @State private var renderedCardID: String?
     @State private var progressHeaderBottom: CGFloat = 0
     @State private var collapsedCardTop: CGFloat = 0
 
@@ -43,11 +44,15 @@ struct FlashcardStudyView: View {
     }
 
     private var notesText: String? {
-        card.explanation?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        presentation.notesHTML?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
     }
 
     private var cardImageURL: URL? {
-        card.imageURL
+        presentation.imageURL
+    }
+
+    private var presentation: FlashcardPresentation {
+        FlashcardPresentation(card: card, displayMode: displayMode)
     }
 
     var body: some View {
@@ -94,14 +99,14 @@ struct FlashcardStudyView: View {
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             .coordinateSpace(.named(Self.layoutCoordinateSpace))
         }
-        .task(id: card.id) {
+        .task(id: presentation.id) {
             resetForNewCard()
             WordAudioPlayer.shared.playWord(from: card)
         }
     }
 
     private var isUsingCurrentCardState: Bool {
-        renderedCardID == nil || renderedCardID == card.id
+        renderedCardID == nil || renderedCardID == presentation.id
     }
 
     private var isShowingBack: Bool {
@@ -442,7 +447,7 @@ struct FlashcardStudyView: View {
                     .frame(width: 10, height: 10)
                     .shadow(color: wordDotColor.opacity(0.7), radius: 5)
                     .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-                Text(card.word)
+                Text(presentation.word)
                     .font(.title2.bold())
                     .foregroundStyle(FlashcardPalette.primaryText)
                     .lineLimit(nil)
@@ -452,7 +457,7 @@ struct FlashcardStudyView: View {
             }
 
             if isBack {
-                Text(card.translation)
+                Text(presentation.translation)
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(FlashcardPalette.primaryText)
                     .lineLimit(nil)
@@ -538,7 +543,7 @@ struct FlashcardStudyView: View {
             Text(exampleSentence(font: .body, color: FlashcardPalette.secondaryText))
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let translation = card.clozeExampleTranslation?.trimmingCharacters(in: .whitespacesAndNewlines),
+            if let translation = presentation.exampleTranslation?.trimmingCharacters(in: .whitespacesAndNewlines),
                !translation.isEmpty {
                 HTMLText(
                     html: translation,
@@ -564,12 +569,12 @@ struct FlashcardStudyView: View {
     }
 
     private func exampleSentence(font: Font, color: Color) -> AttributedString {
-        let example = card.clozeExamplePlainText
+        let example = presentation.exampleText
         var attributed = AttributedString(example)
         attributed.font = font
         attributed.foregroundColor = color
 
-        let answer = card.effectiveClozeAnswer
+        let answer = presentation.answer
         if let stringRange = example.range(of: answer, options: [.caseInsensitive, .diacriticInsensitive]),
            let range = Range(stringRange, in: attributed) {
             attributed[range].font = font.weight(.bold)
@@ -579,7 +584,7 @@ struct FlashcardStudyView: View {
 
     private func flipCard() {
         guard !isFlipAnimating else { return }
-        renderedCardID = card.id
+        renderedCardID = presentation.id
 
         if reduceMotion {
             isFlipped.toggle()
@@ -631,7 +636,7 @@ struct FlashcardStudyView: View {
 
     private func resetForNewCard() {
         flipGeneration += 1
-        renderedCardID = card.id
+        renderedCardID = presentation.id
         isFlipped = false
         isExampleExpanded = false
         isExampleDetailsVisible = false
@@ -641,6 +646,60 @@ struct FlashcardStudyView: View {
         cardRotation = 0
         isFlipAnimating = false
         collapsedCardTop = 0
+    }
+}
+
+private struct FlashcardPresentation {
+    let id: String
+    let word: String
+    let translation: String
+    let exampleText: String
+    let exampleTranslation: String?
+    let notesHTML: String?
+    let imageURL: URL?
+    let answer: String
+
+    init(card: WordCardContent, displayMode: FlashcardDisplayMode) {
+        switch displayMode {
+        case .oneSense:
+            let sense = card.primarySense
+            id = "\(card.id.uuidString):\(sense?.id.uuidString ?? card.id.uuidString):sense"
+            word = sense?.displayPattern ?? card.word
+            translation = sense?.translation ?? card.translation
+            exampleText = card.clozeExamplePlainText
+            exampleTranslation = sense?.clozeExampleTranslation ?? card.clozeExampleTranslation
+            notesHTML = Self.joinNotes([
+                sense?.note,
+                card.cardNotes,
+                card.etymology,
+            ])
+            imageURL = sense?.imageURL ?? card.imageURL
+            answer = card.effectiveClozeAnswer
+        case .wholeCard:
+            let activeSenses = card.activeSenses
+            let exampleSense = card.primarySense ?? activeSenses.first
+            id = "\(card.id.uuidString):whole"
+            word = card.baseWord
+            translation = activeSenses.map(\.translation).joined(separator: "; ")
+            exampleText = exampleSense?.exampleText ?? card.clozeExamplePlainText
+            exampleTranslation = exampleSense?.clozeExampleTranslation
+            notesHTML = Self.joinNotes([
+                card.cardNotes,
+                card.etymology,
+            ])
+            imageURL = exampleSense?.imageURL
+            answer = exampleSense?.clozeAnswer ?? card.effectiveClozeAnswer
+        }
+    }
+
+    private static func joinNotes(_ values: [String?]) -> String? {
+        let notes = values.compactMap { value -> String? in
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        guard !notes.isEmpty else { return nil }
+        return notes.joined(separator: "<br><br>")
     }
 }
 

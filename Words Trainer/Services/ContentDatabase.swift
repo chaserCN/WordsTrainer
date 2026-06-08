@@ -224,7 +224,7 @@ nonisolated final class ContentDatabase {
         )
         let decksWithImportedContent = Set(importedContentVersionIDs.compactMap { versionDeckIDs[$0] })
 
-            try beginTransaction()
+        try beginTransaction()
         do {
             try replaceAssignments(bootstrap.assignments, selectedUserID: selectedUserID)
             try upsertMediaObjects(bootstrap.media)

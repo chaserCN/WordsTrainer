@@ -17,6 +17,11 @@ nonisolated enum ContentStatus: String, Codable, Hashable, Sendable {
     var isActive: Bool { self == .active }
 }
 
+nonisolated enum FlashcardDisplayMode: String, Codable, CaseIterable, Hashable, Sendable {
+    case oneSense
+    case wholeCard
+}
+
 nonisolated struct SenseExampleContent: Codable, Hashable, Sendable {
     let text: String
     let translation: String?
@@ -64,6 +69,7 @@ nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
     let id: UUID
     let status: ContentStatus
     let word: String
+    let baseWord: String
     let lemma: String
     let partOfSpeech: String?
     let etymology: String?
@@ -77,6 +83,7 @@ nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
         id: UUID = UUID(),
         status: ContentStatus = .active,
         word: String,
+        baseWord: String? = nil,
         lemma: String? = nil,
         partOfSpeech: String? = nil,
         translation: String? = nil,
@@ -100,6 +107,7 @@ nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
         self.id = id
         self.status = status
         self.word = word
+        self.baseWord = baseWord ?? word
         self.lemma = lemma ?? Self.headword(from: word)
         self.partOfSpeech = partOfSpeech
         self.etymology = etymology
@@ -163,6 +171,7 @@ nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
     var clozeExampleTranslation: String? { primarySense?.clozeExampleTranslation }
     var clozeExampleImageURL: URL? { primarySense?.clozeExampleImageURL }
     var answerFormKey: String? { primarySense?.answerFormKey }
+    var cardNotes: String? { notes }
     var explanation: String? { primarySense?.note ?? notes }
     var imageURL: URL? { primarySense?.imageURL }
     var audioAnswerURL: URL? { primarySense?.audioAnswerURL }
@@ -173,6 +182,7 @@ nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
             id: id,
             status: status,
             word: sense.displayPattern ?? word,
+            baseWord: baseWord,
             lemma: lemma,
             partOfSpeech: partOfSpeech,
             etymology: etymology,

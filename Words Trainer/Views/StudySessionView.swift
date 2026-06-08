@@ -3,6 +3,7 @@ import SwiftUI
 struct StudySessionView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AppUserStore.self) private var userStore
+    @Environment(AppSettings.self) private var settings
 
     @Bindable var session: StudySession
     let store: DeckStore
@@ -58,8 +59,9 @@ struct StudySessionView: View {
                     case .flashcards:
                         FlashcardStudyView(
                             card: item.card,
-                            totalCount: session.sessionChoicePool.count,
-                            remainingCount: session.remainingCount,
+                            displayMode: settings.flashcardDisplayMode,
+                            totalCount: session.displayTotalCount(flashcardDisplayMode: settings.flashcardDisplayMode),
+                            remainingCount: session.displayRemainingCount(flashcardDisplayMode: settings.flashcardDisplayMode),
                             isAnswerEnabled: isFlashcardSubmitEnabled
                         ) { outcome in
                             submit(outcome)
@@ -97,7 +99,7 @@ struct StudySessionView: View {
                 }
             } else if session.mode == .matchingAudio || session.mode == .flashcards || session.mode == .clozeMultipleChoice {
                 ToolbarItem(placement: .topBarTrailing) {
-                    SoundToggleButton()
+                    SoundToggleButton(showsFlashcardMode: session.mode == .flashcards)
                         .tint(navbarButtonTint)
                 }
             }
@@ -219,6 +221,7 @@ struct StudySessionView: View {
             try session.advanceAfterReview(
                 outcome: outcome,
                 additionalFailureCardID: additionalFailureCardID,
+                reviewsActiveCardSenses: session.mode == .flashcards && settings.flashcardDisplayMode == .wholeCard,
                 store: store
             )
         } catch {
