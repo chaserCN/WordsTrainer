@@ -703,7 +703,7 @@ enum ServerSyncError: LocalizedError {
     case cannotFindHost
     case secureConnectionFailed
     case cancelled
-    case httpStatus(Int)
+    case httpStatus(code: Int, path: String? = nil)
 
     var errorDescription: String? {
         switch self {
@@ -729,17 +729,21 @@ enum ServerSyncError: LocalizedError {
             L10n.text("Не удалось установить защищённое соединение с сервером.")
         case .cancelled:
             L10n.text("Синхронизация отменена.")
-        case .httpStatus(let code):
-            Self.httpStatusMessage(code)
+        case .httpStatus(let code, let path):
+            Self.httpStatusMessage(code, path: path)
         }
     }
 
-    private static func httpStatusMessage(_ code: Int) -> String {
+    private static func httpStatusMessage(_ code: Int, path: String?) -> String {
         switch code {
         case 401, 403:
             L10n.text("Сервер отклонил HOUSEHOLD_SYNC_TOKEN. Проверьте семейный sync token.")
         case 404:
-            L10n.text("Сервер доступен, но endpoint /v1/bootstrap не найден.")
+            if let path, !path.isEmpty {
+                L10n.format("Сервер доступен, но ресурс %@ не найден (404).", path)
+            } else {
+                L10n.text("Сервер доступен, но запрошенный ресурс не найден (404).")
+            }
         case 500..<600:
             L10n.format("На сервере ошибка HTTP %d. Попробуйте позже.", code)
         default:
@@ -931,7 +935,7 @@ struct ServerSyncClient: Sendable {
         }
         guard (200..<300).contains(http.statusCode) else {
             Self.logger.error("HTTP \(method, privacy: .public) \(endpoint.absoluteString, privacy: .public) status=\(http.statusCode, privacy: .public)")
-            throw ServerSyncError.httpStatus(http.statusCode)
+            throw ServerSyncError.httpStatus(code: http.statusCode, path: endpoint.path)
         }
         Self.logger.info("HTTP \(method, privacy: .public) \(endpoint.absoluteString, privacy: .public) status=\(http.statusCode, privacy: .public) bytes=\(data.count, privacy: .public)")
         return data

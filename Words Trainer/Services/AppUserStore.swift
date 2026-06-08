@@ -407,7 +407,7 @@ final class AppUserStore {
         if case ServerSyncError.timedOut = error {
             return "delta_timed_out"
         }
-        if case ServerSyncError.httpStatus(let statusCode) = error,
+        if case ServerSyncError.httpStatus(let statusCode, _) = error,
            statusCode == 400 || statusCode == 409 {
             return "server_rejected_delta_revision"
         }

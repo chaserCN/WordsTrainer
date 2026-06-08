@@ -17,7 +17,8 @@
 "Синхронизация отменена." = "Sync cancelled.";
 "Синхронизация отменена" = "Sync cancelled";
 "Сервер отклонил HOUSEHOLD_SYNC_TOKEN. Проверьте семейный sync token." = "The server rejected HOUSEHOLD_SYNC_TOKEN. Check the household sync token.";
-"Сервер доступен, но endpoint /v1/bootstrap не найден." = "The server is reachable, but endpoint /v1/bootstrap was not found.";
+"Сервер доступен, но ресурс %@ не найден (404)." = "The server is reachable, but resource %@ was not found (404).";
+"Сервер доступен, но запрошенный ресурс не найден (404)." = "The server is reachable, but the requested resource was not found (404).";
 "На сервере ошибка HTTP %d. Попробуйте позже." = "Server error HTTP %d. Try again later.";
 "Сервер вернул HTTP %d." = "The server returned HTTP %d.";
 "Пользователь ещё не загружен с сервера." = "The user has not been loaded from the server yet.";
