@@ -669,9 +669,9 @@ private struct FlashcardPresentation {
             exampleText = card.clozeExamplePlainText
             exampleTranslation = sense?.clozeExampleTranslation ?? card.clozeExampleTranslation
             notesHTML = Self.joinNotes([
+                Self.etymologyNote(card.etymology),
                 sense?.note,
                 card.cardNotes,
-                card.etymology,
             ])
             imageURL = sense?.imageURL ?? card.imageURL
             answer = card.effectiveClozeAnswer
@@ -684,12 +684,19 @@ private struct FlashcardPresentation {
             exampleText = exampleSense?.exampleText ?? card.clozeExamplePlainText
             exampleTranslation = exampleSense?.clozeExampleTranslation
             notesHTML = Self.joinNotes([
+                Self.etymologyNote(card.etymology),
                 card.cardNotes,
-                card.etymology,
             ])
             imageURL = exampleSense?.imageURL
             answer = exampleSense?.clozeAnswer ?? card.effectiveClozeAnswer
         }
+    }
+
+    private static func etymologyNote(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return "<b>Этимология:</b> \(trimmed)"
     }
 
     private static func joinNotes(_ values: [String?]) -> String? {

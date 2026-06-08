@@ -1982,12 +1982,13 @@ nonisolated final class ContentDatabase {
     private func upsertSentenceQuestions(_ questions: [ServerSentenceQuestionContent]) throws {
         for question in questions {
             let sql = """
-            INSERT INTO sentence_questions (sense_id, card_id, template, answer, answer_form_key, audio_answer_media_id, sort_order)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO sentence_questions (sense_id, card_id, template, answer, translation, answer_form_key, audio_answer_media_id, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(sense_id) DO UPDATE SET
                 card_id = excluded.card_id,
                 template = excluded.template,
                 answer = excluded.answer,
+                translation = excluded.translation,
                 answer_form_key = excluded.answer_form_key,
                 audio_answer_media_id = excluded.audio_answer_media_id,
                 sort_order = excluded.sort_order
@@ -2001,9 +2002,10 @@ nonisolated final class ContentDatabase {
             try bind(statement, index: 2, uuid: question.cardId)
             try bind(statement, index: 3, text: question.template)
             try bind(statement, index: 4, text: question.answer)
-            try bind(statement, index: 5, text: question.answerFormKey)
-            try bind(statement, index: 6, uuid: question.audioAnswerMediaId)
-            try bind(statement, index: 7, int: question.sortOrder ?? 0)
+            try bind(statement, index: 5, text: question.translation)
+            try bind(statement, index: 6, text: question.answerFormKey)
+            try bind(statement, index: 7, uuid: question.audioAnswerMediaId)
+            try bind(statement, index: 8, int: question.sortOrder ?? 0)
             guard sqlite3_step(statement) == SQLITE_DONE else {
                 throw ContentDatabaseError.queryFailed
             }
@@ -2564,6 +2566,7 @@ nonisolated final class ContentDatabase {
             card_id TEXT NOT NULL,
             template TEXT NOT NULL,
             answer TEXT NOT NULL,
+            translation TEXT,
             answer_form_key TEXT,
             audio_answer_media_id TEXT,
             sort_order INTEGER NOT NULL DEFAULT 0,
@@ -2703,6 +2706,7 @@ nonisolated final class ContentDatabase {
         try addColumnIfMissing(table: "user_deck_assignments", column: "deck_sort_order", definition: "INTEGER NOT NULL DEFAULT 0")
         try addColumnIfMissing(table: "cards", column: "audio_word_media_id", definition: "TEXT")
         try addColumnIfMissing(table: "card_senses", column: "image_media_id", definition: "TEXT")
+        try addColumnIfMissing(table: "sentence_questions", column: "translation", definition: "TEXT")
         try addColumnIfMissing(table: "sentence_questions", column: "audio_answer_media_id", definition: "TEXT")
         try addColumnIfMissing(table: "sense_progress", column: "synced_at", definition: "REAL")
         try addColumnIfMissing(table: "deck_matching_records", column: "synced_at", definition: "REAL")
@@ -2913,6 +2917,7 @@ nonisolated final class ContentDatabase {
                     sentenceQuestion: SentenceQuestionContent(
                         template: question.template,
                         answer: question.answer,
+                        translation: question.translation,
                         answerFormKey: question.answerFormKey,
                         audioAnswerURL: mediaURL(question.audioAnswerMediaID)
                     ),
@@ -3067,6 +3072,7 @@ nonisolated final class ContentDatabase {
     private struct SentenceQuestionRow {
         let template: String
         let answer: String
+        let translation: String?
         let answerFormKey: String?
         let audioAnswerMediaID: UUID?
     }
@@ -3074,7 +3080,7 @@ nonisolated final class ContentDatabase {
     private func fetchSentenceQuestions(senseIDs: [UUID]) throws -> [UUID: SentenceQuestionRow] {
         guard !senseIDs.isEmpty else { return [:] }
         let sql = """
-        SELECT sense_id, template, answer, answer_form_key, audio_answer_media_id
+        SELECT sense_id, template, answer, translation, answer_form_key, audio_answer_media_id
         FROM sentence_questions
         WHERE sense_id IN (\(placeholders(count: senseIDs.count)))
         ORDER BY sense_id, sort_order
@@ -3096,8 +3102,9 @@ nonisolated final class ContentDatabase {
             rows[senseID] = SentenceQuestionRow(
                 template: template,
                 answer: answer,
-                answerFormKey: textColumn(statement, index: 3),
-                audioAnswerMediaID: uuidColumn(statement, index: 4)
+                translation: textColumn(statement, index: 3),
+                answerFormKey: textColumn(statement, index: 4),
+                audioAnswerMediaID: uuidColumn(statement, index: 5)
             )
         }
         return rows

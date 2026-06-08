@@ -65,8 +65,7 @@ struct ClozeMCQStudyView: View {
 
                 if answered {
                     VStack(spacing: 16) {
-                        if let translation = card.clozeExampleTranslation?.trimmingCharacters(in: .whitespacesAndNewlines),
-                           !translation.isEmpty {
+                        if let translation = answerTranslationHTML {
                             HTMLText(
                                 html: translation,
                                 foregroundColor: MatchPalette.foreground,
@@ -115,6 +114,15 @@ struct ClozeMCQStudyView: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: previewPair?.id)
+    }
+
+    private var answerTranslationHTML: String? {
+        if let questionTranslation = card.clozeQuestionTranslation?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !questionTranslation.isEmpty {
+            return questionTranslation
+        }
+        let translation = card.translation.trimmingCharacters(in: .whitespacesAndNewlines)
+        return translation.isEmpty ? nil : "<b>\(Self.escapedHTML(translation))</b>"
     }
 
     private var sentenceCard: some View {
@@ -208,6 +216,15 @@ struct ClozeMCQStudyView: View {
 
     private func optionsMatch(_ lhs: String, _ rhs: String) -> Bool {
         lhs.compare(rhs, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+    }
+
+    private static func escapedHTML(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&#39;")
     }
 
     private func previewPair(for option: String) -> MatchingPair? {

@@ -31,8 +31,23 @@ nonisolated struct SenseExampleContent: Codable, Hashable, Sendable {
 nonisolated struct SentenceQuestionContent: Codable, Hashable, Sendable {
     let template: String
     let answer: String
+    let translation: String?
     let answerFormKey: String?
     let audioAnswerURL: URL?
+
+    init(
+        template: String,
+        answer: String,
+        translation: String? = nil,
+        answerFormKey: String?,
+        audioAnswerURL: URL?
+    ) {
+        self.template = template
+        self.answer = answer
+        self.translation = translation
+        self.answerFormKey = answerFormKey
+        self.audioAnswerURL = audioAnswerURL
+    }
 }
 
 nonisolated struct WordSenseContent: Codable, Identifiable, Hashable, Sendable {
@@ -56,6 +71,7 @@ nonisolated struct WordSenseContent: Codable, Identifiable, Hashable, Sendable {
         return template.contains(WordCardContent.blankToken) || template.contains("___") ? template : nil
     }
     var clozeAnswer: String? { sentenceQuestion.answer }
+    var clozeQuestionTranslation: String? { sentenceQuestion.translation }
     var clozeExampleTranslation: String? { example.translation }
     var clozeExampleImageURL: URL? { imageURL }
     var answerFormKey: String? { sentenceQuestion.answerFormKey }
@@ -91,6 +107,7 @@ nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
         clozePrompt: String? = nil,
         clozeTemplate: String? = nil,
         clozeAnswer: String? = nil,
+        clozeQuestionTranslation: String? = nil,
         clozeExampleTranslation: String? = nil,
         clozeExampleImageURL: URL? = nil,
         answerFormKey: String? = nil,
@@ -139,6 +156,7 @@ nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
                     sentenceQuestion: SentenceQuestionContent(
                         template: fallbackQuestion,
                         answer: answer,
+                        translation: clozeQuestionTranslation,
                         answerFormKey: answerFormKey,
                         audioAnswerURL: audioAnswerURL
                     ),
@@ -168,6 +186,7 @@ nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
     var clozePrompt: String { primarySense?.clozePrompt ?? Self.blankToken }
     var clozeTemplate: String? { primarySense?.clozeTemplate }
     var clozeAnswer: String? { primarySense?.clozeAnswer }
+    var clozeQuestionTranslation: String? { primarySense?.clozeQuestionTranslation }
     var clozeExampleTranslation: String? { primarySense?.clozeExampleTranslation }
     var clozeExampleImageURL: URL? { primarySense?.clozeExampleImageURL }
     var answerFormKey: String? { primarySense?.answerFormKey }

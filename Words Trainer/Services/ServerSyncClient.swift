@@ -276,6 +276,7 @@ struct ServerSentenceQuestionContent: Decodable, Sendable {
     let senseId: UUID
     let template: String
     let answer: String
+    let translation: String?
     let answerFormKey: String?
     let audioAnswerMediaId: UUID?
     let sortOrder: Int?

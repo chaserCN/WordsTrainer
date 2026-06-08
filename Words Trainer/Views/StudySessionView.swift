@@ -26,61 +26,8 @@ struct StudySessionView: View {
 
     var body: some View {
         ZStack {
-            if usesLightStudyTheme {
-                MatchingBackground()
-            } else {
-                AppBackground()
-            }
-            Group {
-                if session.mode.isMatching {
-                    if matchingFinished {
-                        finishedView
-                    } else {
-                        MatchingColumnsStudyView(
-                            session: session,
-                            store: store,
-                            onFinished: {
-                                finishMatchingSessionIfNeeded(playCompletionEffects: true)
-                            }
-                        )
-                    }
-                } else if session.isFinished {
-                    finishedView
-                } else if let item = session.current {
-                    switch session.mode {
-                    case .recall:
-                        RecallStudyView(
-                            card: item.card,
-                            totalCount: session.sessionChoicePool.count,
-                            remainingCount: session.remainingCount
-                        ) { outcome in
-                            submit(outcome)
-                        }
-                    case .flashcards:
-                        FlashcardStudyView(
-                            card: item.card,
-                            displayMode: settings.flashcardDisplayMode,
-                            totalCount: session.displayTotalCount(flashcardDisplayMode: settings.flashcardDisplayMode),
-                            remainingCount: session.displayRemainingCount(flashcardDisplayMode: settings.flashcardDisplayMode),
-                            isAnswerEnabled: isFlashcardSubmitEnabled
-                        ) { outcome in
-                            submit(outcome)
-                        }
-                    case .clozeMultipleChoice:
-                        ClozeMCQStudyView(
-                            card: item.card,
-                            sessionChoicePool: session.sessionChoicePool,
-                            deckChoicePool: session.deckChoicePool,
-                            totalCount: session.sessionChoicePool.count,
-                            remainingCount: session.remainingCount
-                        ) { outcome, additionalFailureSenseID in
-                            submit(outcome, additionalFailureSenseID: additionalFailureSenseID)
-                        }
-                    case .matching, .matchingAudio, .clozeTyping:
-                        EmptyView()
-                    }
-                }
-            }
+            studyBackground
+            sessionContent
         }
         .overlay {
             if session.mode == .matching {
@@ -92,28 +39,14 @@ struct StudySessionView: View {
         .toolbarColorScheme(usesLightStudyTheme ? .light : .dark, for: .navigationBar)
         .tint(usesLightStudyTheme ? LovableSurface.foreground : .white)
         .toolbar {
-            if session.mode == .matching {
-                ToolbarItem(placement: .topBarTrailing) {
-                    MatchingSettingsMenu()
-                        .tint(navbarButtonTint)
-                }
-            } else if session.mode == .matchingAudio || session.mode == .flashcards || session.mode == .clozeMultipleChoice {
-                ToolbarItem(placement: .topBarTrailing) {
-                    SoundToggleButton(showsFlashcardMode: session.mode == .flashcards)
-                        .tint(navbarButtonTint)
-                }
+            ToolbarItem(placement: .topBarTrailing) {
+                toolbarSettingsButton
+                    .tint(navbarButtonTint)
             }
         }
         .alert(
             L10n.text("Не удалось сохранить прогресс"),
-            isPresented: Binding(
-                get: { sessionError != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        sessionError = nil
-                    }
-                }
-            )
+            isPresented: sessionErrorBinding
         ) {
             Button("ОК", role: .cancel) {}
         } message: {
@@ -132,6 +65,106 @@ struct StudySessionView: View {
             guard selectedUserID != store.currentUserID else { return }
             dismiss()
         }
+    }
+
+    @ViewBuilder
+    private var studyBackground: some View {
+        if usesLightStudyTheme {
+            MatchingBackground()
+        } else {
+            AppBackground()
+        }
+    }
+
+    @ViewBuilder
+    private var sessionContent: some View {
+        if session.mode.isMatching {
+            matchingContent
+        } else if session.isFinished {
+            finishedView
+        } else if let item = session.current {
+            studyContent(for: item)
+        }
+    }
+
+    @ViewBuilder
+    private var matchingContent: some View {
+        if matchingFinished {
+            finishedView
+        } else {
+            MatchingColumnsStudyView(
+                session: session,
+                store: store,
+                onFinished: {
+                    finishMatchingSessionIfNeeded(playCompletionEffects: true)
+                }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func studyContent(for item: StudyQueueItem) -> some View {
+        switch session.mode {
+        case .recall:
+            RecallStudyView(
+                card: item.card,
+                totalCount: session.sessionChoicePool.count,
+                remainingCount: session.remainingCount
+            ) { outcome in
+                submit(outcome)
+            }
+        case .flashcards:
+            flashcardContent(for: item)
+        case .clozeMultipleChoice:
+            ClozeMCQStudyView(
+                card: item.card,
+                sessionChoicePool: session.sessionChoicePool,
+                deckChoicePool: session.deckChoicePool,
+                totalCount: session.sessionChoicePool.count,
+                remainingCount: session.remainingCount
+            ) { outcome, additionalFailureSenseID in
+                submit(outcome, additionalFailureSenseID: additionalFailureSenseID)
+            }
+        case .matching, .matchingAudio, .clozeTyping:
+            EmptyView()
+        }
+    }
+
+    private func flashcardContent(for item: StudyQueueItem) -> some View {
+        let displayMode = settings.flashcardDisplayMode
+        return FlashcardStudyView(
+            card: item.card,
+            displayMode: displayMode,
+            totalCount: session.displayTotalCount(flashcardDisplayMode: displayMode),
+            remainingCount: session.displayRemainingCount(flashcardDisplayMode: displayMode),
+            isAnswerEnabled: isFlashcardSubmitEnabled
+        ) { outcome in
+            submit(outcome)
+        }
+    }
+
+    @ViewBuilder
+    private var toolbarSettingsButton: some View {
+        if session.mode == .matching {
+            MatchingSettingsMenu()
+        } else if session.mode == .flashcards {
+            FlashcardSettingsMenu()
+        } else if session.mode == .matchingAudio || session.mode == .clozeMultipleChoice {
+            SoundToggleButton()
+        } else {
+            EmptyView()
+        }
+    }
+
+    private var sessionErrorBinding: Binding<Bool> {
+        Binding(
+            get: { sessionError != nil },
+            set: { isPresented in
+                if !isPresented {
+                    sessionError = nil
+                }
+            }
+        )
     }
 
     private var finishedView: some View {

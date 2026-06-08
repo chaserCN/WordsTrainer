@@ -134,6 +134,24 @@ struct MatchingSettingsMenu: View {
     }
 }
 
+/// Меню-шестерёнка в тулбаре flashcards: звук и способ показа senses.
+struct FlashcardSettingsMenu: View {
+    @State private var isShowingSettings = false
+
+    var body: some View {
+        Button {
+            isShowingSettings.toggle()
+        } label: {
+            Image(systemName: "gearshape.fill")
+        }
+        .accessibilityLabel("Настройки")
+        .popover(isPresented: $isShowingSettings) {
+            SoundSettingsPopover(showsFlashcardMode: true)
+                .presentationCompactAdaptation(.popover)
+        }
+    }
+}
+
 private struct SoundSettingsPopover: View {
     @Environment(AppSettings.self) private var settings
     let showsPaceBarToggle: Bool
@@ -170,11 +188,15 @@ private struct SoundSettingsPopover: View {
 
             if showsFlashcardMode {
                 Divider()
-                Picker("Карточки", selection: $settings.flashcardDisplayMode) {
-                    Text("По значению").tag(FlashcardDisplayMode.oneSense)
-                    Text("Слово целиком").tag(FlashcardDisplayMode.wholeCard)
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Senses", systemImage: "rectangle.stack.fill")
+                        .font(.headline)
+                    Picker("Senses", selection: $settings.flashcardDisplayMode) {
+                        Text("Одной картой").tag(FlashcardDisplayMode.wholeCard)
+                        Text("Несколькими").tag(FlashcardDisplayMode.oneSense)
+                    }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
             }
 
             if showsPaceBarToggle {

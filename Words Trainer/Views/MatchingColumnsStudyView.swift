@@ -739,8 +739,20 @@ struct MatchingFlashcardPreviewOverlay: View {
         trimmedNonEmpty(card.clozeExampleTranslation)
     }
 
-    private var notesText: String? {
-        trimmedNonEmpty(card.explanation)
+    private var etymologyHTML: String? {
+        trimmedNonEmpty(card.etymology)
+    }
+
+    private var senseNoteHTML: String? {
+        trimmedNonEmpty(card.primarySense?.note)
+    }
+
+    private var cardNotesHTML: String? {
+        trimmedNonEmpty(card.cardNotes)
+    }
+
+    private var hasDetails: Bool {
+        etymologyHTML != nil || senseNoteHTML != nil || cardNotesHTML != nil
     }
 
     var body: some View {
@@ -750,41 +762,14 @@ struct MatchingFlashcardPreviewOverlay: View {
 
             ScrollView(.vertical, showsIndicators: false) {
                 ZStack(alignment: .topTrailing) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        Text(card.word)
-                            .font(.title.bold())
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 14) {
+                        headerSection
                             .padding(.trailing, 44)
 
-                        Text(pair.translation)
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        exampleSection
 
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text(card.clozeExamplePlainText)
-                                .font(.body)
-                                .foregroundStyle(oklch(0.92, 0.01, 260))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            if let exampleTranslation {
-                                HTMLText(
-                                    html: exampleTranslation,
-                                    foregroundColor: oklch(0.92, 0.01, 260),
-                                    font: .body
-                                )
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-
-                            if let notesText {
-                                HTMLText(
-                                    html: notesText,
-                                    foregroundColor: oklch(0.72, 0.015, 260),
-                                    font: .subheadline
-                                )
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
+                        if hasDetails {
+                            detailsSection
                         }
                     }
                     .padding(24)
@@ -837,6 +822,75 @@ struct MatchingFlashcardPreviewOverlay: View {
         )
         .onPreferenceChange(MatchingPreviewCardFrameKey.self) { frame in
             cardFrame = frame
+        }
+    }
+
+    private var headerSection: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(card.word)
+                .font(.title.bold())
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text(pair.translation)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var exampleSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(card.clozeExamplePlainText)
+                .font(.body)
+                .foregroundStyle(oklch(0.92, 0.01, 260))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let exampleTranslation {
+                HTMLText(
+                    html: exampleTranslation,
+                    foregroundColor: oklch(0.92, 0.01, 260),
+                    font: .body
+                )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var detailsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+                .overlay(.white.opacity(0.12))
+                .padding(.bottom, 2)
+
+            VStack(alignment: .leading, spacing: 12) {
+                if let etymologyHTML {
+                    detailSection(title: "Этимология", html: etymologyHTML)
+                }
+
+                if let senseNoteHTML {
+                    detailSection(title: "Значение", html: senseNoteHTML)
+                }
+
+                if let cardNotesHTML {
+                    detailSection(title: "Заметка", html: cardNotesHTML)
+                }
+            }
+        }
+    }
+
+    private func detailSection(title: String, html: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(oklch(0.82, 0.018, 260))
+
+            HTMLText(
+                html: html,
+                foregroundColor: oklch(0.72, 0.015, 260),
+                font: .footnote
+            )
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
