@@ -15,10 +15,16 @@ struct HTMLText: View {
             emphasisColor: emphasisColor
         ) {
             Text(styled)
+                .multilineTextAlignment(.leading)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
         } else {
             Text(html)
                 .foregroundStyle(foregroundColor ?? .primary)
                 .font(font)
+                .multilineTextAlignment(.leading)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
