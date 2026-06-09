@@ -1717,7 +1717,7 @@ nonisolated final class ContentDatabase {
             defer { sqlite3_finalize(statement) }
             try bind(statement, index: 1, uuid: selectedUserID)
             try bind(statement, index: 2, uuid: assignment.deckId)
-            try bind(statement, index: 3, text: localStatus(assignment.assignmentStatus).rawValue)
+            try bind(statement, index: 3, text: assignmentStatusValue(assignment.assignmentStatus))
             try bind(statement, index: 4, uuid: assignment.deckGroupId)
             try bind(statement, index: 5, text: assignment.deckGroupTitle)
             try bind(statement, index: 6, int: assignment.deckGroupSortOrder)
@@ -2467,6 +2467,15 @@ nonisolated final class ContentDatabase {
         value == "active" ? .active : .inactive
     }
 
+    private func assignmentStatusValue(_ value: String) -> String {
+        switch value {
+        case "active", "inactive", "archived":
+            value
+        default:
+            "inactive"
+        }
+    }
+
     private func localStudyModeRawValue(_ value: String) -> String {
         switch value {
         case "cloze_multiple_choice":
@@ -2627,7 +2636,7 @@ nonisolated final class ContentDatabase {
         CREATE TABLE IF NOT EXISTS user_deck_assignments (
             user_id TEXT NOT NULL,
             deck_id TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'archived')),
             deck_group_id TEXT,
             deck_group_title TEXT,
             deck_group_sort_order INTEGER,
@@ -2857,6 +2866,52 @@ nonisolated final class ContentDatabase {
         try executeMigrationStatements([
             "CREATE INDEX IF NOT EXISTS idx_study_reviews_user_reviewed ON study_reviews(user_id, reviewed_at)",
         ])
+        try migrateUserDeckAssignmentsForArchivedStatus()
+    }
+
+    private func migrateUserDeckAssignmentsForArchivedStatus() throws {
+        guard let ddl = try tableDDL("user_deck_assignments"),
+              !ddl.localizedCaseInsensitiveContains("'archived'") else {
+            return
+        }
+        try executeMigrationStatements([
+            """
+            CREATE TABLE user_deck_assignments__v2 (
+                user_id TEXT NOT NULL,
+                deck_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'archived')),
+                deck_group_id TEXT,
+                deck_group_title TEXT,
+                deck_group_sort_order INTEGER,
+                deck_sort_order INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (user_id, deck_id),
+                FOREIGN KEY (deck_id) REFERENCES decks(id)
+            );
+            """,
+            """
+            INSERT INTO user_deck_assignments__v2 (
+                user_id, deck_id, status, deck_group_id, deck_group_title,
+                deck_group_sort_order, deck_sort_order
+            )
+            SELECT user_id, deck_id, status, deck_group_id, deck_group_title,
+                   deck_group_sort_order, deck_sort_order
+            FROM user_deck_assignments;
+            """,
+            "DROP TABLE user_deck_assignments;",
+            "ALTER TABLE user_deck_assignments__v2 RENAME TO user_deck_assignments;",
+            "CREATE INDEX IF NOT EXISTS idx_user_deck_assignments_user_id ON user_deck_assignments(user_id);",
+        ])
+    }
+
+    private func tableDDL(_ table: String) throws -> String? {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, text: table)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return textColumn(statement, index: 0)
     }
 
     private func executeMigrationStatements(_ statements: [String]) throws {
@@ -2975,6 +3030,7 @@ nonisolated final class ContentDatabase {
         LEFT JOIN user_deck_preferences ON user_deck_preferences.user_id = user_deck_assignments.user_id
             AND user_deck_preferences.deck_id = user_deck_assignments.deck_id
         WHERE user_deck_assignments.user_id = ?
+          AND user_deck_assignments.status != 'archived'
         ORDER BY user_deck_assignments.deck_group_sort_order IS NULL,
                  user_deck_assignments.deck_group_sort_order,
                  user_deck_assignments.deck_group_title,

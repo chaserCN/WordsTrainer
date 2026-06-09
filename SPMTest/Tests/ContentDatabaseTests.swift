@@ -1406,10 +1406,7 @@ struct ContentDatabaseTests {
                 selectedUserID: userID
             )
 
-            let deck = try #require(database.loadDecks().first)
-            #expect(deck.id == deckID)
-            #expect(!deck.isActive)
-            #expect(deck.cards.map(\.id) == [cardID])
+            #expect(try database.loadDecks().isEmpty)
             #expect(try database.cachedDeckVersionIDs() == [versionID])
             #expect(try database.weakCards(limit: 10).isEmpty)
             #expect(try database.studyReviewCount(since: failedAt).total == 1)
