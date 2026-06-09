@@ -182,6 +182,14 @@ nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
     }
 
     var translation: String { primarySense?.translation ?? "" }
+
+    var joinedTranslations: String {
+        let joined = activeSenses
+            .map(\.translation)
+            .filter { !$0.isEmpty }
+            .joined(separator: "; ")
+        return joined.isEmpty ? translation : joined
+    }
     var exampleText: String { primarySense?.exampleText ?? "" }
     var clozePrompt: String { primarySense?.clozePrompt ?? Self.blankToken }
     var clozeTemplate: String? { primarySense?.clozeTemplate }
