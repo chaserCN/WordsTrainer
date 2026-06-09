@@ -1,5 +1,6 @@
 import Foundation
 import FSRS
+import OSLog
 import SQLite3
 
 nonisolated(unsafe) private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
@@ -72,10 +73,28 @@ struct PendingServerSyncBatch {
             && matchingAttemptIDs.isEmpty
             && deckPreferenceDeckIDs.isEmpty
     }
+
+    var diagnosticSummary: String {
+        "reviews=\(reviewIDs.count) practice=\(practiceReviewIDs.count) progress=\(progressSenseIDs.count) matching=\(matchingDeckIDs.count) attempts=\(matchingAttemptIDs.count) prefs=\(deckPreferenceDeckIDs.count)"
+    }
+
+    var diagnosticFingerprint: String {
+        let parts = [
+            reviewIDs.map(\.uuidString).sorted().joined(separator: ","),
+            practiceReviewIDs.map(\.uuidString).sorted().joined(separator: ","),
+            progressSnapshots.map { "\($0.senseID.uuidString)@\(Int($0.updatedAt.timeIntervalSince1970 * 1000))" }.sorted().joined(separator: ","),
+            matchingSnapshots.map { "\($0.deckID.uuidString)@\(Int($0.achievedAt.timeIntervalSince1970 * 1000))" }.sorted().joined(separator: ","),
+            matchingAttemptIDs.map(\.uuidString).sorted().joined(separator: ","),
+            deckPreferenceSnapshots.map { "\($0.deckID.uuidString)@\(Int($0.updatedAt.timeIntervalSince1970 * 1000))" }.sorted().joined(separator: ","),
+        ]
+        return parts.joined(separator: "|")
+    }
 }
 
 /// Read/write access to `Documents/Data/flashgame.db` (content + study progress).
 nonisolated final class ContentDatabase {
+    private static let logger = Logger(subsystem: "com.uniweb.wordtrainer.Words-Trainer", category: "Outbox")
+
     enum OpenMode {
         case readWrite
         case readOnly
@@ -1214,39 +1233,78 @@ nonisolated final class ContentDatabase {
         try beginTransaction()
         do {
             let timestamp = syncedAt.timeIntervalSince1970
-            let reviewIDs = response.map { Set($0.acceptedReviewIds + $0.duplicateReviewIds + $0.rejectedReviewIds) }
-            let practiceReviewIDs = response.map {
-                Set($0.acceptedPracticeReviewIds + $0.duplicatePracticeReviewIds + $0.rejectedPracticeReviewIds)
-            }
-            let progressSenseIDs = response.map {
-                Set($0.progressSenseIds + $0.rejectedProgressSenseIds)
-            }
-            let matchingAttemptIDs = response.map {
-                Set($0.acceptedMatchingAttemptIds + $0.duplicateMatchingAttemptIds + $0.rejectedMatchingAttemptIds)
+            if let response, !batch.progressSnapshots.isEmpty,
+               response.progressSenseIds.isEmpty, response.rejectedProgressSenseIds.isEmpty {
+                Self.logger.info(
+                    "outbox mark acking submitted progress after 200 OK even though server returned empty progressSenseIds count=\(batch.progressSnapshots.count, privacy: .public)"
+                )
             }
 
-            for reviewID in batch.reviewIDs where reviewIDs?.contains(reviewID) ?? true {
-                try markReviewSynced(reviewID: reviewID, syncedAt: timestamp)
+            var markedReviews = 0
+            for reviewID in batch.reviewIDs {
+                markedReviews += try markReviewSynced(reviewID: reviewID, syncedAt: timestamp)
             }
-            for snapshot in batch.practiceReviewSnapshots where practiceReviewIDs?.contains(snapshot.id) ?? true {
-                try markPracticeReviewSynced(snapshot: snapshot, syncedAt: timestamp)
+
+            var markedPracticeReviews = 0
+            for snapshot in batch.practiceReviewSnapshots {
+                markedPracticeReviews += try markPracticeReviewSynced(snapshot: snapshot, syncedAt: timestamp)
             }
-            for snapshot in batch.progressSnapshots where progressSenseIDs?.contains(snapshot.senseID) ?? true {
-                try markProgressSynced(snapshot: snapshot, syncedAt: timestamp)
+
+            var markedProgress = 0
+            var zeroRowProgress = 0
+            for snapshot in batch.progressSnapshots {
+                let changes = try markProgressSynced(snapshot: snapshot, syncedAt: timestamp)
+                if changes == 0 {
+                    zeroRowProgress += 1
+                    Self.logger.warning(
+                        "outbox mark updated 0 rows progress senseID=\(snapshot.senseID.uuidString, privacy: .public) updatedAtMs=\(Int(snapshot.updatedAt.timeIntervalSince1970 * 1000), privacy: .public) reason=updated_at_mismatch_or_already_synced"
+                    )
+                } else {
+                    markedProgress += changes
+                }
             }
+
+            var markedMatchingRecords = 0
+            var zeroRowMatchingRecords = 0
             for snapshot in batch.matchingSnapshots {
-                try markMatchingRecordSynced(snapshot: snapshot, syncedAt: timestamp)
+                let changes = try markMatchingRecordSynced(snapshot: snapshot, syncedAt: timestamp)
+                if changes == 0 {
+                    zeroRowMatchingRecords += 1
+                    Self.logger.warning(
+                        "outbox mark updated 0 rows matching deckID=\(snapshot.deckID.uuidString, privacy: .public) achievedAtMs=\(Int(snapshot.achievedAt.timeIntervalSince1970 * 1000), privacy: .public) reason=achieved_at_mismatch_or_already_synced"
+                    )
+                } else {
+                    markedMatchingRecords += changes
+                }
             }
-            for snapshot in batch.matchingAttemptSnapshots where matchingAttemptIDs?.contains(snapshot.id) ?? true {
-                try markMatchingAttemptSynced(snapshot: snapshot, syncedAt: timestamp)
+
+            var markedMatchingAttempts = 0
+            for snapshot in batch.matchingAttemptSnapshots {
+                markedMatchingAttempts += try markMatchingAttemptSynced(snapshot: snapshot, syncedAt: timestamp)
             }
+
+            var markedDeckPreferences = 0
+            var zeroRowDeckPreferences = 0
             for snapshot in batch.deckPreferenceSnapshots {
-                try markDeckPreferenceSynced(snapshot: snapshot, syncedAt: timestamp)
+                let changes = try markDeckPreferenceSynced(snapshot: snapshot, syncedAt: timestamp)
+                if changes == 0 {
+                    zeroRowDeckPreferences += 1
+                    Self.logger.warning(
+                        "outbox mark updated 0 rows deckPreference deckID=\(snapshot.deckID.uuidString, privacy: .public) updatedAtMs=\(Int(snapshot.updatedAt.timeIntervalSince1970 * 1000), privacy: .public) reason=updated_at_mismatch_or_already_synced"
+                    )
+                } else {
+                    markedDeckPreferences += changes
+                }
             }
+
             if let serverRevision = response?.serverRevision {
                 try setServerRevision(serverRevision)
             }
             try commitTransaction()
+
+            Self.logger.info(
+                "outbox mark finished \(batch.diagnosticSummary, privacy: .public) markedRows reviews=\(markedReviews, privacy: .public) practice=\(markedPracticeReviews, privacy: .public) progress=\(markedProgress, privacy: .public) matching=\(markedMatchingRecords, privacy: .public) attempts=\(markedMatchingAttempts, privacy: .public) prefs=\(markedDeckPreferences, privacy: .public) zeroRow progress=\(zeroRowProgress, privacy: .public) matching=\(zeroRowMatchingRecords, privacy: .public) prefs=\(zeroRowDeckPreferences, privacy: .public)"
+            )
         } catch {
             try? rollbackTransaction()
             throw error
@@ -1550,7 +1608,8 @@ nonisolated final class ContentDatabase {
         return (payload, snapshots)
     }
 
-    private func markReviewSynced(reviewID: UUID, syncedAt: Double) throws {
+    @discardableResult
+    private func markReviewSynced(reviewID: UUID, syncedAt: Double) throws -> Int {
         try markSynced(
             sql: "UPDATE study_reviews SET synced_at = ? WHERE user_id = ? AND id = ?",
             id: reviewID,
@@ -1558,7 +1617,8 @@ nonisolated final class ContentDatabase {
         )
     }
 
-    private func markPracticeReviewSynced(snapshot: PendingPracticeReviewSnapshot, syncedAt: Double) throws {
+    @discardableResult
+    private func markPracticeReviewSynced(snapshot: PendingPracticeReviewSnapshot, syncedAt: Double) throws -> Int {
         try markSynced(
             sql: "UPDATE practice_reviews SET synced_at = ? WHERE user_id = ? AND id = ?",
             id: snapshot.id,
@@ -1566,7 +1626,8 @@ nonisolated final class ContentDatabase {
         )
     }
 
-    private func markProgressSynced(snapshot: PendingProgressSnapshot, syncedAt: Double) throws {
+    @discardableResult
+    private func markProgressSynced(snapshot: PendingProgressSnapshot, syncedAt: Double) throws -> Int {
         try markSynced(
             sql: "UPDATE sense_progress SET synced_at = ? WHERE user_id = ? AND sense_id = ? AND updated_at = ?",
             id: snapshot.senseID,
@@ -1575,7 +1636,8 @@ nonisolated final class ContentDatabase {
         )
     }
 
-    private func markMatchingRecordSynced(snapshot: PendingMatchingRecordSnapshot, syncedAt: Double) throws {
+    @discardableResult
+    private func markMatchingRecordSynced(snapshot: PendingMatchingRecordSnapshot, syncedAt: Double) throws -> Int {
         try markSynced(
             sql: "UPDATE deck_matching_records SET synced_at = ? WHERE user_id = ? AND deck_id = ? AND achieved_at = ?",
             id: snapshot.deckID,
@@ -1584,7 +1646,8 @@ nonisolated final class ContentDatabase {
         )
     }
 
-    private func markMatchingAttemptSynced(snapshot: PendingMatchingAttemptSnapshot, syncedAt: Double) throws {
+    @discardableResult
+    private func markMatchingAttemptSynced(snapshot: PendingMatchingAttemptSnapshot, syncedAt: Double) throws -> Int {
         try markSynced(
             sql: "UPDATE matching_attempts SET synced_at = ? WHERE user_id = ? AND id = ?",
             id: snapshot.id,
@@ -1592,7 +1655,8 @@ nonisolated final class ContentDatabase {
         )
     }
 
-    private func markDeckPreferenceSynced(snapshot: PendingDeckPreferenceSnapshot, syncedAt: Double) throws {
+    @discardableResult
+    private func markDeckPreferenceSynced(snapshot: PendingDeckPreferenceSnapshot, syncedAt: Double) throws -> Int {
         try markSynced(
             sql: "UPDATE user_deck_preferences SET synced_at = ? WHERE user_id = ? AND deck_id = ? AND updated_at = ?",
             id: snapshot.deckID,
@@ -1601,7 +1665,8 @@ nonisolated final class ContentDatabase {
         )
     }
 
-    private func markSynced(sql: String, id: UUID, syncedAt: Double, unchangedAt: Double? = nil) throws {
+    @discardableResult
+    private func markSynced(sql: String, id: UUID, syncedAt: Double, unchangedAt: Double? = nil) throws -> Int {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
@@ -1620,6 +1685,7 @@ nonisolated final class ContentDatabase {
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw ContentDatabaseError.queryFailed
         }
+        return Int(sqlite3_changes(db))
     }
 
     // MARK: - Server content import

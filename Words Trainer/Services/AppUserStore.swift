@@ -444,11 +444,48 @@ final class AppUserStore {
     }
 
     private func uploadPendingEvents(database: ContentDatabase, selectedUserID: UUID, deviceID: UUID) async throws {
+        var iteration = 0
+        var previousFingerprint: String?
         while true {
+            iteration += 1
             let batch = try database.pendingServerSyncBatch()
-            guard !batch.isEmpty else { return }
+            guard !batch.isEmpty else {
+                if iteration > 1 {
+                    Self.logger.info("outbox upload finished after \(iteration, privacy: .public) iterations")
+                }
+                return
+            }
+
+            let fingerprint = batch.diagnosticFingerprint
+            Self.logger.info(
+                "outbox upload iteration=\(iteration, privacy: .public) \(batch.diagnosticSummary, privacy: .public) fingerprint=\(fingerprint, privacy: .public)"
+            )
+            if fingerprint == previousFingerprint {
+                Self.logger.error(
+                    "outbox upload stalled: pending batch unchanged after mark; stopping loop to avoid server spam fingerprint=\(fingerprint, privacy: .public)"
+                )
+                return
+            }
+            previousFingerprint = fingerprint
+
             let response = try await syncClient.uploadEvents(batch.payload, selectedUserID: selectedUserID, deviceID: deviceID)
+            Self.logger.info(
+                "outbox server ack accepted reviews=\(response.acceptedReviewIds.count, privacy: .public) dupReviews=\(response.duplicateReviewIds.count, privacy: .public) practice=\(response.acceptedPracticeReviewIds.count, privacy: .public) dupPractice=\(response.duplicatePracticeReviewIds.count, privacy: .public) progress=\(response.progressSenseIds.count, privacy: .public) matching=\(response.matchingRecordDeckIds.count, privacy: .public) attempts=\(response.acceptedMatchingAttemptIds.count, privacy: .public) dupAttempts=\(response.duplicateMatchingAttemptIds.count, privacy: .public) prefs=\(response.deckPreferenceDeckIds.count, privacy: .public) rejected reviews=\(response.rejectedReviewIds.count, privacy: .public) practice=\(response.rejectedPracticeReviewIds.count, privacy: .public) progress=\(response.rejectedProgressSenseIds.count, privacy: .public) matching=\(response.rejectedMatchingRecordDeckIds.count, privacy: .public) attempts=\(response.rejectedMatchingAttemptIds.count, privacy: .public) prefs=\(response.rejectedDeckPreferenceDeckIds.count, privacy: .public) toRevision=\(response.serverRevision ?? "nil", privacy: .public)"
+            )
+
             try database.markServerSyncBatchUploaded(batch, response: response)
+
+            let remaining = try database.pendingServerSyncBatch()
+            Self.logger.info(
+                "outbox after mark remaining \(remaining.diagnosticSummary, privacy: .public) fingerprint=\(remaining.diagnosticFingerprint, privacy: .public)"
+            )
+            if !remaining.isEmpty, remaining.diagnosticFingerprint == fingerprint {
+                Self.logger.error(
+                    "outbox upload stalled: mark did not clear pending batch fingerprint=\(fingerprint, privacy: .public)"
+                )
+                return
+            }
+
             if let serverRevision = response.serverRevision {
                 Self.logger.info("uploaded pending events serverRevision=\(serverRevision, privacy: .public)")
             }

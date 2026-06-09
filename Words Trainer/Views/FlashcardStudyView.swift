@@ -13,6 +13,7 @@ struct FlashcardStudyView: View {
     @State private var isFlipped = false
     @State private var isExampleExpanded = false
     @State private var isExampleDetailsVisible = false
+    @State private var revealedCardID: String?
     @State private var frontCardContentHeight: CGFloat = 0
     @State private var backCardContentHeight: CGFloat = 0
     @State private var expandedCardContentHeight: CGFloat = 0
@@ -208,7 +209,7 @@ struct FlashcardStudyView: View {
                             .frame(height: maxHeight, alignment: .top)
                         } else {
                             expandedCardBody(minHeight: baseHeight)
-                                .frame(height: cardHeight, alignment: .top)
+                                .frame(minHeight: cardHeight, alignment: .top)
                         }
                     } else {
                         cardBody(isBack: true, minHeight: baseHeight, layout: .fixed)
@@ -375,16 +376,20 @@ struct FlashcardStudyView: View {
             .buttonStyle(.plain)
 
             if isBack {
-                exampleToggleButton
-                    .padding(.horizontal, 18)
-                    .padding(.top, 12)
-
-                if isShowingExampleDetails {
-                    exampleDetailsFlipArea
+                if notesText != nil {
+                    exampleToggleButton
                         .padding(.horizontal, 18)
                         .padding(.top, 12)
-                        .padding(.bottom, 20)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+
+                    if isShowingExampleDetails {
+                        exampleDetailsFlipArea
+                            .padding(.horizontal, 18)
+                            .padding(.top, 12)
+                            .padding(.bottom, 20)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    } else if layout == .fixed {
+                        bottomFlipArea
+                    }
                 } else if layout == .fixed {
                     bottomFlipArea
                 }
@@ -471,6 +476,16 @@ struct FlashcardStudyView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .layoutPriority(1)
+                if revealedCardID == presentation.id,
+                   let exampleTranslation = presentation.exampleTranslation?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !exampleTranslation.isEmpty {
+                    HTMLText(
+                        html: exampleTranslation,
+                        foregroundColor: FlashcardPalette.secondaryText,
+                        font: .body
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
             if layout == .fixed && !isBack {
@@ -490,7 +505,7 @@ struct FlashcardStudyView: View {
             toggleExampleDetails()
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "text.quote")
+                Image(systemName: "lightbulb.fill")
                     .font(.subheadline.weight(.semibold))
                 Text("Подробнее")
                     .font(.subheadline.weight(.semibold))
@@ -540,19 +555,6 @@ struct FlashcardStudyView: View {
 
     private var exampleDetails: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(exampleSentence(font: .body, color: FlashcardPalette.secondaryText))
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            if let translation = presentation.exampleTranslation?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !translation.isEmpty {
-                HTMLText(
-                    html: translation,
-                    foregroundColor: FlashcardPalette.secondaryText,
-                    font: .body
-                )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
             if let notesText {
                 HTMLText(
                     html: notesText,
@@ -588,6 +590,7 @@ struct FlashcardStudyView: View {
 
         if reduceMotion {
             isFlipped.toggle()
+            revealedCardID = presentation.id
             return
         }
 
@@ -611,6 +614,7 @@ struct FlashcardStudyView: View {
             withTransaction(transaction) {
                 isFlipped = targetIsBack
                 cardRotation = incomingAngle
+                revealedCardID = presentation.id
             }
 
             withAnimation(.easeOut(duration: Self.flipHalfDuration)) {
@@ -638,6 +642,7 @@ struct FlashcardStudyView: View {
         flipGeneration += 1
         renderedCardID = presentation.id
         isFlipped = false
+        revealedCardID = nil
         isExampleExpanded = false
         isExampleDetailsVisible = false
         frontCardContentHeight = 0

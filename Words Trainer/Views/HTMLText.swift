@@ -11,10 +11,15 @@ struct HTMLText: View {
         if let styled = Self.styled(
             from: html,
             foregroundColor: foregroundColor,
-            font: font,
             emphasisColor: emphasisColor
         ) {
+            // Один шрифт на весь Text; жирный/курсив — через inlinePresentationIntent.
+            // ВАЖНО: Text(AttributedString), где есть курсив и НЕТ жирного, в SwiftUI
+            // недомеряет высоту многострочного текста и обрезает его («…»). Смешанная
+            // разметка (есть <b>) меряется нормально. Поэтому в контенте эмфазу в notes
+            // делаем <b>, а не только <i>. См. docs/card-generation-format.md.
             Text(styled)
+                .font(font)
                 .multilineTextAlignment(.leading)
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
@@ -31,7 +36,6 @@ struct HTMLText: View {
     private static func styled(
         from html: String,
         foregroundColor: Color?,
-        font: Font?,
         emphasisColor: Color?
     ) -> AttributedString? {
         let runs = htmlRuns(from: html)
@@ -40,12 +44,11 @@ struct HTMLText: View {
         var result = AttributedString()
         for run in runs {
             var piece = AttributedString(run.text)
-            if let font {
-                var resolvedFont = run.isBold ? font.weight(.bold) : font
-                if run.isItalic {
-                    resolvedFont = resolvedFont.italic()
-                }
-                piece.font = resolvedFont
+            var intent: InlinePresentationIntent = []
+            if run.isBold { intent.insert(.stronglyEmphasized) }
+            if run.isItalic { intent.insert(.emphasized) }
+            if !intent.isEmpty {
+                piece.inlinePresentationIntent = intent
             }
             if run.isBold, let emphasisColor {
                 piece.foregroundColor = emphasisColor

@@ -986,6 +986,35 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("mark uploaded clears progress after 200 OK even when server ack list is empty")
+    func markUploadedClearsProgressWhenServerAckListIsEmpty() throws {
+        try withIsolatedDatabase { database in
+            try database.importServerBootstrap(bootstrap(), selectedUserID: userID)
+            let reviewedAt = try #require(Self.isoDate("2026-06-02T12:00:00.000Z"))
+            try database.saveProgress(
+                deckID: deckID,
+                progress: CardProgress.newSense(senseID: senseID, now: reviewedAt)
+            )
+
+            let batch = try database.pendingServerSyncBatch()
+            #expect(batch.progressSenseIDs == [senseID])
+            try database.markServerSyncBatchUploaded(
+                batch,
+                response: ServerSyncEventsResponse(
+                    acceptedReviewIds: [],
+                    duplicateReviewIds: [],
+                    progressSenseIds: [],
+                    matchingRecordDeckIds: [],
+                    deckPreferenceDeckIds: [],
+                    serverRevision: "42"
+                ),
+                syncedAt: reviewedAt
+            )
+
+            #expect(try database.pendingServerSyncBatch().isEmpty)
+        }
+    }
+
     @Test("mark uploaded keeps newer progress pending when it changed after batch snapshot")
     func markUploadedKeepsNewerProgressPending() throws {
         try withIsolatedDatabase { database in
