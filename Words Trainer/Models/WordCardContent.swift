@@ -472,6 +472,27 @@ nonisolated struct WordCardContent: Codable, Identifiable, Hashable, Sendable {
         options: [.caseInsensitive, .dotMatchesLineSeparators]
     )
 
+    /// Strips HTML from a fragment and reports the range of its first `<b>...</b>` emphasis
+    /// (if any) within the resulting plain text, so callers can render that bold themselves
+    /// instead of guessing which word to highlight.
+    static func plainTextWithBoldRange(fromHTMLFragment html: String) -> (text: String, boldRange: Range<String.Index>?) {
+        let nsRange = NSRange(html.startIndex..., in: html)
+        guard let match = boldTagRegex.firstMatch(in: html, range: nsRange),
+              let innerRange = Range(match.range(at: 1), in: html)
+        else {
+            return (plainText(fromHTMLFragment: html), nil)
+        }
+
+        let before = plainText(fromHTMLFragment: String(html[html.startIndex..<innerRange.lowerBound]))
+        let inner = plainText(fromHTMLFragment: String(html[innerRange]))
+        let after = plainText(fromHTMLFragment: String(html[innerRange.upperBound...]))
+        let text = before + inner + after
+
+        let lower = text.index(text.startIndex, offsetBy: before.count)
+        let upper = text.index(lower, offsetBy: inner.count)
+        return (text, lower..<upper)
+    }
+
     private static func plainText(fromHTMLFragment html: String) -> String {
         html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
             .replacingOccurrences(of: "&nbsp;", with: " ")

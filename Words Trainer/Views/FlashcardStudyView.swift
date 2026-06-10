@@ -571,14 +571,15 @@ struct FlashcardStudyView: View {
     }
 
     private func exampleSentence(font: Font, color: Color) -> AttributedString {
-        let example = presentation.exampleText
+        let (example, boldRange) = WordCardContent.plainTextWithBoldRange(fromHTMLFragment: presentation.exampleText)
         var attributed = AttributedString(example)
         attributed.font = font
         attributed.foregroundColor = color
 
-        let answer = presentation.answer
-        if let stringRange = example.range(of: answer, options: [.caseInsensitive, .diacriticInsensitive]),
-           let range = Range(stringRange, in: attributed) {
+        if let boldRange, let range = Range(boldRange, in: attributed) {
+            attributed[range].font = font.weight(.bold)
+        } else if let stringRange = example.range(of: presentation.answer, options: [.caseInsensitive, .diacriticInsensitive]),
+                  let range = Range(stringRange, in: attributed) {
             attributed[range].font = font.weight(.bold)
         }
         return attributed
