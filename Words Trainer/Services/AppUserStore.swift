@@ -162,22 +162,35 @@ final class AppUserStore {
             var bootstrapCachedDeckVersionIDs: [UUID] = []
             if let targetUserID {
                 do {
-                    let database = try ContentDatabase(userID: targetUserID)
-                    let deviceID = try database.deviceID()
+                    // Read local sync state off the main actor: opening the DB,
+                    // cachedDeckVersionIDs (directory listings) and the deck count
+                    // are disk-bound and must not block the UI / dashboard paint.
+                    let usersIsEmpty = users.isEmpty
+                    let prep = try await Task.detached(priority: .userInitiated) {
+                        let database = try ContentDatabase(userID: targetUserID)
+                        let deviceID = try database.deviceID()
+                        let revision = try database.serverRevision()
+                        let canUse = try database.hasCompletedInitialSync()
+                            && revision != "0"
+                            && !usersIsEmpty
+                        let cached = try database.cachedDeckVersionIDs()
+                        let deckCount = canUse ? try database.loadedDeckCount() : 0
+                        return (deviceID: deviceID, revision: revision, canUse: canUse, cached: cached, deckCount: deckCount)
+                    }.value
+
+                    let deviceID = prep.deviceID
                     bootstrapDeviceID = deviceID
-                    localServerRevision = try database.serverRevision()
-                    canUseChanges = try database.hasCompletedInitialSync()
-                        && localServerRevision != "0"
-                        && !users.isEmpty
-                    cachedDeckVersionIDs = try database.cachedDeckVersionIDs()
-                    bootstrapCachedDeckVersionIDs = cachedDeckVersionIDs
-                    if canUseChanges {
-                        localDeckCountBeforeChanges = try database.loadDecks().count
-                    }
+                    localServerRevision = prep.revision
+                    canUseChanges = prep.canUse
+                    cachedDeckVersionIDs = prep.cached
+                    bootstrapCachedDeckVersionIDs = prep.cached
+                    localDeckCountBeforeChanges = prep.deckCount
+
                     Self.logger.info(
                         "sync state selectedUserID=\(targetUserID.uuidString, privacy: .public) revision=\(localServerRevision, privacy: .public) cachedDeckVersions=\(cachedDeckVersionIDs.count, privacy: .public) deviceID=\(deviceID.databaseString, privacy: .public)"
                     )
                     updateSyncProgress(.uploadingChanges, taskID: taskID)
+                    let database = try ContentDatabase(userID: targetUserID)
                     try await uploadPendingEvents(
                         database: database,
                         selectedUserID: targetUserID,

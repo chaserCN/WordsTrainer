@@ -55,6 +55,7 @@ struct TodayView: View {
     @State private var isVisible = false
     @State private var reloadTask: Task<Void, Never>?
     @State private var reloadGeneration = 0
+    @State private var lastAppliedReloadGeneration = -1
     @State private var needsReloadWhenVisible = false
 
     private var activeDecks: [DeckContent] {
@@ -114,6 +115,7 @@ struct TodayView: View {
         .onChange(of: userStore.selectedUserID) {
             store = nil
             storeUserID = nil
+            lastAppliedReloadGeneration = -1
             clearToast()
             reloadImmediately()
         }
@@ -302,8 +304,17 @@ struct TodayView: View {
                 return
             }
             let snapshot = try await DeckStore.todayDashboardSnapshot(userID: selectedUserID)
-            guard reloadGeneration == generation,
-                  userStore.selectedUserID == selectedUserID else { return }
+            // Apply if this result is at least as new as whatever is already
+            // painted and the user hasn't changed. Using a monotonic watermark
+            // (instead of strict generation equality) lets the initial reload
+            // paint local data immediately, even when sync completion kicks off
+            // a follow-up reload that bumps the generation — the follow-up then
+            // harmlessly repaints the same data instead of leaving an empty gap.
+            guard generation >= lastAppliedReloadGeneration,
+                  userStore.selectedUserID == selectedUserID else {
+                return
+            }
+            lastAppliedReloadGeneration = generation
             if store == nil || storeUserID != selectedUserID {
                 store = try DeckStore(userID: selectedUserID)
                 storeUserID = selectedUserID
@@ -1788,7 +1799,11 @@ private struct TodayAllDecksModesView: View {
         }
         guard reloadGeneration == generation else { return }
         practiceCount = snapshot.todayPracticeCount
-        wordListCards = snapshot.todayStudyCards
+        // The dashboard snapshot is lightweight (no full cards); load the full
+        // word-list separately for display.
+        let fullCards = (try? await DeckStore.todayStudyCardsSnapshot(userID: store.currentUserID)) ?? []
+        guard reloadGeneration == generation else { return }
+        wordListCards = fullCards
     }
 }
 
@@ -1854,7 +1869,8 @@ private struct TodayDeckModesView: View {
         let deckID = deck.id
         stats = snapshot.statsByDeckID[deckID] ?? .zero
         practiceCount = snapshot.todayPracticeCountByDeckID[deckID] ?? 0
-        wordListCards = snapshot.todayStudyCardsByDeckID[deckID] ?? []
+        // Dashboard snapshot is lightweight; load full cards for the word-list.
+        wordListCards = (try? await DeckStore.todayStudyCardsSnapshot(userID: store.currentUserID, deckID: deckID)) ?? []
     }
 
     private func start(_ mode: StudyMode) {

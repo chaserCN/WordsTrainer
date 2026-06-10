@@ -221,6 +221,50 @@ nonisolated final class ContentDatabase {
         }
     }
 
+    /// Number of decks `loadDecks()` would return (non-archived assignments for
+    /// this user), without loading any card content.
+    func loadedDeckCount() throws -> Int {
+        let sql = """
+        SELECT COUNT(*)
+        FROM decks
+        JOIN user_deck_assignments ON user_deck_assignments.deck_id = decks.id
+        WHERE user_deck_assignments.user_id = ?
+          AND user_deck_assignments.status != 'archived'
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bind(statement, index: 1, uuid: userID)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int(statement, 0))
+    }
+
+    /// Like `loadDecks()` but with lightweight cards (no examples/questions/
+    /// forms/distractors/media). For dashboard stats and queue counts only.
+    func loadDecksLite() throws -> [DeckContent] {
+        let deckRows = try fetchDeckRows()
+        return try deckRows.map { row in
+            DeckContent(
+                id: row.id,
+                contentVersionID: row.contentVersionID,
+                status: row.status,
+                title: row.title,
+                avatarSystemName: row.avatarSystemName,
+                avatarImageURL: resolveMediaURL(deckID: row.id, mediaID: row.avatarMediaID),
+                languageCode: row.languageCode,
+                newCardsPerDay: row.newCardsPerDay,
+                reviewCardsPerDay: row.reviewCardsPerDay,
+                deckGroupID: row.deckGroupID,
+                deckGroupTitle: row.deckGroupTitle,
+                deckGroupSortOrder: row.deckGroupSortOrder,
+                deckSortOrder: row.deckSortOrder,
+                cards: try fetchCardsLite(deckID: row.id)
+            )
+        }
+    }
+
     func importServerBootstrap(
         _ bootstrap: ServerBootstrap,
         selectedUserID: UUID,
@@ -457,32 +501,58 @@ nonisolated final class ContentDatabase {
     private func cachedDeckMediaIsComplete(deckID: UUID) throws -> Bool {
         let mediaIDs = try referencedMediaIDs(deckID: deckID)
         guard !mediaIDs.isEmpty else { return true }
-        let sql = """
-        SELECT local_path, storage_key
-        FROM media_objects
-        WHERE id = ?
-        LIMIT 1
-        """
-        for mediaID in mediaIDs {
-            var statement: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-                throw ContentDatabaseError.queryFailed
+        // Resolve all referenced media references in one query, and check local
+        // files against a single directory listing instead of a per-file
+        // fileExists syscall (hundreds per deck on cold disk).
+        let references = try mediaReferences(ids: mediaIDs)
+        guard references.count == mediaIDs.count else { return false }
+        let presentFileNames = downloadedMediaFileNames(deckID: deckID)
+        for reference in references.values {
+            if let remoteURL = URL(string: reference), remoteURL.scheme == "http" || remoteURL.scheme == "https" {
+                continue
             }
-            let isAvailable: Bool = try {
-                defer { sqlite3_finalize(statement) }
-                try bind(statement, index: 1, uuid: mediaID)
-                guard sqlite3_step(statement) == SQLITE_ROW else { return false }
-                let reference = textColumn(statement, index: 0) ?? textColumn(statement, index: 1)
-                guard let reference,
-                      let url = resolveMediaReference(reference, deckID: deckID),
-                      FileManager.default.fileExists(atPath: url.path) else {
-                    return false
-                }
-                return true
-            }()
-            guard isAvailable else { return false }
+            let fileName = (reference as NSString).lastPathComponent
+            guard presentFileNames.contains(fileName) else { return false }
         }
         return true
+    }
+
+    /// `local_path` (falling back to `storage_key`) for each media id, one query.
+    private func mediaReferences(ids: Set<UUID>) throws -> [UUID: String] {
+        guard !ids.isEmpty else { return [:] }
+        let idList = Array(ids)
+        let sql = """
+        SELECT id, local_path, storage_key
+        FROM media_objects
+        WHERE id IN (\(placeholders(count: idList.count)))
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bindUUIDs(idList, to: statement)
+        var result: [UUID: String] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let id = uuidColumn(statement, index: 0),
+                  let reference = textColumn(statement, index: 1) ?? textColumn(statement, index: 2) else { continue }
+            result[id] = reference
+        }
+        return result
+    }
+
+    /// File names present in the deck's media folder. One directory listing.
+    private func downloadedMediaFileNames(deckID: UUID) -> Set<String> {
+        guard let mediaDir = try? AppDataPaths
+            .deckFolderURL(deckID: deckID)
+            .appendingPathComponent(AppDataPaths.deckMediaFolderName, isDirectory: true),
+            let entries = try? FileManager.default.contentsOfDirectory(
+                at: mediaDir,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )
+        else { return [] }
+        return Set(entries.map { $0.lastPathComponent })
     }
 
     private func referencedMediaIDs(deckID: UUID) throws -> Set<UUID> {
@@ -3197,6 +3267,49 @@ nonisolated final class ContentDatabase {
                 explanation: row.notes,
                 audioWordURL: mediaURL(row.audioWordMediaID),
                 forms: forms,
+                primarySenseID: row.primarySenseID,
+                senses: senses
+            )
+        }
+    }
+
+    /// Lightweight card load for stats/queue counts only: card + sense rows
+    /// (id, status, translation) without examples, sentence questions, forms,
+    /// distractors, or media resolution. Examples and questions are filled with
+    /// empty placeholders — they are not read by DeckStatsCalculator or the
+    /// queue builder, which only need sense ids/status and FSRS progress.
+    /// NOT suitable for study/display (cards would have empty examples).
+    private func fetchCardsLite(deckID: UUID) throws -> [WordCardContent] {
+        let rows = try fetchCardRows(deckID: deckID)
+        let sensesByCardID = try fetchSenses(cardIDs: rows.map(\.id))
+        let emptyExample = SenseExampleContent(text: "", translation: nil, note: nil)
+        let emptyQuestion = SentenceQuestionContent(template: "", answer: "", answerFormKey: nil, audioAnswerURL: nil)
+        return rows.compactMap { row in
+            let senses = (sensesByCardID[row.id] ?? []).map { senseRow in
+                WordSenseContent(
+                    id: senseRow.id,
+                    cardID: row.id,
+                    status: senseRow.status,
+                    displayPattern: senseRow.displayPattern,
+                    translation: senseRow.translation,
+                    note: senseRow.note,
+                    imageURL: nil,
+                    example: emptyExample,
+                    sentenceQuestion: emptyQuestion,
+                    distractors: []
+                )
+            }
+            guard !senses.isEmpty else { return nil }
+            return WordCardContent(
+                id: row.id,
+                status: row.status,
+                word: row.displayWord,
+                lemma: row.lemma,
+                partOfSpeech: row.partOfSpeech,
+                etymology: row.etymology,
+                explanation: row.notes,
+                audioWordURL: nil,
+                forms: [],
                 primarySenseID: row.primarySenseID,
                 senses: senses
             )

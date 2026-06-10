@@ -84,6 +84,39 @@ final class DeckStore {
         }.value
     }
 
+    /// Full study-card list for today (all decks), loaded off the main actor.
+    /// Used by the study-modes word-list, which needs complete cards (examples,
+    /// questions) — the dashboard snapshot intentionally omits these.
+    nonisolated static func todayStudyCardsSnapshot(userID: UUID) async throws -> [WordCardContent] {
+        try await Task.detached(priority: .userInitiated) {
+            let database = try ContentDatabase(userID: userID, mode: .readOnly)
+            return try database.readTransaction {
+                let decks = try database.loadDecks().filter(\.isActive)
+                var queue: [WordCardContent] = []
+                var practice: [WordCardContent] = []
+                for deck in decks {
+                    let snapshot = try todayStudyDeckSnapshot(database: database, deck: deck)
+                    queue.append(contentsOf: todayQueueCards(snapshot: snapshot))
+                    practice.append(contentsOf: todayPracticeCards(snapshot: snapshot))
+                }
+                return uniqueCards(queue.isEmpty ? practice : queue)
+            }
+        }.value
+    }
+
+    /// Full study-card list for today for a single deck, loaded off the main actor.
+    nonisolated static func todayStudyCardsSnapshot(userID: UUID, deckID: UUID) async throws -> [WordCardContent] {
+        try await Task.detached(priority: .userInitiated) {
+            let database = try ContentDatabase(userID: userID, mode: .readOnly)
+            return try database.readTransaction {
+                guard let deck = try database.loadDecks().first(where: { $0.id == deckID && $0.isActive }) else { return [] }
+                let snapshot = try todayStudyDeckSnapshot(database: database, deck: deck)
+                let queue = todayQueueCards(snapshot: snapshot)
+                return uniqueCards(queue.isEmpty ? todayPracticeCards(snapshot: snapshot) : queue)
+            }
+        }.value
+    }
+
     nonisolated static func statisticsSnapshot(userID: UUID) async throws -> DeckStatisticsSnapshot {
         try await Task.detached(priority: .userInitiated) {
             try loadStatisticsSnapshot(userID: userID)
@@ -558,40 +591,39 @@ final class DeckStore {
         }
     }
 
+    /// Dashboard snapshot: counts and stats only, using the lightweight deck
+    /// load (no examples/questions/forms/distractors/media). The full study-card
+    /// lists (todayStudyCards*) are intentionally empty here — they are loaded
+    /// on demand by the study-modes views via `todayStudyCards()`/
+    /// `todayStudyCards(deck:)`, which use the full content path.
     nonisolated private static func loadTodayDashboardSnapshot(database: ContentDatabase) throws -> DeckTodaySnapshot {
-        let decks = try database.loadDecks()
+        let decks = try database.loadDecksLite()
         let activeDecks = decks.filter(\.isActive)
         var statsByDeckID: [UUID: DeckStats] = [:]
         var todayPracticeCountByDeckID: [UUID: Int] = [:]
-        var todayStudyCardsByDeckID: [UUID: [WordCardContent]] = [:]
-        var queueCards: [WordCardContent] = []
-        var practiceCards: [WordCardContent] = []
         var todayPracticeCount = 0
 
         for deck in activeDecks {
             let snapshot = try todayStudyDeckSnapshot(database: database, deck: deck)
-            let deckQueueCards = todayQueueCards(snapshot: snapshot)
-            queueCards.append(contentsOf: deckQueueCards)
-            let deckPracticeCards = todayPracticeCards(snapshot: snapshot)
-            practiceCards.append(contentsOf: deckPracticeCards)
-            todayPracticeCountByDeckID[deck.id] = deckPracticeCards.count
-            todayStudyCardsByDeckID[deck.id] = uniqueCards(deckQueueCards.isEmpty ? deckPracticeCards : deckQueueCards)
+            let deckPracticeCount = todayPracticeCards(snapshot: snapshot).count
+            todayPracticeCountByDeckID[deck.id] = deckPracticeCount
             statsByDeckID[deck.id] = DeckStatsCalculator.compute(
                 deck: deck,
                 progressBySenseID: snapshot.progressBySenseID,
                 dailyUsage: snapshot.dailyUsage
             )
-            todayPracticeCount += deckPracticeCards.count
+            todayPracticeCount += deckPracticeCount
         }
+        let activity = try studyActivity(database: database, days: 90)
 
         return DeckTodaySnapshot(
             decks: decks,
             statsByDeckID: statsByDeckID,
             todayPracticeCount: todayPracticeCount,
             todayPracticeCountByDeckID: todayPracticeCountByDeckID,
-            todayStudyCards: uniqueCards(queueCards.isEmpty ? practiceCards : queueCards),
-            todayStudyCardsByDeckID: todayStudyCardsByDeckID,
-            activityDays: try studyActivity(database: database, days: 90)
+            todayStudyCards: [],
+            todayStudyCardsByDeckID: [:],
+            activityDays: activity
         )
     }
 
