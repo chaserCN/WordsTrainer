@@ -66,7 +66,10 @@ struct TodayStudySessionBuilderTests {
 
     @Test("a card already due is not also counted against the new-card budget")
     func dueCardDoesNotConsumeNewBudget() {
-        let now = Date()
+        // Pin to daytime: a due time inside quiet hours (22:00–08:00) is pushed
+        // forward by ReviewSchedule.availableDate, which would otherwise make
+        // this test flaky depending on the wall-clock hour it runs at.
+        let now = Calendar.current.date(from: DateComponents(year: 2026, month: 6, day: 3, hour: 12))!
         // Card with two senses: one already due for review, one still new.
         let mixedCard = TestFixtures.card(word: "cast", translation: "бросать; гипс")
         let dueSense = mixedCard.activeSenses[0]
