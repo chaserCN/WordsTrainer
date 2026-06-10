@@ -84,6 +84,39 @@ final class DeckStore {
         }.value
     }
 
+    /// Lightweight decks (card/sense rows only, no examples/questions/media)
+    /// loaded off the main actor. Enough to render the deck list and its card
+    /// counts immediately; full content is loaded separately on demand.
+    nonisolated static func allDecksLiteSnapshot(userID: UUID) async throws -> [DeckContent] {
+        try await Task.detached(priority: .userInitiated) {
+            let database = try ContentDatabase(userID: userID, mode: .readOnly)
+            return try database.readTransaction {
+                try database.loadDecksLite()
+            }
+        }.value
+    }
+
+    /// Full decks (with card content) loaded off the main actor — for the deck
+    /// list's word search index and for opening a deck's details/study.
+    nonisolated static func allDecksSnapshot(userID: UUID) async throws -> [DeckContent] {
+        try await Task.detached(priority: .userInitiated) {
+            let database = try ContentDatabase(userID: userID, mode: .readOnly)
+            return try database.readTransaction {
+                try database.loadDecks()
+            }
+        }.value
+    }
+
+    /// Full card content for a single deck, loaded off the main actor.
+    nonisolated static func deckCardsSnapshot(userID: UUID, deckID: UUID) async throws -> [WordCardContent] {
+        try await Task.detached(priority: .userInitiated) {
+            let database = try ContentDatabase(userID: userID, mode: .readOnly)
+            return try database.readTransaction {
+                try database.loadDecks().first(where: { $0.id == deckID })?.cards ?? []
+            }
+        }.value
+    }
+
     /// Full study-card list for today (all decks), loaded off the main actor.
     /// Used by the study-modes word-list, which needs complete cards (examples,
     /// questions) — the dashboard snapshot intentionally omits these.
@@ -211,26 +244,6 @@ final class DeckStore {
             matchingRecordScope: MatchingRecordScope.none,
             reviewSource: .weakCards,
             savesProgress: false
-        )
-    }
-
-    func scheduledReviewDays(days: Int) throws -> [ScheduledReviewDay] {
-        let activeDecks = try allDecks().filter(\.isActive)
-        var progressByDeckID: [UUID: [UUID: CardProgress]] = [:]
-        var dailyUsageByDeckID: [UUID: DeckDailyUsage] = [:]
-
-        for deck in activeDecks {
-            progressByDeckID[deck.id] = try database.progressMap(deckID: deck.id)
-            if let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey()) {
-                dailyUsageByDeckID[deck.id] = usage
-            }
-        }
-
-        return StudyPlanForecastCalculator.compute(
-            days: days,
-            decks: activeDecks,
-            progressByDeckID: progressByDeckID,
-            dailyUsageByDeckID: dailyUsageByDeckID
         )
     }
 

@@ -433,10 +433,19 @@ struct DeckListView: View {
             let deckStore = try DeckStore(userID: selectedUserID)
             storeUserID = selectedUserID
             store = deckStore
-            let loadedDecks = try deckStore.allDecks()
-            decks = loadedDecks
-            rebuildSearchIndex()
+            // Paint the list fast: lite decks (no examples/questions/media) give
+            // titles and correct card counts almost instantly, off the main actor.
+            let liteDecks = try await DeckStore.allDecksLiteSnapshot(userID: selectedUserID)
+            guard userStore.selectedUserID == selectedUserID else { return }
+            decks = liteDecks
             loadError = nil
+            // Then preemptively load full card content in the background so deck
+            // details / study / search are ready by the time they're needed,
+            // without blocking the first paint.
+            let fullDecks = try await DeckStore.allDecksSnapshot(userID: selectedUserID)
+            guard userStore.selectedUserID == selectedUserID else { return }
+            decks = fullDecks
+            rebuildSearchIndex()
         } catch {
             loadError = error.localizedDescription
         }
@@ -1667,6 +1676,15 @@ struct DeckDetailView: View {
     private func reloadDeckState() async {
         let userID = store.currentUserID
         let currentDeck = deck
+        // The list may have handed us a lightweight deck (empty examples) while
+        // its full content was still loading. Ensure this deck has full cards so
+        // the word list and study sessions work even if opened immediately.
+        if currentDeck.cards.contains(where: { $0.activeSenses.contains { $0.example.text.isEmpty } }) {
+            if let fullCards = try? await DeckStore.deckCardsSnapshot(userID: userID, deckID: currentDeck.id),
+               !Task.isCancelled, deck.id == currentDeck.id, !fullCards.isEmpty {
+                deck.cards = fullCards
+            }
+        }
         do {
             let snapshot = try await DeckStore.deckDetailSnapshot(userID: userID, deck: currentDeck)
             guard !Task.isCancelled else { return }

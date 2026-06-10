@@ -225,7 +225,10 @@ final class AppUserStore {
                     guard isCurrentRefreshTask(taskID) else { return .cancelled }
                     let mediaFailureCount = try await cacheMedia(from: changes, database: database, taskID: taskID)
                     guard isCurrentRefreshTask(taskID) else { return .cancelled }
-                    let decks = try database.loadDecks()
+                    // Only emptiness and counts are needed here, not full card
+                    // content — use the lightweight load to avoid a ~600-card
+                    // read on the main actor on every sync.
+                    let decks = try database.loadDecksLite()
                     if let reason = changesFullBootstrapFallbackReason(
                         changes: changes,
                         localServerRevision: localServerRevision,
