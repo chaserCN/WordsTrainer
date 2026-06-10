@@ -1434,6 +1434,36 @@ struct ContentDatabaseTests {
         }
     }
 
+    @Test("cleanup deletes media files whose object is no longer referenced")
+    func cleanupDeletesOrphanedMediaFiles() throws {
+        try withIsolatedDatabase { database in
+            // Import a version whose card audio uses audioWordMediaID, then
+            // place its downloaded file on disk.
+            try database.importServerBootstrap(
+                bootstrap(audioWordMediaID: audioWordMediaID, media: [mediaJSON(id: audioWordMediaID)]),
+                selectedUserID: userID
+            )
+            let mediaFolderURL = try AppDataPaths.deckFolderURL(deckID: deckID)
+                .appendingPathComponent(AppDataPaths.deckMediaFolderName, isDirectory: true)
+            try FileManager.default.createDirectory(at: mediaFolderURL, withIntermediateDirectories: true)
+            let oldFileURL = mediaFolderURL.appendingPathComponent("\(audioWordMediaID.databaseString).png")
+            try Data([1, 2, 3]).write(to: oldFileURL)
+            #expect(FileManager.default.fileExists(atPath: oldFileURL.path))
+
+            // Re-import the same assigned deck with the audio swapped to a new
+            // media id (simulating updated audio): the old object becomes
+            // unreferenced and its leftover file must be removed.
+            try database.importServerBootstrap(
+                bootstrap(audioWordMediaID: mediaID, media: [mediaJSON(id: mediaID)]),
+                selectedUserID: userID
+            )
+
+            #expect(!FileManager.default.fileExists(atPath: oldFileURL.path))
+            #expect(try database.mediaObjects(ids: [audioWordMediaID]).isEmpty)
+            #expect(try database.mediaObjects(ids: [mediaID]).map(\.id) == [mediaID])
+        }
+    }
+
     @Test("loadDecks resolves sense image and answer audio through bulk media lookup")
     func loadDecksResolvesSenseImageAndAnswerAudioThroughBulkLookup() throws {
         try withIsolatedDatabase { database in

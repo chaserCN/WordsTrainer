@@ -359,6 +359,7 @@ nonisolated final class ContentDatabase {
         let orphanDeckIDs = try fetchDeckIDsWithoutAssignments()
         guard !orphanDeckIDs.isEmpty else {
             try deleteUnreferencedMediaObjects()
+            deleteOrphanedMediaFiles(remainingDeckIDs: try remainingDeckIDs())
             return ContentCacheCleanupResult(removedDeckIDs: [])
         }
 
@@ -378,6 +379,7 @@ nonisolated final class ContentDatabase {
                 try FileManager.default.removeItem(at: folderURL)
             }
         }
+        deleteOrphanedMediaFiles(remainingDeckIDs: try remainingDeckIDs())
         return ContentCacheCleanupResult(removedDeckIDs: orphanDeckIDs)
     }
 
@@ -1960,6 +1962,72 @@ nonisolated final class ContentDatabase {
         )
         """
         try exec(sql)
+    }
+
+    /// Lowercased ids of every media object still tracked in the database.
+    private func knownMediaObjectIDStrings() throws -> Set<String> {
+        let sql = "SELECT id FROM media_objects"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        var ids: Set<String> = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let id = uuidColumn(statement, index: 0) {
+                ids.insert(id.uuidString.lowercased())
+            }
+        }
+        return ids
+    }
+
+    /// Removes media files whose media_id is no longer tracked in media_objects.
+    /// Media files are named `<media_id>.<ext>`; when a card's audio is updated
+    /// the row gets a new id and the old file would otherwise leak on disk.
+    /// Only files in still-present deck folders are swept here; fully orphaned
+    /// decks have their entire folder removed by the caller.
+    private func deleteOrphanedMediaFiles(remainingDeckIDs: [UUID]) {
+        let knownIDs: Set<String>
+        do {
+            knownIDs = try knownMediaObjectIDStrings()
+        } catch {
+            return
+        }
+        let fileManager = FileManager.default
+        for deckID in remainingDeckIDs {
+            guard let mediaDirectory = try? AppDataPaths
+                .deckFolderURL(deckID: deckID)
+                .appendingPathComponent(AppDataPaths.deckMediaFolderName, isDirectory: true),
+                fileManager.fileExists(atPath: mediaDirectory.path),
+                let entries = try? fileManager.contentsOfDirectory(
+                    at: mediaDirectory,
+                    includingPropertiesForKeys: nil,
+                    options: [.skipsHiddenFiles]
+                )
+            else { continue }
+            for fileURL in entries {
+                let stem = fileURL.deletingPathExtension().lastPathComponent.lowercased()
+                if knownIDs.contains(stem) { continue }
+                try? fileManager.removeItem(at: fileURL)
+            }
+        }
+    }
+
+    /// Deck ids that still have a row after content cleanup.
+    private func remainingDeckIDs() throws -> [UUID] {
+        let sql = "SELECT id FROM decks"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        var ids: [UUID] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let id = uuidColumn(statement, index: 0) {
+                ids.append(id)
+            }
+        }
+        return ids
     }
 
     private func upsertCards(_ cards: [ServerCardContent], versionDeckIDs: [UUID: UUID]) throws {
