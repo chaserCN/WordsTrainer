@@ -188,12 +188,12 @@ struct DeckListView: View {
 
     private var activeCardCount: Int {
         activeDecks.reduce(0) { count, deck in
-            count + deck.activeCards.count
+            count + deck.activeCardCount
         }
     }
 
     private var hasSearchItems: Bool {
-        activeDecks.contains { !$0.activeCards.isEmpty }
+        activeDecks.contains(where: \.hasActiveCards)
     }
 
     /// Активные колоды выше, отключённые ниже; внутри каждой группы — по названию.
@@ -481,21 +481,28 @@ private struct DeckGroupSection: Identifiable {
     let title: String
     let sortOrder: Int
     let decks: [Binding<DeckContent>]
+    let activeDeckCount: Int
+    let activeCardCount: Int
+
+    init(key: DeckGroupKey, title: String, sortOrder: Int, decks: [Binding<DeckContent>]) {
+        self.key = key
+        self.title = title
+        self.sortOrder = sortOrder
+        self.decks = decks
+        var deckCount = 0
+        var cardCount = 0
+        for binding in decks where binding.wrappedValue.isActive {
+            deckCount += 1
+            cardCount += binding.wrappedValue.activeCardCount
+        }
+        activeDeckCount = deckCount
+        activeCardCount = cardCount
+    }
 
     var id: String { key.id }
 
-    var activeDeckCount: Int {
-        decks.map(\.wrappedValue).filter(\.isActive).count
-    }
-
-    var activeCardCount: Int {
-        decks.map(\.wrappedValue).filter(\.isActive).reduce(0) { total, deck in
-            total + deck.activeCards.count
-        }
-    }
-
     var activeDeckIDs: Set<UUID> {
-        Set(decks.map(\.wrappedValue).filter(\.isActive).map(\.id))
+        Set(decks.lazy.map(\.wrappedValue).filter(\.isActive).map(\.id))
     }
 }
 
@@ -1241,22 +1248,31 @@ struct LovableDeckCard: View {
     let deck: DeckContent
     var showsChevron: Bool = true
     var footnote: String? = nil
+    var showsShadows: Bool = true
 
     var body: some View {
+        let avatarPalette = DeckAvatarPalette(seed: deck.id.uuidString)
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(DeckAvatarPalette(seed: deck.id.uuidString).gradient)
-                    .frame(width: 56, height: 56)
-                    .overlay {
-                        DeckAvatarContent(
-                            symbolName: deck.avatarSystemName,
-                            imageURL: deck.avatarImageURL,
-                            size: 56,
-                            cornerRadius: 16
-                        )
-                    }
-                    .shadow(color: DeckAvatarPalette(seed: deck.id.uuidString).shadowColor, radius: 9, x: 0, y: 8)
+                Group {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(avatarPalette.gradient)
+                        .frame(width: 56, height: 56)
+                        .overlay {
+                            DeckAvatarContent(
+                                symbolName: deck.avatarSystemName,
+                                imageURL: deck.avatarImageURL,
+                                size: 56,
+                                cornerRadius: 16
+                            )
+                        }
+                }
+                .modifier(OptionalShadowModifier(
+                    isEnabled: showsShadows,
+                    color: avatarPalette.shadowColor,
+                    radius: 9,
+                    y: 8
+                ))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(deck.title)
@@ -1264,7 +1280,7 @@ struct LovableDeckCard: View {
                         .foregroundStyle(.white)
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    Text("\(LocalizedCounts.cardPhrase(deck.activeCards.count)) · \(deck.languageCode.uppercased())")
+                    Text("\(LocalizedCounts.cardPhrase(deck.activeCardCount)) · \(deck.languageCode.uppercased())")
                         .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(.white.opacity(0.55))
                         .lineLimit(1)
@@ -1295,7 +1311,24 @@ struct LovableDeckCard: View {
                     .padding(.trailing, 16)
             }
         }
-        .lovablePanel(cornerRadius: 24)
+        .lovablePanel(cornerRadius: 24, showsShadow: showsShadows)
+    }
+}
+
+private struct OptionalShadowModifier: ViewModifier {
+    let isEnabled: Bool
+    let color: Color
+    let radius: CGFloat
+    let y: CGFloat
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content
+                .compositingGroup()
+                .shadow(color: color, radius: radius, x: 0, y: y)
+        } else {
+            content
+        }
     }
 }
 
@@ -1364,7 +1397,7 @@ struct DeckCardView: View {
     var showsChevron: Bool = true
 
     @State private var stats: DeckStats = .zero
-    private var activeCardCount: Int { deck.activeCards.count }
+    private var activeCardCount: Int { deck.activeCardCount }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -1408,6 +1441,7 @@ struct DeckCardView: View {
             RoundedRectangle(cornerRadius: 28, style: .continuous)
                 .stroke(.white.opacity(0.75), lineWidth: 1)
         }
+        .compositingGroup()
         .shadow(color: .black.opacity(0.28), radius: 26, x: 0, y: 16)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
@@ -1466,7 +1500,7 @@ struct DeckDetailView: View {
                         backgroundVariant: .decks
                     )
                 } label: {
-                    LovableDeckCard(deck: deck, showsChevron: true, footnote: deckFootnote)
+                    LovableDeckCard(deck: deck, showsChevron: true, footnote: deckFootnote, showsShadows: false)
                 }
                 .buttonStyle(.plain)
 
@@ -1935,7 +1969,6 @@ private struct StudyActionButton: View {
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
                     .background(accent.opacity(isEnabled ? 1 : 0.4), in: Circle())
-                    .shadow(color: accent.opacity(isEnabled ? 0.5 : 0), radius: 9, x: 0, y: 8)
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
@@ -1964,7 +1997,7 @@ private struct StudyActionButton: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
             .foregroundStyle(.white)
-            .lovablePanel(cornerRadius: 20)
+            .lovablePanel(cornerRadius: 20, showsShadow: false)
             .opacity(isEnabled ? 1 : 0.55)
         }
         .buttonStyle(.plain)
@@ -1995,6 +2028,7 @@ private struct DeckIcon: View {
             )
         }
         .frame(width: size, height: size)
+        .compositingGroup()
         .shadow(color: .blue.opacity(0.25), radius: 12, x: 0, y: 6)
     }
 

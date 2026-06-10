@@ -542,6 +542,10 @@ nonisolated struct DeckContent: Identifiable, Hashable, Sendable {
 
     var isActive: Bool { status.isActive }
     var activeCards: [WordCardContent] { cards.filter(\.status.isActive) }
+    /// Счётчики без материализации массива `activeCards` — для view-кода,
+    /// который пересчитывает их на каждом body и которому нужно только число.
+    var activeCardCount: Int { cards.lazy.filter(\.status.isActive).count }
+    var hasActiveCards: Bool { cards.contains(where: \.status.isActive) }
 
     init(
         id: UUID,

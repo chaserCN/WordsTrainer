@@ -255,6 +255,7 @@ struct FlashcardStudyView: View {
             perspective: Self.flipPerspective
         )
         .allowsHitTesting(!isFlipAnimating)
+        .compositingGroup()
         .shadow(color: MatchPalette.shadow.opacity(0.18), radius: 10, x: 0, y: 6)
         .shadow(color: MatchPalette.shadow.opacity(0.08), radius: 4, x: 0, y: 2)
     }
@@ -778,6 +779,7 @@ private struct FlashcardMediaImage: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
         )
+        .compositingGroup()
         .shadow(color: MatchPalette.shadow.opacity(0.18), radius: 14, x: 0, y: 8)
     }
 }

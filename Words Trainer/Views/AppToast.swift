@@ -43,6 +43,7 @@ struct AppToastView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(.white, lineWidth: 0.5)
         }
+        .compositingGroup()
         .shadow(color: .black.opacity(0.08), radius: 18, x: 0, y: 8)
         .accessibilityElement(children: .combine)
     }

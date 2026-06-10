@@ -189,11 +189,11 @@ private struct SoundSettingsPopover: View {
             if showsFlashcardMode {
                 Divider()
                 VStack(alignment: .leading, spacing: 10) {
-                    Label("Senses", systemImage: "rectangle.stack.fill")
+                    Label(L10n.text("Значения"), systemImage: "rectangle.stack.fill")
                         .font(.headline)
-                    Picker("Senses", selection: $settings.flashcardDisplayMode) {
-                        Text("Одной картой").tag(FlashcardDisplayMode.wholeCard)
-                        Text("Несколькими").tag(FlashcardDisplayMode.oneSense)
+                    Picker(L10n.text("Значения"), selection: $settings.flashcardDisplayMode) {
+                        Text(L10n.text("Одной картой")).tag(FlashcardDisplayMode.wholeCard)
+                        Text(L10n.text("Несколькими")).tag(FlashcardDisplayMode.oneSense)
                     }
                     .pickerStyle(.segmented)
                 }

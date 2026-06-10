@@ -8,7 +8,7 @@ struct HTMLText: View {
     var emphasisColor: Color?
 
     var body: some View {
-        if let styled = Self.styled(
+        if let styled = Self.cachedStyled(
             from: html,
             foregroundColor: foregroundColor,
             emphasisColor: emphasisColor
@@ -31,6 +31,37 @@ struct HTMLText: View {
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private struct StyleCacheKey: Hashable {
+        let html: String
+        let foregroundColor: Color?
+        let emphasisColor: Color?
+    }
+
+    /// Кэш разобранных строк: одни и те же карточки перерисовываются много раз
+    /// (анимации переворота, выбор в «Колонках»), а вход неизменен — без кэша
+    /// парсер гонялся бы на каждом пересчёте body.
+    @MainActor
+    private static var styledCache: [StyleCacheKey: AttributedString?] = [:]
+    private static let styledCacheLimit = 256
+
+    @MainActor
+    private static func cachedStyled(
+        from html: String,
+        foregroundColor: Color?,
+        emphasisColor: Color?
+    ) -> AttributedString? {
+        let key = StyleCacheKey(html: html, foregroundColor: foregroundColor, emphasisColor: emphasisColor)
+        if let cached = styledCache[key] {
+            return cached
+        }
+        if styledCache.count >= styledCacheLimit {
+            styledCache.removeAll(keepingCapacity: true)
+        }
+        let styled = styled(from: html, foregroundColor: foregroundColor, emphasisColor: emphasisColor)
+        styledCache[key] = styled
+        return styled
     }
 
     private static func styled(

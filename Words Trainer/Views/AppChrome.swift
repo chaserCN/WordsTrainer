@@ -261,9 +261,10 @@ private struct LovableOrb {
 
 struct LovablePanel: ViewModifier {
     let cornerRadius: CGFloat
+    var showsShadow: Bool = true
 
     func body(content: Content) -> some View {
-        content
+        let panel = content
             .background(
                 LinearGradient(
                     colors: [LovableSurface.panelTop, LovableSurface.panelBottom],
@@ -276,13 +277,23 @@ struct LovablePanel: ViewModifier {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(.white.opacity(0.06), lineWidth: 0.5)
             }
-            .shadow(color: oklch(0.1, 0.05, 265, 0.32), radius: 18, x: 0, y: 10)
+
+        if showsShadow {
+            // compositingGroup сплющивает панель в один слой, иначе .shadow
+            // рисует тень для каждого текста/иконки внутри — это рушит FPS
+            // пуш-переходов на экранах с несколькими панелями.
+            panel
+                .compositingGroup()
+                .shadow(color: oklch(0.1, 0.05, 265, 0.32), radius: 18, x: 0, y: 10)
+        } else {
+            panel
+        }
     }
 }
 
 extension View {
-    func lovablePanel(cornerRadius: CGFloat = 24) -> some View {
-        modifier(LovablePanel(cornerRadius: cornerRadius))
+    func lovablePanel(cornerRadius: CGFloat = 24, showsShadow: Bool = true) -> some View {
+        modifier(LovablePanel(cornerRadius: cornerRadius, showsShadow: showsShadow))
     }
 }
 

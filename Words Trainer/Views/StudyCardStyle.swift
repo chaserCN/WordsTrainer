@@ -34,6 +34,7 @@ struct RecallOutcomeButton: View {
             .padding(.horizontal, 10)
             .background(studyActionShape.fill(cardFill))
             .overlay(studyActionShape.strokeBorder(.white.opacity(0.7), lineWidth: 0.5))
+            .compositingGroup()
             .shadow(color: MatchPalette.shadow.opacity(0.12), radius: 10, x: 0, y: 6)
         }
         .buttonStyle(.plain)

@@ -801,6 +801,7 @@ struct MatchingFlashcardPreviewOverlay: View {
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .strokeBorder(.white.opacity(0.10), lineWidth: 0.5)
                 )
+                .compositingGroup()
                 .shadow(color: MatchPalette.shadow.opacity(0.22), radius: 18, x: 0, y: 10)
                 .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .background(
@@ -940,6 +941,7 @@ private struct MatchingCell: View {
             .padding(.vertical, 12)
             .background(studyCardShape.fill(cardFill))
             .overlay(studyCardShape.strokeBorder(ringColor, lineWidth: ringWidth))
+            .compositingGroup()
             .shadow(color: primaryShadow.color, radius: primaryShadow.radius, x: 0, y: primaryShadow.y)
             .shadow(color: secondaryShadow.color, radius: secondaryShadow.radius, x: 0, y: secondaryShadow.y)
         }

@@ -163,6 +163,7 @@ struct ClozeMCQStudyView: View {
                 .clipShape(clozeSentenceShape)
         )
         .overlay(clozeSentenceShape.strokeBorder(.white.opacity(0.06), lineWidth: 0.5))
+        .compositingGroup()
         .shadow(color: oklch(0.2, 0.12, 265, 0.4), radius: 18, x: 0, y: 12)
         .modifier(ShakeEffect(animatableData: shakeCount))
         .animation(.linear(duration: 0.4), value: shakeCount)
@@ -364,6 +365,7 @@ private struct ClozeChoiceButton: View {
             .padding(.vertical, 10)
             .background(clozeCardShape.fill(cardFill))
             .overlay(clozeCardShape.strokeBorder(ringColor, lineWidth: ringWidth))
+            .compositingGroup()
             .shadow(color: primaryShadow.color, radius: primaryShadow.radius, x: 0, y: primaryShadow.y)
         }
         .buttonStyle(.plain)

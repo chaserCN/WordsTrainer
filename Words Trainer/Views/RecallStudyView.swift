@@ -76,6 +76,7 @@ struct RecallStudyView: View {
             RoundedRectangle(cornerRadius: 32, style: .continuous)
                 .strokeBorder(.white.opacity(0.07), lineWidth: 0.5)
         )
+        .compositingGroup()
         .shadow(color: oklch(0.1, 0.05, 270, 0.5), radius: 24, x: 0, y: 16)
         .shadow(color: oklch(0.1, 0.05, 270, 0.3), radius: 8, x: 0, y: 6)
     }
