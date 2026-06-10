@@ -255,7 +255,10 @@ struct FlashcardStudyView: View {
             perspective: Self.flipPerspective
         )
         .allowsHitTesting(!isFlipAnimating)
-        .compositingGroup()
+        // No compositingGroup here: it flattens the 3D-rotated layer into an
+        // offscreen bitmap every frame of the flip, which janks the animation
+        // (and can collapse the two-phase rotation into a snap) and is costly
+        // on device. The card shadows render fine without it.
         .shadow(color: MatchPalette.shadow.opacity(0.18), radius: 10, x: 0, y: 6)
         .shadow(color: MatchPalette.shadow.opacity(0.08), radius: 4, x: 0, y: 2)
     }
