@@ -213,30 +213,27 @@ final class AppUserStore {
                     let mediaFailureCount = try await cacheMedia(from: changes, database: database, taskID: taskID)
                     guard isCurrentRefreshTask(taskID) else { return .cancelled }
                     let decks = try database.loadDecks()
-                    let cachedDeckVersionIDsAfterChanges = try database.cachedDeckVersionIDs()
                     if let reason = changesFullBootstrapFallbackReason(
                         changes: changes,
                         localServerRevision: localServerRevision,
                         localDeckCountBeforeChanges: localDeckCountBeforeChanges,
-                        decksAfterChanges: decks,
-                        cachedDeckVersionIDsAfterChanges: cachedDeckVersionIDsAfterChanges
+                        decksAfterChanges: decks
                     ) {
                         Self.logger.warning("changes discarded; falling back to full bootstrap reason=\(reason, privacy: .public)")
                         fullBootstrapReason = reason
-                        bootstrapCachedDeckVersionIDs = reason == "incomplete_media_cache_after_delta"
-                            ? cachedDeckVersionIDsAfterChanges
-                            : []
+                        bootstrapCachedDeckVersionIDs = []
                     } else {
-                        if mediaFailureCount == 0 {
-                            if let serverRevision = changes.serverRevision {
-                                try database.setServerRevision(serverRevision)
-                            }
-                            try database.markInitialSyncCompleted()
-                            let importedServerRevision = try database.serverRevision()
-                            Self.logger.info("changes committed localServerRevision=\(importedServerRevision, privacy: .public)")
-                        } else {
-                            Self.logger.warning("changes media incomplete; keeping previous localServerRevision=\(localServerRevision, privacy: .public)")
+                        // serverRevision is the cursor for study events (FSRS,
+                        // progress) and is advanced unconditionally. Deck content
+                        // and media are tracked separately: an incomplete media
+                        // cache leaves the version out of cachedDeckVersionIDs, so
+                        // the next sync re-fetches it regardless of the cursor.
+                        if let serverRevision = changes.serverRevision {
+                            try database.setServerRevision(serverRevision)
                         }
+                        try database.markInitialSyncCompleted()
+                        let importedServerRevision = try database.serverRevision()
+                        Self.logger.info("changes committed localServerRevision=\(importedServerRevision, privacy: .public) mediaFailures=\(mediaFailureCount, privacy: .public)")
                         try applyCachedUserAvatarURLs(from: changes)
                         guard isCurrentRefreshTask(taskID) else { return .cancelled }
                         bootstrapState = .loaded
@@ -308,16 +305,16 @@ final class AppUserStore {
                 )
                 let mediaFailureCount = try await cacheMedia(from: bootstrap, database: database, taskID: taskID)
                 try applyCachedUserAvatarURLs(from: bootstrap)
-                if mediaFailureCount == 0 {
-                    if let serverRevision = bootstrap.serverRevision {
-                        try database.setServerRevision(serverRevision)
-                    }
-                    try database.markInitialSyncCompleted()
-                    let importedServerRevision = try database.serverRevision()
-                    Self.logger.info("bootstrap committed localServerRevision=\(importedServerRevision, privacy: .public)")
-                } else {
-                    Self.logger.warning("bootstrap media incomplete; server revision was not committed")
+                // serverRevision is the study-event cursor and is advanced
+                // unconditionally. An incomplete media cache keeps the version
+                // out of cachedDeckVersionIDs, so the next (delta) sync re-fetches
+                // it; it does not need to hold back the cursor.
+                if let serverRevision = bootstrap.serverRevision {
+                    try database.setServerRevision(serverRevision)
                 }
+                try database.markInitialSyncCompleted()
+                let importedServerRevision = try database.serverRevision()
+                Self.logger.info("bootstrap committed localServerRevision=\(importedServerRevision, privacy: .public) mediaFailures=\(mediaFailureCount, privacy: .public)")
                 guard isCurrentRefreshTask(taskID) else { return .cancelled }
                 do {
                     updateSyncProgress(.uploadingChanges, taskID: taskID)
@@ -376,8 +373,7 @@ final class AppUserStore {
         changes: ServerSyncChanges,
         localServerRevision: String,
         localDeckCountBeforeChanges: Int,
-        decksAfterChanges: [DeckContent],
-        cachedDeckVersionIDsAfterChanges: [UUID]
+        decksAfterChanges: [DeckContent]
     ) -> String? {
         guard let serverRevision = changes.serverRevision else {
             return "missing_delta_revision"
@@ -392,14 +388,9 @@ final class AppUserStore {
            changes.assignments.isEmpty {
             return "empty_decks_after_delta_without_assignment_changes"
         }
-        let cachedVersionIDs = Set(cachedDeckVersionIDsAfterChanges)
-        let hasIncompleteAssignedDeck = decksAfterChanges.contains { deck in
-            guard let contentVersionID = deck.contentVersionID else { return false }
-            return !cachedVersionIDs.contains(contentVersionID)
-        }
-        if hasIncompleteAssignedDeck {
-            return "incomplete_media_cache_after_delta"
-        }
+        // An incomplete media cache no longer forces a full bootstrap: the
+        // affected version simply stays out of cachedDeckVersionIDs and is
+        // re-fetched (content + remaining media) on the next sync.
         return nil
     }
 

@@ -1703,9 +1703,9 @@ struct ContentDatabaseTests {
         #expect(try database.loadDecks().isEmpty)
     }
 
-    @Test("bootstrap does not commit revision when required media fails")
+    @Test("bootstrap commits the event-cursor revision even when media fails")
     @MainActor
-    func bootstrapDoesNotCommitRevisionWhenRequiredMediaFails() async throws {
+    func bootstrapCommitsRevisionEvenWhenRequiredMediaFails() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)
         let suiteName = "AppUserStoreTests-\(UUID().uuidString)"
@@ -1751,14 +1751,17 @@ struct ContentDatabaseTests {
         #expect(result == .loadedWithMediaWarnings(userCount: 1, assignmentCount: 1, activeAssignmentCount: 1, failedMediaCount: 1))
         #expect(captured.requests.map(\.url?.path) == ["/v1/bootstrap", "/v1/media/\(audioWordMediaID.uuidString.lowercased())"])
         let database = try ContentDatabase(userID: userID)
-        #expect(try database.serverRevision() == "0")
-        #expect(try database.hasCompletedInitialSync() == false)
+        // The event cursor advances regardless of media: it tracks FSRS/progress,
+        // not deck media. The version with the missing file stays out of
+        // cachedDeckVersionIDs, so the server re-sends it on the next sync.
+        #expect(try database.serverRevision() == "42")
+        #expect(try database.hasCompletedInitialSync())
         #expect(try database.cachedDeckVersionIDs().isEmpty)
     }
 
-    @Test("delta sync repairs incomplete media cache with full bootstrap")
+    @Test("delta sync keeps applying without a bootstrap fallback when media is incomplete")
     @MainActor
-    func deltaSyncRepairsIncompleteMediaCacheWithFullBootstrap() async throws {
+    func deltaSyncDoesNotFallBackToBootstrapWhenMediaIncomplete() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("flashgame-db-tests-\(UUID().uuidString)", isDirectory: true)
         let suiteName = "AppUserStoreTests-\(UUID().uuidString)"
@@ -1840,25 +1843,16 @@ struct ContentDatabaseTests {
         let result = await store.refreshFromServer()
 
         #expect(result == .loaded(userCount: 1, assignmentCount: 1, activeAssignmentCount: 1))
-        #expect(captured.requests.map(\.url?.path) == [
-            "/v1/sync/changes",
-            "/v1/bootstrap",
-            "/v1/media/\(audioWordMediaID.uuidString.lowercased())",
-        ])
+        // Incomplete media no longer discards the delta and forces a bootstrap:
+        // only the delta is fetched. The version stays out of cachedDeckVersionIDs
+        // so a later (content-bearing) delta re-sends it and its media.
+        #expect(captured.requests.map(\.url?.path) == ["/v1/sync/changes"])
         let changesRequest = try #require(captured.requests.first)
         #expect(changesRequest.url?.query == "sinceRevision=10")
-        #expect(changesRequest.value(forHTTPHeaderField: "X-FlashGame-Cached-Deck-Version-Ids") == nil)
-        let bootstrapRequest = try #require(captured.requests.dropFirst().first)
-        #expect(bootstrapRequest.value(forHTTPHeaderField: "X-FlashGame-Cached-Deck-Version-Ids") == nil)
         let repairedDatabase = try ContentDatabase(userID: userID)
-        #expect(try repairedDatabase.serverRevision() == "11")
+        #expect(try repairedDatabase.serverRevision() == "10")
         #expect(try repairedDatabase.hasCompletedInitialSync())
-        #expect(try repairedDatabase.cachedDeckVersionIDs() == [versionID])
-        let deck = try #require(repairedDatabase.loadDecks().first)
-        let card = try #require(deck.cards.first)
-        let audioURL = try #require(card.audioWordURL)
-        #expect(FileManager.default.fileExists(atPath: audioURL.path))
-        #expect(try Data(contentsOf: audioURL) == audioData)
+        #expect(try repairedDatabase.cachedDeckVersionIDs().isEmpty)
     }
 
     @Test("initial bootstrap caches user avatar media")
