@@ -76,6 +76,12 @@ struct StudySessionView: View {
                 break
             }
         }
+        .onAppear {
+            FrameHitchMonitor.shared.mark("study \(session.mode) appeared (pool=\(session.sessionChoicePool.count))")
+        }
+        .onDisappear {
+            FrameHitchMonitor.shared.mark("returned from study \(session.mode)")
+        }
     }
 
     @ViewBuilder

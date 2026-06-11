@@ -132,6 +132,73 @@ final class DeckStore {
         }.value
     }
 
+    /// Today's word-list (all decks) built OFF the main thread.
+    ///
+    /// `cachedCards` is a snapshot of StudyCardCache taken on the MainActor by the
+    /// caller; card content is taken from it (no DB), while deck shells and fresh
+    /// progress are read from a read-only DB connection here. A deck missing from
+    /// the snapshot (cold cache) is loaded fully from the DB. Keeps the ~80ms of
+    /// queue-building + content assembly off the main thread to avoid frame hitches
+    /// when the Today screen appears.
+    nonisolated static func todayWordListSnapshot(
+        userID: UUID,
+        cachedCards: [UUID: [WordCardContent]]
+    ) async throws -> [WordCardContent] {
+        try await Task.detached(priority: .userInitiated) {
+            let database = try ContentDatabase(userID: userID, mode: .readOnly)
+            return try database.readTransaction {
+                let decks = try database.loadDecksLite().filter(\.isActive).map { deck -> DeckContent in
+                    var full = deck
+                    if let cached = cachedCards[deck.id] {
+                        full.cards = cached
+                    } else {
+                        let dbCards = try database.deckCards(deckID: deck.id)
+                        if !dbCards.isEmpty { full.cards = dbCards }
+                    }
+                    return full
+                }
+                var queue: [WordCardContent] = []
+                var practice: [WordCardContent] = []
+                for deck in decks {
+                    let snapshot = try todayStudyDeckSnapshot(database: database, deck: deck)
+                    queue.append(contentsOf: todayQueueCards(snapshot: snapshot))
+                    practice.append(contentsOf: todayPracticeCards(snapshot: snapshot))
+                }
+                return uniqueCardsStatic(queue.isEmpty ? practice : queue)
+            }
+        }.value
+    }
+
+    /// Per-deck variant of todayWordListSnapshot, off the main thread.
+    nonisolated static func todayWordListSnapshot(
+        userID: UUID,
+        deckID: UUID,
+        cachedCards: [UUID: [WordCardContent]]
+    ) async throws -> [WordCardContent] {
+        try await Task.detached(priority: .userInitiated) {
+            let database = try ContentDatabase(userID: userID, mode: .readOnly)
+            return try database.readTransaction {
+                guard var deck = try database.loadDecksLite().first(where: { $0.id == deckID && $0.isActive }) else {
+                    return []
+                }
+                if let cached = cachedCards[deckID] {
+                    deck.cards = cached
+                } else {
+                    let dbCards = try database.deckCards(deckID: deckID)
+                    if !dbCards.isEmpty { deck.cards = dbCards }
+                }
+                let snapshot = try todayStudyDeckSnapshot(database: database, deck: deck)
+                let queue = todayQueueCards(snapshot: snapshot)
+                return uniqueCardsStatic(queue.isEmpty ? todayPracticeCards(snapshot: snapshot) : queue)
+            }
+        }.value
+    }
+
+    nonisolated private static func uniqueCardsStatic(_ cards: [WordCardContent]) -> [WordCardContent] {
+        var seen: Set<UUID> = []
+        return cards.filter { seen.insert($0.id).inserted }
+    }
+
     func allDecks() throws -> [DeckContent] {
         try database.loadDecks()
     }
@@ -373,6 +440,7 @@ final class DeckStore {
     func startTodaySession(deck deckArg: DeckContent, mode: StudyMode) throws -> StudySession {
         // "Сегодня" passes a lightweight dashboard deck; ensure full cards so
         // flashcards play their recording instead of TTS.
+        let started = Date()
         let deck = try deckWithFullCards(deckArg)
         let studyCards = deck.isActive ? deck.activeCards : []
         let progress = try database.progressMap(deckID: deck.id)
@@ -382,6 +450,7 @@ final class DeckStore {
             progressBySenseID: progress,
             dailyUsage: usage
         )
+        Log.log("Perf", "Сегодня start \(mode): deck \(studyCards.count) cards → today queue \(queue.count) items, built in \(Int(Date().timeIntervalSince(started) * 1000))ms")
 
         return StudySession(
             deckID: deck.id,
@@ -415,12 +484,14 @@ final class DeckStore {
 
     /// Сессия из всех активных карт колоды независимо от расписания (вкладка «Колоды»).
     func startAllCardsSession(deck deckArg: DeckContent, mode: StudyMode) throws -> StudySession {
+        let started = Date()
         let deck = try deckWithFullCards(deckArg)
         let studyCards = deck.isActive ? deck.activeCards : []
         let progress = try database.progressMap(deckID: deck.id)
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
         let items = StudyQueueBuilder.allItems(cards: studyCards, progressBySenseID: progress)
         let queue = (mode == .recall || mode == .clozeMultipleChoice) ? items.shuffled() : items
+        Log.log("Perf", "Колоди start \(mode): ALL \(studyCards.count) cards → queue \(queue.count) items, built in \(Int(Date().timeIntervalSince(started) * 1000))ms")
 
         return StudySession(
             deckID: deck.id,

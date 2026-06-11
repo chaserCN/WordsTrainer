@@ -25,6 +25,8 @@ struct AppRootView: View {
             // Заранее растеризуем фоны вкладок, чтобы первый переход в колоду/режимы
             // не платил за офскрин-рендер MeshGradient + blur во время анимации.
             LovableBackgroundImageCache.warm([.today, .decks, .stats])
+            // И тёмный фон study — иначе первый вход в карточки платит за blur'ы.
+            AppBackgroundImageCache.warm()
             await userStore.refreshFromServer()
         }
         .onChange(of: scenePhase) { _, phase in
@@ -102,6 +104,7 @@ struct TodayView: View {
             reloadImmediately()
         }
         .onAppear {
+            FrameHitchMonitor.shared.mark("Today dashboard appeared")
             isVisible = true
             if needsReloadWhenVisible {
                 needsReloadWhenVisible = false
@@ -1816,11 +1819,13 @@ private struct TodayAllDecksModesView: View {
         }
         guard reloadGeneration == generation else { return }
         practiceCount = snapshot.todayPracticeCount
-        // Word-list content comes from the warm cache (queue rebuilt from fresh
-        // progress); falls back to a DB load per deck only when the cache is cold.
+        // Build the word-list OFF the main thread to avoid frame hitches when the
+        // screen appears: snapshot the warm cache here (MainActor), then assemble
+        // queue + content in a detached task. Falls back to DB for cold decks.
+        let cachedCards = StudyCardCache.shared.snapshot(userID: store.currentUserID)
         let fullCards: [WordCardContent]
         do {
-            fullCards = try store.todayStudyCards()
+            fullCards = try await DeckStore.todayWordListSnapshot(userID: store.currentUserID, cachedCards: cachedCards)
         } catch {
             Log.log("WordList", "all-decks load FAILED: \(error.localizedDescription)")
             fullCards = []
@@ -1893,8 +1898,9 @@ private struct TodayDeckModesView: View {
         let deckID = deck.id
         stats = snapshot.statsByDeckID[deckID] ?? .zero
         practiceCount = snapshot.todayPracticeCountByDeckID[deckID] ?? 0
-        // Word-list content from the warm cache; queue rebuilt from fresh progress.
-        wordListCards = (try? store.todayStudyCards(deck: deck)) ?? []
+        // Word-list built off the main thread (cache snapshot + detached assembly).
+        let cachedCards = StudyCardCache.shared.snapshot(userID: store.currentUserID)
+        wordListCards = (try? await DeckStore.todayWordListSnapshot(userID: store.currentUserID, deckID: deckID, cachedCards: cachedCards)) ?? []
     }
 
     private func start(_ mode: StudyMode) {

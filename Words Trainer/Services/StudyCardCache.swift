@@ -30,6 +30,14 @@ final class StudyCardCache {
         return cardsByDeckID[deckID]
     }
 
+    /// Snapshot of all warmed decks' cards for `userID` (empty if not warmed).
+    /// Taken on the MainActor so the result can be handed to a background task
+    /// that builds today's word list off the main thread.
+    func snapshot(userID: UUID) -> [UUID: [WordCardContent]] {
+        guard self.userID == userID else { return [:] }
+        return cardsByDeckID
+    }
+
     /// Drop everything. Call on content change (sync), local edits, or user switch.
     func invalidate() {
         warmTask?.cancel()

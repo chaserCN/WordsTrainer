@@ -8,7 +8,30 @@ func deckSymbol(_ name: String?, fallback: String = "books.vertical.fill") -> St
     return name
 }
 
+/// Dark study background. Static gradient + two blurred orbs — rendered once into
+/// a UIImage and shown as an Image, mirroring LovableBackground. The live version
+/// re-rasterized its big blurs offscreen on every screen appearance, blocking the
+/// push transition into study (~1s hitch on slow machines). The cached image
+/// composites instantly; the background does not depend on card state, so the
+/// flip animation is unaffected.
 struct AppBackground: View {
+    var body: some View {
+        Group {
+            if let image = AppBackgroundImageCache.image() {
+                Image(uiImage: image)
+                    .resizable()
+            } else {
+                AppBackgroundContent()
+                    .drawingGroup()
+            }
+        }
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
+    }
+}
+
+/// Live render of the dark background; source for rasterization and fallback.
+private struct AppBackgroundContent: View {
     var body: some View {
         ZStack {
             LinearGradient(
@@ -33,7 +56,46 @@ struct AppBackground: View {
                 .blur(radius: 85)
                 .offset(x: 150, y: 280)
         }
-        .ignoresSafeArea()
+    }
+}
+
+/// Cache of the rendered dark background image. Rendered once (lazily or warmed at
+/// launch) and reused by every study screen and transition.
+@MainActor
+enum AppBackgroundImageCache {
+    private static var cached: UIImage?
+
+    static func image() -> UIImage? {
+        if let cached { return cached }
+        let size = screenSize
+        guard size.width > 0, size.height > 0 else { return nil }
+        let renderer = ImageRenderer(
+            content: AppBackgroundContent().frame(width: size.width, height: size.height)
+        )
+        renderer.scale = screenScale
+        guard let image = renderer.uiImage else { return nil }
+        cached = image
+        return image
+    }
+
+    static func warm() {
+        _ = image()
+    }
+
+    private static var screenSize: CGSize {
+        if let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive })
+            ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
+            return scene.screen.bounds.size
+        }
+        return UIScreen.main.bounds.size
+    }
+
+    private static var screenScale: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.screen.scale ?? UIScreen.main.scale
     }
 }
 

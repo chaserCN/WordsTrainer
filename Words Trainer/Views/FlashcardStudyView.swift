@@ -591,6 +591,7 @@ struct FlashcardStudyView: View {
 
     private func flipCard() {
         guard !isFlipAnimating else { return }
+        FrameHitchMonitor.shared.mark("card flip")
         renderedCardID = presentation.id
 
         if reduceMotion {
