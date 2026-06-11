@@ -128,6 +128,14 @@ struct TodayView: View {
         .onReceive(NotificationCenter.default.publisher(for: DeckStore.localDataDidChangeNotification)) { _ in
             scheduleLocalDataReload()
         }
+        .onChange(of: showTodayModes) { _, isShowing in
+            // Returned from the study/modes subtree: apply any reload deferred
+            // while it was on top, so the dashboard reflects what was studied.
+            if !isShowing, needsReloadWhenVisible {
+                needsReloadWhenVisible = false
+                reloadImmediately()
+            }
+        }
     }
 
     private var todayScrollContent: some View {
@@ -338,7 +346,11 @@ struct TodayView: View {
     }
 
     private func scheduleLocalDataReload() {
-        guard isVisible else {
+        // Defer while not on screen, or while navigated into the study subtree:
+        // a NavigationStack push does not fire .onDisappear on the root, so
+        // isVisible stays true during study. Without this, every answer's
+        // localDataDidChange would recompute the (hidden) dashboard stats.
+        guard isVisible, !showTodayModes else {
             needsReloadWhenVisible = true
             return
         }
@@ -1814,7 +1826,7 @@ private struct TodayAllDecksModesView: View {
             fullCards = []
         }
         guard reloadGeneration == generation else { return }
-        Log.log("WordList", "all-decks wordListCards set count=\(fullCards.count)")
+        Log.log("WordList", "Today (all decks): showing \(fullCards.count) cards in the card-preview list")
         wordListCards = fullCards
     }
 }

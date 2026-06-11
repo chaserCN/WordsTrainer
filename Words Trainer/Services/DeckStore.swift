@@ -83,7 +83,7 @@ final class DeckStore {
         let snapshot = try await Task.detached(priority: .userInitiated) {
             try loadTodayDashboardSnapshot(userID: userID)
         }.value
-        Log.log("Stats", "computed (dashboard) decks=\(snapshot.statsByDeckID.count) ms=\(Int(Date().timeIntervalSince(started) * 1000))")
+        Log.log("Stats", "dashboard counters recomputed for \(snapshot.statsByDeckID.count) decks (lightweight: progress + counts only, no card content) in \(Int(Date().timeIntervalSince(started) * 1000))ms")
         return snapshot
     }
 
@@ -142,18 +142,29 @@ final class DeckStore {
     /// so the word-list avoids a full loadDecks() of every deck on each reload.
     /// Falls back to a full DB load per deck only when its cache is cold.
     func activeDecksWithFullCardsFavoringCache() throws -> [DeckContent] {
-        try database.loadDecksLite().filter(\.isActive).map { deck in
+        let started = Date()
+        var hits = 0
+        var dbLoads = 0
+        let decks = try database.loadDecksLite().filter(\.isActive).map { deck -> DeckContent in
             if let cached = StudyCardCache.shared.cards(deckID: deck.id, userID: userID) {
+                hits += 1
                 var full = deck
                 full.cards = cached
                 return full
             }
+            dbLoads += 1
             let fullCards = try database.deckCards(deckID: deck.id)
             guard !fullCards.isEmpty else { return deck }
             var full = deck
             full.cards = fullCards
             return full
         }
+        if dbLoads == 0 {
+            Log.log("Cache", "all \(decks.count) decks' cards served from warm cache (no DB) in \(Int(Date().timeIntervalSince(started) * 1000))ms")
+        } else {
+            Log.log("Cache", "\(hits) deck(s) from cache, \(dbLoads) loaded from DB (cache cold) in \(Int(Date().timeIntervalSince(started) * 1000))ms")
+        }
+        return decks
     }
 
     func setDeckStatus(_ status: ContentStatus, for deckID: UUID) throws {
@@ -307,17 +318,20 @@ final class DeckStore {
         let looksLite = deck.cards.contains { card in
             card.activeSenses.contains { $0.example.text.isEmpty }
         }
-        guard looksLite else { return deck }
+        guard looksLite else {
+            Log.log("Cache", "study deck '\(deck.title)': already full (came in with content, e.g. from Колоди) — no load")
+            return deck
+        }
         // Prefer the warm cache (populated in the background after launch/sync);
         // fall back to a single-deck DB read when it is not warmed yet.
         let fullCards: [WordCardContent]
         if let cached = StudyCardCache.shared.cards(deckID: deck.id, userID: userID) {
-            Log.log("Cache", "hit deck=\(deck.id.uuidString) cards=\(cached.count)")
+            Log.log("Cache", "study deck '\(deck.title)': \(cached.count) cards from warm cache (no DB)")
             fullCards = cached
         } else {
             let started = Date()
             fullCards = try database.deckCards(deckID: deck.id)
-            Log.log("Cache", "miss → DB load deck=\(deck.id.uuidString) cards=\(fullCards.count) ms=\(Int(Date().timeIntervalSince(started) * 1000))")
+            Log.log("Cache", "study deck '\(deck.title)': cache cold, loaded \(fullCards.count) cards from DB in \(Int(Date().timeIntervalSince(started) * 1000))ms")
         }
         guard !fullCards.isEmpty else { return deck }
         var full = deck
@@ -587,18 +601,22 @@ final class DeckStore {
     }
 
     private func todaySnapshots() throws -> [TodayStudyDeckSnapshot] {
-        try allDecks().filter(\.isActive).map { deck in
-            try todaySnapshot(deck: deck)
-        }
+        let started = Date()
+        // Card content comes from the warm cache (fast); each snapshot still reads
+        // fresh progress from the DB, so today's queue reflects cards just studied.
+        let decks = try activeDecksWithFullCardsFavoringCache()
+        let snapshots = try decks.map { try todaySnapshot(deck: $0) }
+        Log.log("Today", "built today's queue for all \(snapshots.count) decks (content from cache, progress fresh from DB) in \(Int(Date().timeIntervalSince(started) * 1000))ms")
+        return snapshots
     }
 
     private func todaySnapshots(deckIDs: Set<UUID>) throws -> [TodayStudyDeckSnapshot] {
         guard !deckIDs.isEmpty else { return [] }
-        return try allDecks()
-            .filter { $0.isActive && deckIDs.contains($0.id) }
-            .map { deck in
-                try todaySnapshot(deck: deck)
-            }
+        let started = Date()
+        let decks = try activeDecksWithFullCardsFavoringCache().filter { deckIDs.contains($0.id) }
+        let snapshots = try decks.map { try todaySnapshot(deck: $0) }
+        Log.log("Today", "built today's queue for \(snapshots.count) selected deck(s) (content from cache, progress fresh from DB) in \(Int(Date().timeIntervalSince(started) * 1000))ms")
+        return snapshots
     }
 
     private func todaySnapshot(deck: DeckContent) throws -> TodayStudyDeckSnapshot {

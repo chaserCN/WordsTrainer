@@ -50,7 +50,14 @@ struct DeckListView: View {
         }
         .task {
             loadCollapsedDeckGroups()
-            await bootstrap()
+            // .task re-runs every time the tab re-appears. Deck content only
+            // changes on sync (.loaded) and user switch — both handled below — so
+            // load once and skip the heavy full loadDecks() on every tab return.
+            if store == nil || decks.isEmpty {
+                await bootstrap()
+            } else {
+                Log.log("Decks", "deck list tab re-appeared — using already-loaded \(decks.count) decks (no reload)")
+            }
         }
         .onAppear {
             isVisible = true
@@ -75,9 +82,11 @@ struct DeckListView: View {
             guard state == .loaded else { return }
             reloadImmediately()
         }
-        .onReceive(NotificationCenter.default.publisher(for: DeckStore.localDataDidChangeNotification)) { _ in
-            scheduleLocalDataReload()
-        }
+        // The deck list shows only deck content (titles, card counts) — it does
+        // not depend on study progress, so it must NOT reload on every answer's
+        // localDataDidChange. Content changes only on sync (.loaded above) and
+        // user switch. The deck-detail screen has its own listener for progress-
+        // derived bits (matching record, weak cards).
     }
 
     @ViewBuilder
@@ -421,6 +430,7 @@ struct DeckListView: View {
     }
 
     private func bootstrap() async {
+        Log.log("Decks", "deck list reloading (lite paint → full content)…")
         do {
             guard let selectedUserID = userStore.selectedUserID else {
                 decks = []
@@ -435,15 +445,19 @@ struct DeckListView: View {
             store = deckStore
             // Paint the list fast: lite decks (no examples/questions/media) give
             // titles and correct card counts almost instantly, off the main actor.
+            let liteStarted = Date()
             let liteDecks = try await DeckStore.allDecksLiteSnapshot(userID: selectedUserID)
             guard userStore.selectedUserID == selectedUserID else { return }
+            Log.log("Decks", "deck list painted from LITE load (titles + counts, no card content) — \(liteDecks.count) decks in \(Int(Date().timeIntervalSince(liteStarted) * 1000))ms")
             decks = liteDecks
             loadError = nil
             // Then preemptively load full card content in the background so deck
             // details / study / search are ready by the time they're needed,
             // without blocking the first paint.
+            let fullStarted = Date()
             let fullDecks = try await DeckStore.allDecksSnapshot(userID: selectedUserID)
             guard userStore.selectedUserID == selectedUserID else { return }
+            Log.log("Decks", "deck list FULL content loaded from DB (for search/detail) — \(fullDecks.count) decks in \(Int(Date().timeIntervalSince(fullStarted) * 1000))ms")
             decks = fullDecks
             rebuildSearchIndex()
         } catch {
@@ -1412,6 +1426,7 @@ struct DeckDetailView: View {
     @State private var exerciseScope: DeckExerciseScope = .all
     @State private var weakCardIDs: Set<UUID> = []
     @State private var matchingRecord: DeckMatchingRecord?
+    @State private var isReloadingDeckState = false
     private var studyCards: [WordCardContent] { deck.isActive ? deck.activeCards : [] }
     private var scopedStudyCards: [WordCardContent] {
         switch exerciseScope {
@@ -1598,20 +1613,31 @@ struct DeckDetailView: View {
 
     @MainActor
     private func reloadDeckState() async {
+        // Returning from study fires both .task(id:) and .onChange(of: showStudy);
+        // collapse overlapping calls so the deck state is reloaded once.
+        guard !isReloadingDeckState else { return }
+        isReloadingDeckState = true
+        defer { isReloadingDeckState = false }
         let userID = store.currentUserID
         let currentDeck = deck
         // The list may have handed us a lightweight deck (empty examples) while
         // its full content was still loading. Ensure this deck has full cards so
         // the word list and study sessions work even if opened immediately.
         if currentDeck.cards.contains(where: { $0.activeSenses.contains { $0.example.text.isEmpty } }) {
+            let started = Date()
             if let fullCards = try? await DeckStore.deckCardsSnapshot(userID: userID, deckID: currentDeck.id),
                !Task.isCancelled, deck.id == currentDeck.id, !fullCards.isEmpty {
+                Log.log("Decks", "deck detail '\(currentDeck.title)': upgraded to FULL cards from DB — \(fullCards.count) cards in \(Int(Date().timeIntervalSince(started) * 1000))ms")
                 deck.cards = fullCards
             }
+        } else {
+            Log.log("Decks", "deck detail '\(currentDeck.title)': already has full cards, no extra load")
         }
         do {
+            let started = Date()
             let snapshot = try await DeckStore.deckDetailSnapshot(userID: userID, deck: currentDeck)
             guard !Task.isCancelled else { return }
+            Log.log("Stats", "deck detail '\(currentDeck.title)': stats recomputed in \(Int(Date().timeIntervalSince(started) * 1000))ms")
             stats = snapshot.stats
             matchingRecord = snapshot.matchingRecord
             weakCardIDs = snapshot.weakCardIDs

@@ -30,6 +30,7 @@ final class WordAudioPlayer {
                 pitchCents: style == .wrong ? Self.wrongPitchCents : 0
             )
         } else {
+            Log.log("Audio", "word '\(card.word)' has no recording → TTS")
             speak(
                 card: card,
                 pitchMultiplier: style == .wrong ? Self.wrongSpeechPitchMultiplier : 1
@@ -39,7 +40,10 @@ final class WordAudioPlayer {
 
     func playClozeAnswer(from card: WordCardContent) {
         guard AppSettings.shared.isSoundEnabled else { return }
-        guard let url = card.audioAnswerURL else { return }
+        guard let url = card.audioAnswerURL else {
+            Log.log("Audio", "answer '\(card.word)' has no recording → silent")
+            return
+        }
         playFile(at: url, pitchCents: 0)
     }
 

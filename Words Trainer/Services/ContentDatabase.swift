@@ -3253,9 +3253,12 @@ nonisolated final class ContentDatabase {
             let wordAudioURL = mediaURL(row.audioWordMediaID)
             if wordAudioURL == nil {
                 // Card will fall back to TTS. Distinguish "no media id on the row"
-                // from "media id present but URL did not resolve" (see the
-                // mediaURL UNRESOLVED log).
-                Self.logger.info("card NO wordAudioURL word=\(row.displayWord, privacy: .public) cardID=\(row.id.uuidString, privacy: .public) audioWordMediaID=\(row.audioWordMediaID?.uuidString ?? "nil", privacy: .public)")
+                // from "media id present but file not on disk" (see the next log).
+                if row.audioWordMediaID == nil {
+                    Log.log("Audio", "card '\(row.displayWord)' has NO word-audio media id in DB → will speak via TTS")
+                } else {
+                    Log.log("Audio", "card '\(row.displayWord)' has media id but file is missing on disk → will speak via TTS")
+                }
             }
             return WordCardContent(
                 id: row.id,
@@ -3561,7 +3564,7 @@ nonisolated final class ContentDatabase {
                 // URL stayed nil: either no reference, or the referenced file is
                 // not on disk yet. This is what makes a card play TTS instead of
                 // its recording — log enough to tell which.
-                Self.logger.info("mediaURL UNRESOLVED mediaID=\(id.uuidString, privacy: .public) deckID=\(deckID.uuidString, privacy: .public) local_path=\(localPath ?? "nil", privacy: .public) storage_key=\(storageKey ?? "nil", privacy: .public)")
+                Log.log("Audio", "media file not found for id \(id.uuidString) (path=\(localPath ?? storageKey ?? "none")) → card will use TTS")
             }
         }
         return urls

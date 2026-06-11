@@ -45,7 +45,7 @@ final class StudyCardCache {
     func warm(userID: UUID) {
         warmTask?.cancel()
         let started = Date()
-        Log.log("Cache", "warm START user=\(userID.uuidString)")
+        Log.log("Cache", "warming up: loading all decks' full cards into memory in background…")
         warmTask = Task { [weak self] in
             let loaded: [UUID: [WordCardContent]]
             do {
@@ -60,17 +60,17 @@ final class StudyCardCache {
                     }
                 }.value
             } catch is CancellationError {
-                Log.log("Cache", "warm CANCELLED user=\(userID.uuidString)")
+                Log.log("Cache", "warm-up cancelled (a newer warm-up or invalidation superseded it)")
                 return
             } catch {
-                Log.log("Cache", "warm FAILED: \(error.localizedDescription)")
+                Log.log("Cache", "warm-up FAILED: \(error.localizedDescription) — study will fall back to DB loads")
                 return
             }
             guard !Task.isCancelled else { return }
             self?.cardsByDeckID = loaded
             self?.userID = userID
             let cards = loaded.values.reduce(0) { $0 + $1.count }
-            Log.log("Cache", "warm DONE decks=\(loaded.count) cards=\(cards) ms=\(Int(Date().timeIntervalSince(started) * 1000)) user=\(userID.uuidString)")
+            Log.log("Cache", "warm-up READY: \(cards) cards across \(loaded.count) decks cached, took \(Int(Date().timeIntervalSince(started) * 1000))ms — study/word-list now serve from memory")
         }
     }
 
