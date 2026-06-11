@@ -79,9 +79,12 @@ final class DeckStore {
     static var databaseExists: Bool { ContentDatabase.databaseExists() }
 
     nonisolated static func todayDashboardSnapshot(userID: UUID) async throws -> DeckTodaySnapshot {
-        try await Task.detached(priority: .userInitiated) {
+        let started = Date()
+        let snapshot = try await Task.detached(priority: .userInitiated) {
             try loadTodayDashboardSnapshot(userID: userID)
         }.value
+        Log.log("Stats", "computed (dashboard) decks=\(snapshot.statsByDeckID.count) ms=\(Int(Date().timeIntervalSince(started) * 1000))")
+        return snapshot
     }
 
     /// Lightweight decks (card/sense rows only, no examples/questions/media)
@@ -117,39 +120,6 @@ final class DeckStore {
         }.value
     }
 
-    /// Full study-card list for today (all decks), loaded off the main actor.
-    /// Used by the study-modes word-list, which needs complete cards (examples,
-    /// questions) — the dashboard snapshot intentionally omits these.
-    nonisolated static func todayStudyCardsSnapshot(userID: UUID) async throws -> [WordCardContent] {
-        try await Task.detached(priority: .userInitiated) {
-            let database = try ContentDatabase(userID: userID, mode: .readOnly)
-            return try database.readTransaction {
-                let decks = try database.loadDecks().filter(\.isActive)
-                var queue: [WordCardContent] = []
-                var practice: [WordCardContent] = []
-                for deck in decks {
-                    let snapshot = try todayStudyDeckSnapshot(database: database, deck: deck)
-                    queue.append(contentsOf: todayQueueCards(snapshot: snapshot))
-                    practice.append(contentsOf: todayPracticeCards(snapshot: snapshot))
-                }
-                return uniqueCards(queue.isEmpty ? practice : queue)
-            }
-        }.value
-    }
-
-    /// Full study-card list for today for a single deck, loaded off the main actor.
-    nonisolated static func todayStudyCardsSnapshot(userID: UUID, deckID: UUID) async throws -> [WordCardContent] {
-        try await Task.detached(priority: .userInitiated) {
-            let database = try ContentDatabase(userID: userID, mode: .readOnly)
-            return try database.readTransaction {
-                guard let deck = try database.loadDecks().first(where: { $0.id == deckID && $0.isActive }) else { return [] }
-                let snapshot = try todayStudyDeckSnapshot(database: database, deck: deck)
-                let queue = todayQueueCards(snapshot: snapshot)
-                return uniqueCards(queue.isEmpty ? todayPracticeCards(snapshot: snapshot) : queue)
-            }
-        }.value
-    }
-
     nonisolated static func statisticsSnapshot(userID: UUID) async throws -> DeckStatisticsSnapshot {
         try await Task.detached(priority: .userInitiated) {
             try loadStatisticsSnapshot(userID: userID)
@@ -164,6 +134,26 @@ final class DeckStore {
 
     func allDecks() throws -> [DeckContent] {
         try database.loadDecks()
+    }
+
+    /// Active decks with full card content (examples, questions, audio), favoring
+    /// the warm cache. The deck shells and sense rows come from the cheap lite
+    /// load; each deck's cards are replaced with the cached full cards when warmed,
+    /// so the word-list avoids a full loadDecks() of every deck on each reload.
+    /// Falls back to a full DB load per deck only when its cache is cold.
+    func activeDecksWithFullCardsFavoringCache() throws -> [DeckContent] {
+        try database.loadDecksLite().filter(\.isActive).map { deck in
+            if let cached = StudyCardCache.shared.cards(deckID: deck.id, userID: userID) {
+                var full = deck
+                full.cards = cached
+                return full
+            }
+            let fullCards = try database.deckCards(deckID: deck.id)
+            guard !fullCards.isEmpty else { return deck }
+            var full = deck
+            full.cards = fullCards
+            return full
+        }
     }
 
     func setDeckStatus(_ status: ContentStatus, for deckID: UUID) throws {
@@ -257,16 +247,22 @@ final class DeckStore {
     }
 
     func todayStudyCards() throws -> [WordCardContent] {
+        // The queue is rebuilt from fresh progress here, so it reflects cards just
+        // studied; only the card *content* for display is sourced from the cache.
         if let session = try startTodaySession(mode: .flashcards) {
-            return uniqueCards(unfocusedCards(for: session.queue, in: try allDecks()))
+            return uniqueCards(unfocusedCards(for: session.queue, in: try activeDecksWithFullCardsFavoringCache()))
         }
         if let session = try startTodayPracticeSession(mode: .flashcards) {
-            return uniqueCards(unfocusedCards(for: session.queue, in: try allDecks()))
+            return uniqueCards(unfocusedCards(for: session.queue, in: try activeDecksWithFullCardsFavoringCache()))
         }
         return []
     }
 
-    func todayStudyCards(deck: DeckContent) throws -> [WordCardContent] {
+    func todayStudyCards(deck deckArg: DeckContent) throws -> [WordCardContent] {
+        // Ensure the deck used for word-list mapping has full cards (cache/DB),
+        // so the displayed cards carry audio; the queue is rebuilt from fresh
+        // progress, reflecting cards just studied.
+        let deck = try deckWithFullCards(deckArg)
         let todaySession = try startTodaySession(deck: deck, mode: .flashcards)
         if !todaySession.queue.isEmpty {
             return uniqueCards(unfocusedCards(for: todaySession.queue, in: [deck]))
@@ -299,17 +295,38 @@ final class DeckStore {
         )
     }
 
-    func stats(for deck: DeckContent) throws -> DeckStats {
-        let progress = try database.progressMap(deckID: deck.id)
-        let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
-        return DeckStatsCalculator.compute(
-            deck: deck,
-            progressBySenseID: progress,
-            dailyUsage: usage
-        )
+    /// Return the deck with full card content (examples, questions, media URLs).
+    ///
+    /// Views may hand us a lightweight deck (fetchCardsLite: empty examples and
+    /// audioWordURL == nil) painted before full content loaded — the dashboard
+    /// ("Сегодня") starts sessions from its lite deck, so the flashcard plays
+    /// TTS instead of the recording. Reload just this deck's cards from the DB
+    /// (authoritative) when they look lite; a deck that already has full cards
+    /// (e.g. from "Колоды") is returned untouched, so this costs nothing there.
+    private func deckWithFullCards(_ deck: DeckContent) throws -> DeckContent {
+        let looksLite = deck.cards.contains { card in
+            card.activeSenses.contains { $0.example.text.isEmpty }
+        }
+        guard looksLite else { return deck }
+        // Prefer the warm cache (populated in the background after launch/sync);
+        // fall back to a single-deck DB read when it is not warmed yet.
+        let fullCards: [WordCardContent]
+        if let cached = StudyCardCache.shared.cards(deckID: deck.id, userID: userID) {
+            Log.log("Cache", "hit deck=\(deck.id.uuidString) cards=\(cached.count)")
+            fullCards = cached
+        } else {
+            let started = Date()
+            fullCards = try database.deckCards(deckID: deck.id)
+            Log.log("Cache", "miss → DB load deck=\(deck.id.uuidString) cards=\(fullCards.count) ms=\(Int(Date().timeIntervalSince(started) * 1000))")
+        }
+        guard !fullCards.isEmpty else { return deck }
+        var full = deck
+        full.cards = fullCards
+        return full
     }
 
-    func startSession(deck: DeckContent, mode: StudyMode) throws -> StudySession {
+    func startSession(deck deckArg: DeckContent, mode: StudyMode) throws -> StudySession {
+        let deck = try deckWithFullCards(deckArg)
         let studyCards = deck.isActive ? deck.activeCards : []
         let progress = try database.progressMap(deckID: deck.id)
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
@@ -339,7 +356,10 @@ final class DeckStore {
     }
 
     /// Сессия только из карт, попавших в очередь на сегодня (вкладка «Сегодня»).
-    func startTodaySession(deck: DeckContent, mode: StudyMode) throws -> StudySession {
+    func startTodaySession(deck deckArg: DeckContent, mode: StudyMode) throws -> StudySession {
+        // "Сегодня" passes a lightweight dashboard deck; ensure full cards so
+        // flashcards play their recording instead of TTS.
+        let deck = try deckWithFullCards(deckArg)
         let studyCards = deck.isActive ? deck.activeCards : []
         let progress = try database.progressMap(deckID: deck.id)
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
@@ -370,8 +390,9 @@ final class DeckStore {
         )
     }
 
-    func startTodayPracticeSession(deck: DeckContent, mode: StudyMode) throws -> StudySession? {
-        try TodayStudySessionBuilder.todayPracticeSession(
+    func startTodayPracticeSession(deck deckArg: DeckContent, mode: StudyMode) throws -> StudySession? {
+        let deck = try deckWithFullCards(deckArg)
+        return try TodayStudySessionBuilder.todayPracticeSession(
             snapshot: todaySnapshot(deck: deck),
             mode: mode,
             engine: engine
@@ -379,7 +400,8 @@ final class DeckStore {
     }
 
     /// Сессия из всех активных карт колоды независимо от расписания (вкладка «Колоды»).
-    func startAllCardsSession(deck: DeckContent, mode: StudyMode) throws -> StudySession {
+    func startAllCardsSession(deck deckArg: DeckContent, mode: StudyMode) throws -> StudySession {
+        let deck = try deckWithFullCards(deckArg)
         let studyCards = deck.isActive ? deck.activeCards : []
         let progress = try database.progressMap(deckID: deck.id)
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
@@ -424,7 +446,8 @@ final class DeckStore {
         )
     }
 
-    func startWeakCardsSession(deck: DeckContent, mode: StudyMode) throws -> StudySession? {
+    func startWeakCardsSession(deck deckArg: DeckContent, mode: StudyMode) throws -> StudySession? {
+        let deck = try deckWithFullCards(deckArg)
         let weakStats = try weakCards(deckID: deck.id, limit: deck.activeCards.count)
         let weakCardIDs = Set(weakStats.map(\.cardID))
         let studyCards = deck.isActive ? deck.activeCards.filter { weakCardIDs.contains($0.id) } : []

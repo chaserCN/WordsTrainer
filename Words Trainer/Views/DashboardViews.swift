@@ -1719,6 +1719,11 @@ private struct TodayAllDecksModesView: View {
             if needsReloadWhenVisible {
                 needsReloadWhenVisible = false
                 scheduleLocalDataReload()
+            } else if wordListCards.isEmpty {
+                // The parent may navigate here with empty initialWordListCards
+                // (the dashboard loads them lazily after the lite snapshot). Load
+                // the word list on open so "просмотр карт" is not empty.
+                reloadPracticeCountImmediately()
             }
         }
         .onDisappear {
@@ -1799,10 +1804,17 @@ private struct TodayAllDecksModesView: View {
         }
         guard reloadGeneration == generation else { return }
         practiceCount = snapshot.todayPracticeCount
-        // The dashboard snapshot is lightweight (no full cards); load the full
-        // word-list separately for display.
-        let fullCards = (try? await DeckStore.todayStudyCardsSnapshot(userID: store.currentUserID)) ?? []
+        // Word-list content comes from the warm cache (queue rebuilt from fresh
+        // progress); falls back to a DB load per deck only when the cache is cold.
+        let fullCards: [WordCardContent]
+        do {
+            fullCards = try store.todayStudyCards()
+        } catch {
+            Log.log("WordList", "all-decks load FAILED: \(error.localizedDescription)")
+            fullCards = []
+        }
         guard reloadGeneration == generation else { return }
+        Log.log("WordList", "all-decks wordListCards set count=\(fullCards.count)")
         wordListCards = fullCards
     }
 }
@@ -1869,8 +1881,8 @@ private struct TodayDeckModesView: View {
         let deckID = deck.id
         stats = snapshot.statsByDeckID[deckID] ?? .zero
         practiceCount = snapshot.todayPracticeCountByDeckID[deckID] ?? 0
-        // Dashboard snapshot is lightweight; load full cards for the word-list.
-        wordListCards = (try? await DeckStore.todayStudyCardsSnapshot(userID: store.currentUserID, deckID: deckID)) ?? []
+        // Word-list content from the warm cache; queue rebuilt from fresh progress.
+        wordListCards = (try? store.todayStudyCards(deck: deck)) ?? []
     }
 
     private func start(_ mode: StudyMode) {

@@ -158,6 +158,20 @@ nonisolated final class ContentDatabase {
         contentDatabaseSetupPaths.insert(path)
     }
 
+    /// Fold the WAL back into the main database file.
+    ///
+    /// Dashboard/study reads use separate read-only connections (see DeckStore).
+    /// A read-only SQLite connection cannot create the -shm file needed to read
+    /// an active WAL, so until the writer checkpoints, those readers see the last
+    /// state in the main .db and miss freshly synced cards/media — e.g. a new
+    /// card shows up but its audio URL resolves empty. Checkpointing after a sync
+    /// commit makes the new rows visible to every reader. TRUNCATE also keeps the
+    /// -wal file from growing unbounded. Best-effort: a busy checkpoint must not
+    /// fail the sync, the next one catches up.
+    func checkpoint() {
+        sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_TRUNCATE, nil, nil)
+    }
+
     func readTransaction<T>(_ body: () throws -> T) throws -> T {
         guard sqlite3_exec(db, "BEGIN DEFERRED TRANSACTION", nil, nil, nil) == SQLITE_OK else {
             throw ContentDatabaseError.queryFailed
@@ -197,6 +211,13 @@ nonisolated final class ContentDatabase {
     static func databaseExists() -> Bool {
         guard let url = try? AppDataPaths.databaseURL() else { return false }
         return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    /// Full cards (examples, questions, media URLs) for one deck, without
+    /// loading every other deck. Used to upgrade a lightweight deck before a
+    /// study session so flashcards resolve their audio.
+    func deckCards(deckID: UUID) throws -> [WordCardContent] {
+        try fetchCards(deckID: deckID)
     }
 
     func loadDecks() throws -> [DeckContent] {
@@ -316,6 +337,7 @@ nonisolated final class ContentDatabase {
             try rebuildDerivedStats(selectedUserID: selectedUserID)
             try commitTransaction()
             try cleanupUnusedContentCache()
+            checkpoint()
         } catch {
             try? rollbackTransaction()
             throw error
@@ -366,6 +388,7 @@ nonisolated final class ContentDatabase {
             try rebuildDerivedStats(selectedUserID: selectedUserID)
             try commitTransaction()
             try cleanupUnusedContentCache()
+            checkpoint()
         } catch {
             try? rollbackTransaction()
             throw error
@@ -466,36 +489,6 @@ nonisolated final class ContentDatabase {
         try bind(statement, index: 1, uuid: deckID)
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
         return uuidColumn(statement, index: 0)
-    }
-
-    func mediaObjects(ids mediaIDs: Set<UUID>) throws -> [ServerMediaObject] {
-        guard !mediaIDs.isEmpty else { return [] }
-        var results: [ServerMediaObject] = []
-        let sql = """
-        SELECT id, storage_key, sha256, mime_type, byte_size, width, height
-        FROM media_objects
-        WHERE id = ?
-        """
-        for mediaID in mediaIDs {
-            var statement: OpaquePointer?
-            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
-                throw ContentDatabaseError.queryFailed
-            }
-            defer { sqlite3_finalize(statement) }
-            try bind(statement, index: 1, uuid: mediaID)
-            guard sqlite3_step(statement) == SQLITE_ROW,
-                  let id = uuidColumn(statement, index: 0) else { continue }
-            results.append(ServerMediaObject(
-                id: id,
-                storageKey: textColumn(statement, index: 1),
-                sha256: textColumn(statement, index: 2),
-                mimeType: textColumn(statement, index: 3),
-                byteSize: intColumn(statement, index: 4),
-                width: intColumn(statement, index: 5),
-                height: intColumn(statement, index: 6)
-            ))
-        }
-        return results
     }
 
     private func cachedDeckMediaIsComplete(deckID: UUID) throws -> Bool {
@@ -3257,6 +3250,13 @@ nonisolated final class ContentDatabase {
                 )
             }
             guard !senses.isEmpty else { return nil }
+            let wordAudioURL = mediaURL(row.audioWordMediaID)
+            if wordAudioURL == nil {
+                // Card will fall back to TTS. Distinguish "no media id on the row"
+                // from "media id present but URL did not resolve" (see the
+                // mediaURL UNRESOLVED log).
+                Self.logger.info("card NO wordAudioURL word=\(row.displayWord, privacy: .public) cardID=\(row.id.uuidString, privacy: .public) audioWordMediaID=\(row.audioWordMediaID?.uuidString ?? "nil", privacy: .public)")
+            }
             return WordCardContent(
                 id: row.id,
                 status: row.status,
@@ -3265,7 +3265,7 @@ nonisolated final class ContentDatabase {
                 partOfSpeech: row.partOfSpeech,
                 etymology: row.etymology,
                 explanation: row.notes,
-                audioWordURL: mediaURL(row.audioWordMediaID),
+                audioWordURL: wordAudioURL,
                 forms: forms,
                 primarySenseID: row.primarySenseID,
                 senses: senses
@@ -3551,12 +3551,17 @@ nonisolated final class ContentDatabase {
         var urls: [UUID: URL] = [:]
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let id = uuidColumn(statement, index: 0) else { continue }
-            if let localPath = textColumn(statement, index: 1),
-               let url = resolveMediaReference(localPath, deckID: deckID) {
+            let localPath = textColumn(statement, index: 1)
+            let storageKey = textColumn(statement, index: 2)
+            if let localPath, let url = resolveMediaReference(localPath, deckID: deckID) {
                 urls[id] = url
-            } else if let storageKey = textColumn(statement, index: 2),
-                      let url = resolveMediaReference(storageKey, deckID: deckID) {
+            } else if let storageKey, let url = resolveMediaReference(storageKey, deckID: deckID) {
                 urls[id] = url
+            } else {
+                // URL stayed nil: either no reference, or the referenced file is
+                // not on disk yet. This is what makes a card play TTS instead of
+                // its recording — log enough to tell which.
+                Self.logger.info("mediaURL UNRESOLVED mediaID=\(id.uuidString, privacy: .public) deckID=\(deckID.uuidString, privacy: .public) local_path=\(localPath ?? "nil", privacy: .public) storage_key=\(storageKey ?? "nil", privacy: .public)")
             }
         }
         return urls

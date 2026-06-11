@@ -77,6 +77,11 @@ final class AppUserStore {
             } else {
                 defaults.removeObject(forKey: Keys.selectedUserID)
             }
+            // The warm study-card cache is per-user; drop the old user's cards and
+            // warm the new one. No-op churn when the id is unchanged.
+            if selectedUserID != oldValue {
+                StudyCardCache.shared.invalidateAndWarm(userID: selectedUserID)
+            }
         }
     }
 
@@ -516,6 +521,15 @@ final class AppUserStore {
     ) -> AppUserRefreshResult {
         guard isCurrentRefreshTask(taskID) else { return result }
         syncStatus = .finished(result: result, userID: userID, startedAt: startedAt)
+        // A successful content sync can add/replace cards (and their audio), so the
+        // warm study-card cache is now stale. Rebuild it in the background for the
+        // active user; study sessions read it for instant, audio-complete cards.
+        switch result {
+        case .loaded, .loadedWithMediaWarnings:
+            StudyCardCache.shared.invalidateAndWarm(userID: userID ?? selectedUserID)
+        case .missingConfiguration, .emptyServer, .cancelled, .failed:
+            break
+        }
         return result
     }
 
@@ -568,23 +582,41 @@ final class AppUserStore {
                 mediaScopes[mediaID, default: []].insert(.deck(assignment.deckId))
             }
         }
-        for card in content.cards {
-            guard let deckID = versionDeckIDs[card.deckVersionId] else { continue }
-            if let mediaID = card.audioWordMediaId {
-                mediaScopes[mediaID, default: []].insert(.deck(deckID))
+
+        // Resolve a content row's deck. A delta can carry new-version content
+        // without the matching assignment in the same batch (the assignment row
+        // may sit below the event-cursor revision), so versionDeckIDs alone
+        // would drop the row and its media would never download. Fall back to
+        // the local cards table, which importServerChanges populated just before
+        // this runs. prepareMediaCacheObject still skips anything already on disk
+        // (sha256/byteSize), so this only widens which media we consider, not
+        // what we actually re-download.
+        var deckIDByVersion = versionDeckIDs
+        func deckID(versionID: UUID, cardID: UUID) -> UUID? {
+            if let deckID = deckIDByVersion[versionID] {
+                return deckID
             }
+            guard let deckID = try? database.deckID(forCardID: cardID) else {
+                return nil
+            }
+            deckIDByVersion[versionID] = deckID
+            return deckID
+        }
+
+        for card in content.cards {
+            guard let mediaID = card.audioWordMediaId else { continue }
+            guard let deckID = deckID(versionID: card.deckVersionId, cardID: card.cardId) else { continue }
+            mediaScopes[mediaID, default: []].insert(.deck(deckID))
         }
         for sense in content.senses {
-            guard let deckID = versionDeckIDs[sense.deckVersionId] else { continue }
-            if let mediaID = sense.imageMediaId {
-                mediaScopes[mediaID, default: []].insert(.deck(deckID))
-            }
+            guard let mediaID = sense.imageMediaId else { continue }
+            guard let deckID = deckID(versionID: sense.deckVersionId, cardID: sense.cardId) else { continue }
+            mediaScopes[mediaID, default: []].insert(.deck(deckID))
         }
         for question in content.sentenceQuestions {
-            guard let deckID = versionDeckIDs[question.deckVersionId] else { continue }
-            if let mediaID = question.audioAnswerMediaId {
-                mediaScopes[mediaID, default: []].insert(.deck(deckID))
-            }
+            guard let mediaID = question.audioAnswerMediaId else { continue }
+            guard let deckID = deckID(versionID: question.deckVersionId, cardID: question.cardId) else { continue }
+            mediaScopes[mediaID, default: []].insert(.deck(deckID))
         }
 
         let mediaObjects = Dictionary(

@@ -1400,82 +1400,6 @@ private extension String {
     }
 }
 
-struct DeckCardView: View {
-    let deck: DeckContent
-    let store: DeckStore
-    var showsChevron: Bool = true
-
-    @State private var stats: DeckStats = .zero
-    private var activeCardCount: Int { deck.activeCardCount }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top, spacing: 14) {
-                DeckIcon(symbolName: deck.avatarSystemName, imageURL: deck.avatarImageURL)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(deck.title)
-                        .font(.title3.bold())
-                        .foregroundStyle(Color(red: 0.08, green: 0.08, blue: 0.13))
-
-                    HStack(spacing: 8) {
-                        Text("\(LocalizedCounts.cardPhrase(activeCardCount)) · \(deck.languageCode.uppercased())")
-                            .font(.subheadline)
-                            .foregroundStyle(Color(red: 0.45, green: 0.46, blue: 0.55))
-
-                        if !deck.isActive {
-                            DeckStatusBadge()
-                        }
-                    }
-                }
-
-                Spacer()
-
-                if showsChevron {
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Color.black.opacity(0.24))
-                        .padding(.top, 6)
-                }
-            }
-
-            HStack(spacing: 10) {
-                DeckMetricPill(title: "Новые", value: stats.newAvailable, systemImage: "sparkles", tint: .blue)
-                DeckMetricPill(title: "Повторить", value: stats.dueTotal, systemImage: "arrow.clockwise", tint: .orange)
-            }
-        }
-        .padding(18)
-        .background(LightCardBackground(cornerRadius: 28))
-        .overlay {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .stroke(.white.opacity(0.75), lineWidth: 1)
-        }
-        .compositingGroup()
-        .shadow(color: .black.opacity(0.28), radius: 26, x: 0, y: 16)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityLabel)
-        .task(id: statsTaskID) {
-            stats = (try? store.stats(for: deck)) ?? .zero
-        }
-    }
-
-    private var statsTaskID: String {
-        "\(deck.id.databaseString)-\(deck.status.rawValue)"
-    }
-
-    private var accessibilityLabel: String {
-        let statusText = L10n.text(deck.isActive ? "включена" : "отключена")
-        return L10n.format(
-            "%@, %@, новых %d, повторить %d, всего %d",
-            deck.title,
-            statusText,
-            stats.newAvailable,
-            stats.dueTotal,
-            activeCardCount
-        )
-    }
-}
-
 struct DeckDetailView: View {
     @Binding var deck: DeckContent
     let store: DeckStore
@@ -1882,17 +1806,6 @@ private struct DeckWordRow: View {
     }
 }
 
-private struct DeckStatusBadge: View {
-    var body: some View {
-        Text("Отключена")
-            .font(.caption2.weight(.bold))
-            .foregroundStyle(.orange)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(.orange.opacity(0.14), in: Capsule())
-    }
-}
-
 private enum DeckExerciseScope: String, CaseIterable, Identifiable {
     case all
     case weak
@@ -2023,35 +1936,6 @@ private struct StudyActionButton: View {
     }
 }
 
-private struct DeckIcon: View {
-    let symbolName: String?
-    let imageURL: URL?
-    var size: CGFloat = 56
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: size * 0.32, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [.blue.opacity(0.95), .purple.opacity(0.9)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-            DeckAvatarContent(
-                symbolName: symbolName,
-                imageURL: imageURL,
-                size: size,
-                cornerRadius: size * 0.32
-            )
-        }
-        .frame(width: size, height: size)
-        .compositingGroup()
-        .shadow(color: .blue.opacity(0.25), radius: 12, x: 0, y: 6)
-    }
-
-}
-
 private struct DeckAvatarContent: View {
     let symbolName: String?
     let imageURL: URL?
@@ -2082,94 +1966,6 @@ private struct DeckAvatarContent: View {
         Image(systemName: deckSymbol(symbolName))
             .font(.system(size: size * 0.42, weight: .bold, design: .rounded))
             .foregroundStyle(.white)
-    }
-}
-
-private struct DeckMetricPill: View {
-    let title: String
-    let value: Int
-    let systemImage: String
-    let tint: Color
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: systemImage)
-                .font(.callout.weight(.bold))
-                .foregroundStyle(tint)
-            Text("\(value)")
-                .font(.headline.bold())
-                .foregroundStyle(Color(red: 0.06, green: 0.07, blue: 0.12))
-            Text(L10n.text(title))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color(red: 0.18, green: 0.19, blue: 0.27))
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity)
-        .background(tint.opacity(0.2), in: Capsule())
-        .overlay {
-            Capsule()
-                .stroke(tint.opacity(0.22), lineWidth: 1)
-        }
-    }
-}
-
-private struct DeckQueueSummary: View {
-    let stats: DeckStats
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(summaryColor)
-                .frame(width: 8, height: 8)
-            Text(summaryText)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(Color(red: 0.28, green: 0.29, blue: 0.38))
-            Spacer()
-        }
-        .padding(.horizontal, 2)
-        .accessibilityLabel(summaryText)
-    }
-
-    private var summaryText: String {
-        if stats.studyTotal == 0 {
-            return L10n.text("На сегодня всё готово")
-        }
-        return LocalizedCounts.cardsInQueue(stats.studyTotal)
-    }
-
-    private var summaryColor: Color {
-        if stats.learningDue > 0 { return .orange }
-        if stats.reviewDue > 0 { return .green }
-        if stats.newAvailable > 0 { return .blue }
-        return .gray
-    }
-}
-
-private struct DeckProgressBar: View {
-    let stats: DeckStats
-
-    private var total: Int { max(stats.studyTotal, 1) }
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Capsule()
-                .fill(.blue)
-                .frame(maxWidth: proportionalWidth(stats.newAvailable))
-            Capsule()
-                .fill(.orange)
-                .frame(maxWidth: proportionalWidth(stats.dueTotal))
-        }
-        .frame(height: 7)
-        .frame(maxWidth: .infinity)
-        .background(Color.black.opacity(0.08), in: Capsule())
-        .accessibilityHidden(true)
-    }
-
-    private func proportionalWidth(_ value: Int) -> CGFloat {
-        value == 0 ? 0 : CGFloat(value) / CGFloat(total) * 180
     }
 }
 

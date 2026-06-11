@@ -37,24 +37,6 @@ struct AppBackground: View {
     }
 }
 
-struct LightCardBackground: View {
-    let cornerRadius: CGFloat
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(0.96),
-                        Color(red: 0.94, green: 0.96, blue: 1.0).opacity(0.94),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-    }
-}
-
 struct StudyScreenChrome<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
