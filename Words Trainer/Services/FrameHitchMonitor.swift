@@ -6,7 +6,8 @@ import UIKit
 /// the main thread missed a frame during an animation/transition.
 ///
 /// Driven by CADisplayLink so it measures the real refresh cadence (60 or 120 Hz).
-/// Diagnostic only; remove with the other Log call sites once perf is settled.
+/// Debug-only: start() attaches the display link only in DEBUG builds, so there
+/// is no per-frame cost in release; mark()/stop() remain cheap no-ops there.
 ///
 /// Note: in the Simulator frame timing is unreliable (rendered on the Mac, no
 /// ProMotion), so absolute numbers there are indicative, not authoritative — but
@@ -36,11 +37,16 @@ final class FrameHitchMonitor {
     }
 
     func start() {
+        // Debug-only: never attach the per-frame CADisplayLink in release, so the
+        // monitor has zero runtime cost in production. mark()/stop() stay callable
+        // (cheap no-ops) without sprinkling #if DEBUG at every call site.
+        #if DEBUG
         guard displayLink == nil else { return }
         let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
         link.add(to: .main, forMode: .common)
         displayLink = link
         lastTimestamp = 0
+        #endif
     }
 
     func stop() {
