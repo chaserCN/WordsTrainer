@@ -1673,10 +1673,14 @@ struct RandomAllDecksModesView: View {
 /// Учебная сессия пушится отсюда, поэтому Back возвращает на выбор упражнения.
 private struct TodayAllDecksModesView: View {
     let store: DeckStore
-    let queueCount: Int
-    let newCount: Int
-    let dueCount: Int
-    let laterCount: Int
+
+    // The top card's counts must update after returning from study, so they are
+    // @State (seeded from the parent's values) and refreshed by reloadPracticeCount
+    // — not immutable lets, which kept stale numbers until a full re-entry.
+    @State private var queueCount: Int
+    @State private var newCount: Int
+    @State private var dueCount: Int
+    @State private var laterCount: Int
 
     @State private var session: StudySession?
     @State private var sessionDeckTitle = ""
@@ -1699,10 +1703,10 @@ private struct TodayAllDecksModesView: View {
         initialWordListCards: [WordCardContent]
     ) {
         self.store = store
-        self.queueCount = queueCount
-        self.newCount = newCount
-        self.dueCount = dueCount
-        self.laterCount = laterCount
+        _queueCount = State(initialValue: queueCount)
+        _newCount = State(initialValue: newCount)
+        _dueCount = State(initialValue: dueCount)
+        _laterCount = State(initialValue: laterCount)
         _practiceCount = State(initialValue: initialPracticeCount)
         _wordListCards = State(initialValue: initialWordListCards)
     }
@@ -1819,6 +1823,20 @@ private struct TodayAllDecksModesView: View {
         }
         guard reloadGeneration == generation else { return }
         practiceCount = snapshot.todayPracticeCount
+        // Refresh the top card's counts from the fresh snapshot so the queue
+        // tile reflects what was just studied (matches TodayView's aggregation).
+        let totals = snapshot.statsByDeckID.values.reduce(DeckStats.zero) { partial, s in
+            DeckStats(
+                newAvailable: partial.newAvailable + s.newAvailable,
+                learningDue: partial.learningDue + s.learningDue,
+                reviewDue: partial.reviewDue + s.reviewDue,
+                dueLaterToday: partial.dueLaterToday + s.dueLaterToday
+            )
+        }
+        queueCount = totals.studyTotal
+        newCount = totals.newAvailable
+        dueCount = totals.learningDue + totals.reviewDue
+        laterCount = totals.dueLaterToday
         // Build the word-list OFF the main thread to avoid frame hitches when the
         // screen appears: snapshot the warm cache here (MainActor), then assemble
         // queue + content in a detached task. Falls back to DB for cold decks.
