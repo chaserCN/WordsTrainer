@@ -2618,6 +2618,8 @@ nonisolated final class ContentDatabase {
             StudyMode.clozeTyping.rawValue
         case "matching_audio":
             StudyMode.matchingAudio.rawValue
+        case "picture_choice":
+            StudyMode.pictureChoice.rawValue
         default:
             value
         }
