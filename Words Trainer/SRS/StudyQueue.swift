@@ -120,6 +120,13 @@ nonisolated enum StudyQueueBuilder {
 
         let studiedToday = dailyUsage?.newCardsStudied ?? 0
         let newSlotsLeft = max(0, deck.newCardsPerDay - studiedToday)
+        // A card due any time today is available from the start of the study day
+        // (Anki-style), not only once its exact due time has passed. Without this
+        // a card reviewed at, say, 18:00 yesterday reappears only after 18:00
+        // today, so the queue looks empty all morning even though the day's plan
+        // lists it. Compare against the end of the current study day instead of
+        // the current instant.
+        let studyDayEnd = StudyDay.end(for: now)
 
         for content in deck.activeCards {
             var cardNew: [StudyQueueItem] = []
@@ -136,12 +143,12 @@ nonisolated enum StudyQueueBuilder {
                 case .new:
                     cardNew.append(item)
                 case .learning, .relearning:
-                    if due <= now {
+                    if due < studyDayEnd {
                         learning.append(item)
                         cardHasDue = true
                     }
                 case .review:
-                    if due <= now {
+                    if due < studyDayEnd {
                         review.append(item)
                         cardHasDue = true
                     }

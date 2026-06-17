@@ -31,18 +31,21 @@ nonisolated enum DeckStatsCalculator {
 
         var newCount = 0
         var learningDue = 0
-        var learningLaterToday = 0
         var reviewDue = 0
-        var reviewLaterToday = 0
         let studiedToday = dailyUsage?.newCardsStudied ?? 0
         let newSlotsLeft = max(0, deck.newCardsPerDay - studiedToday)
+
+        // A card due any time today is available from the start of the study day
+        // (Anki-style), so "due today" means due before the next rollover, not
+        // only once its exact due time has passed. This keeps the badge in sync
+        // with StudyQueueBuilder, which queues the whole study day. Nothing is
+        // "later today" anymore, so dueLaterToday is always zero.
+        let studyDayEnd = StudyDay.end(for: now, calendar: calendar)
 
         for card in deck.activeCards {
             var cardHasNew = false
             var cardHasLearningDue = false
-            var cardHasLearningLaterToday = false
             var cardHasReviewDue = false
-            var cardHasReviewLaterToday = false
 
             for sense in card.activeSenses {
                 guard let progress = progressBySenseID[sense.id] else {
@@ -55,16 +58,12 @@ nonisolated enum DeckStatsCalculator {
                 case .new:
                     cardHasNew = true
                 case .learning, .relearning:
-                    if due <= now {
+                    if due < studyDayEnd {
                         cardHasLearningDue = true
-                    } else if StudyDay.isDate(due, inSameStudyDayAs: now, calendar: calendar) {
-                        cardHasLearningLaterToday = true
                     }
                 case .review:
-                    if due <= now {
+                    if due < studyDayEnd {
                         cardHasReviewDue = true
-                    } else if StudyDay.isDate(due, inSameStudyDayAs: now, calendar: calendar) {
-                        cardHasReviewLaterToday = true
                     }
                 }
             }
@@ -75,22 +74,14 @@ nonisolated enum DeckStatsCalculator {
                 reviewDue += 1
             } else if cardHasNew {
                 newCount += 1
-            } else if cardHasLearningLaterToday {
-                learningLaterToday += 1
-            } else if cardHasReviewLaterToday {
-                reviewLaterToday += 1
             }
         }
-
-        let cappedReviewDue = min(reviewDue, deck.reviewCardsPerDay)
-        let cappedReviewTotalToday = min(reviewDue + reviewLaterToday, deck.reviewCardsPerDay)
-        let cappedReviewLaterToday = max(0, cappedReviewTotalToday - cappedReviewDue)
 
         return DeckStats(
             newAvailable: min(newCount, newSlotsLeft),
             learningDue: learningDue,
-            reviewDue: cappedReviewDue,
-            dueLaterToday: learningLaterToday + cappedReviewLaterToday
+            reviewDue: min(reviewDue, deck.reviewCardsPerDay),
+            dueLaterToday: 0
         )
     }
 }

@@ -215,7 +215,7 @@ struct DeckStatsTests {
         #expect(stats.reviewDue == 1)
     }
 
-    @Test("deck stats count cards due later today separately")
+    @Test("deck stats count cards due later today as available now")
     func dueLaterTodayCount() {
         let dueNowID = UUID()
         let reviewLaterID = UUID()
@@ -254,9 +254,13 @@ struct DeckStatsTests {
             calendar: calendar
         )
 
-        #expect(stats.reviewDue == 1)
-        #expect(stats.dueLaterToday == 2)
-        #expect(stats.studyTotal == 1)
+        // dueNow + reviewLater are both review cards due today; learningLater is
+        // a learning card due today. Tomorrow's card stays out. Everything due
+        // today is available now, so nothing is counted as "later".
+        #expect(stats.learningDue == 1)
+        #expect(stats.reviewDue == 2)
+        #expect(stats.dueLaterToday == 0)
+        #expect(stats.studyTotal == 3)
     }
 
     @Test("deck stats do not count night due dates as later today")

@@ -1253,18 +1253,20 @@ private struct StreakBadge: View {
     }
 
     private var badgeFill: Color {
+        // Pink at a low streak shifting toward violet as it grows:
+        // hue 350 (pink) -> 300 (violet).
         oklch(
-            0.72 - 0.08 * intensity,
-            0.17 + 0.06 * intensity,
-            66 - 38 * intensity
+            0.70 - 0.06 * intensity,
+            0.18 + 0.05 * intensity,
+            350 - 50 * intensity
         )
     }
 
     private var badgeShadow: Color {
         oklch(
-            0.45 - 0.06 * intensity,
-            0.09 + 0.03 * intensity,
-            55 - 30 * intensity,
+            0.44 - 0.05 * intensity,
+            0.10 + 0.03 * intensity,
+            340 - 45 * intensity,
             0.45
         )
     }
