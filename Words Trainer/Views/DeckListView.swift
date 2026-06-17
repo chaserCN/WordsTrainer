@@ -1437,6 +1437,12 @@ struct DeckDetailView: View {
         }
     }
 
+    private var hasImagedCards: Bool {
+        scopedStudyCards.contains { card in
+            card.activeSenses.contains { $0.imageURL != nil }
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -1494,6 +1500,16 @@ struct DeckDetailView: View {
                         isEnabled: !scopedStudyCards.isEmpty
                     ) {
                         start(.matchingAudio)
+                    }
+
+                    StudyActionButton(
+                        title: "Картинки",
+                        subtitle: "Смотри картинку — выбери слово",
+                        systemImage: "photo",
+                        accent: .pink,
+                        isEnabled: hasImagedCards
+                    ) {
+                        start(.pictureChoice)
                     }
                 }
 

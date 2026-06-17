@@ -1046,7 +1046,8 @@ nonisolated final class ContentDatabase {
             COALESCE(SUM(CASE WHEN mode = ? THEN duration_ms ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN mode IN (?, ?) THEN duration_ms ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN mode = ? THEN duration_ms ELSE 0 END), 0),
-            COALESCE(SUM(CASE WHEN mode IN (?, ?) THEN duration_ms ELSE 0 END), 0)
+            COALESCE(SUM(CASE WHEN mode IN (?, ?) THEN duration_ms ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN mode = ? THEN duration_ms ELSE 0 END), 0)
         FROM timed_events
         """
         var statement: OpaquePointer?
@@ -1072,13 +1073,15 @@ nonisolated final class ContentDatabase {
         try bind(statement, index: 10, text: StudyMode.matching.rawValue)
         try bind(statement, index: 11, text: StudyMode.matchingAudio.rawValue)
         try bind(statement, index: 12, text: "matching_audio")
+        try bind(statement, index: 13, text: StudyMode.pictureChoice.rawValue)
 
         guard sqlite3_step(statement) == SQLITE_ROW else { return .zero }
         return StudyTimeBreakdown(
             flashcardsMilliseconds: Int(sqlite3_column_int64(statement, 0)),
             sentenceMilliseconds: Int(sqlite3_column_int64(statement, 1)),
             matchingMilliseconds: Int(sqlite3_column_int64(statement, 2)),
-            matchingAudioMilliseconds: Int(sqlite3_column_int64(statement, 3))
+            matchingAudioMilliseconds: Int(sqlite3_column_int64(statement, 3)),
+            pictureMilliseconds: Int(sqlite3_column_int64(statement, 4))
         )
     }
 

@@ -490,7 +490,7 @@ final class DeckStore {
         let progress = try database.progressMap(deckID: deck.id)
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
         let items = StudyQueueBuilder.allItems(cards: studyCards, progressBySenseID: progress)
-        let queue = (mode == .recall || mode == .clozeMultipleChoice) ? items.shuffled() : items
+        let queue = pictureChoiceQueue(items, mode: mode)
         Log.log("Perf", "Колоди start \(mode): ALL \(studyCards.count) cards → queue \(queue.count) items, built in \(Int(Date().timeIntervalSince(started) * 1000))ms")
 
         return StudySession(
@@ -500,8 +500,18 @@ final class DeckStore {
             deckCards: studyCards,
             dailyUsage: usage,
             engine: engine,
-            reviewSource: .deckSession
+            reviewSource: .deckSession,
+            savesProgress: mode != .pictureChoice
         )
+    }
+
+    /// Picture-choice keeps only senses with an image and is always shuffled.
+    /// Other modes keep the existing recall/cloze shuffle behaviour.
+    private func pictureChoiceQueue(_ items: [StudyQueueItem], mode: StudyMode) -> [StudyQueueItem] {
+        if mode == .pictureChoice {
+            return items.filter { $0.sense.imageURL != nil }.shuffled()
+        }
+        return (mode == .recall || mode == .clozeMultipleChoice) ? items.shuffled() : items
     }
 
     func startRandomCardsSession(mode: StudyMode) throws -> StudySession? {
@@ -541,7 +551,7 @@ final class DeckStore {
         let progress = try database.progressMap(deckID: deck.id)
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
         let items = StudyQueueBuilder.allItems(cards: studyCards, progressBySenseID: progress)
-        let queue = (mode == .recall || mode == .clozeMultipleChoice) ? items.shuffled() : items
+        let queue = pictureChoiceQueue(items, mode: mode)
 
         return StudySession(
             deckID: deck.id,
@@ -550,8 +560,9 @@ final class DeckStore {
             deckCards: studyCards,
             dailyUsage: usage,
             engine: engine,
-            matchingRecordScope: mode.isMatching ? MatchingRecordScope.none : .deck(deck.id),
-            reviewSource: .weakCards
+            matchingRecordScope: (mode.isMatching || mode == .pictureChoice) ? MatchingRecordScope.none : .deck(deck.id),
+            reviewSource: .weakCards,
+            savesProgress: mode != .pictureChoice
         )
     }
 

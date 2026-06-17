@@ -7,6 +7,7 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case clozeTyping
     case matching
     case matchingAudio
+    case pictureChoice
 
     var id: String { rawValue }
 
@@ -18,6 +19,7 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
         case .clozeTyping: L10n.text("Пропуск — ввод")
         case .matching: L10n.text("Колонки")
         case .matchingAudio: L10n.text("Колонки аудио")
+        case .pictureChoice: L10n.text("Картинка → слово")
         }
     }
 
@@ -34,7 +36,7 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
 
     var recordsStudyReview: Bool {
         switch self {
-        case .flashcards, .clozeMultipleChoice, .clozeTyping:
+        case .flashcards, .clozeMultipleChoice, .clozeTyping, .pictureChoice:
             true
         case .recall, .matching, .matchingAudio:
             false

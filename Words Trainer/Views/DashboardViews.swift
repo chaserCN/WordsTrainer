@@ -885,6 +885,11 @@ private struct StudyTimeBreakdownPanel: View {
                 milliseconds: breakdown.matchingAudioMilliseconds,
                 tint: oklch(0.76, 0.14, 315)
             ),
+            StudyTimeBreakdownRow(
+                title: "Картинки",
+                milliseconds: breakdown.pictureMilliseconds,
+                tint: oklch(0.74, 0.15, 0)
+            ),
         ]
     }
 

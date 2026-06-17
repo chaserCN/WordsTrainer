@@ -142,6 +142,16 @@ struct StudySessionView: View {
             ) { outcome, additionalFailureSenseID in
                 submit(outcome, additionalFailureSenseID: additionalFailureSenseID)
             }
+        case .pictureChoice:
+            PictureChoiceStudyView(
+                card: item.card,
+                sessionChoicePool: session.sessionChoicePool,
+                deckChoicePool: session.deckChoicePool,
+                totalCount: session.sessionChoicePool.count,
+                remainingCount: session.remainingCount
+            ) { outcome in
+                submit(outcome)
+            }
         case .matching, .matchingAudio, .clozeTyping:
             EmptyView()
         }
@@ -254,6 +264,7 @@ struct StudySessionView: View {
             || session.mode == .clozeMultipleChoice
             || session.mode == .recall
             || session.mode == .flashcards
+            || session.mode == .pictureChoice
     }
 
     private func submit(_ outcome: ReviewOutcome, additionalFailureSenseID: UUID? = nil) {

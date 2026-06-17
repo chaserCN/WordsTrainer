@@ -22,8 +22,6 @@ struct FlashcardStudyView: View {
     @State private var isFlipAnimating = false
     @State private var flipGeneration = 0
     @State private var renderedCardID: String?
-    @State private var progressHeaderBottom: CGFloat = 0
-    @State private var collapsedCardTop: CGFloat = 0
 
     private static let cardHeightFraction: CGFloat = 0.34
     private static let verticalGap: CGFloat = 16
@@ -31,14 +29,7 @@ struct FlashcardStudyView: View {
     private static let actionGap: CGFloat = 20
     private static let flipHalfDuration = 0.18
     private static let flipPerspective: CGFloat = 0.25
-    private static let mediaProgressGap: CGFloat = 30
-    private static let mediaCardGap: CGFloat = 20
-    private static let minMediaImageSize: CGFloat = 72
-    private static let maxMediaImageSize: CGFloat = 180
-    private static let fallbackProgressHeaderBottom: CGFloat = 21
-    private static let fallbackActionHeight: CGFloat = 56
     private static let exampleAnimation = Animation.spring(response: 0.22, dampingFraction: 0.88)
-    private static let layoutCoordinateSpace = "FlashcardStudyLayout"
 
     private var hasWordAudio: Bool {
         card.audioWordURL != nil
@@ -46,10 +37,6 @@ struct FlashcardStudyView: View {
 
     private var notesText: String? {
         presentation.notesHTML?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
-    }
-
-    private var cardImageURL: URL? {
-        presentation.imageURL
     }
 
     private var presentation: FlashcardPresentation {
@@ -68,25 +55,15 @@ struct FlashcardStudyView: View {
             )
 
             ZStack(alignment: .top) {
-                if let cardImageURL {
-                    backgroundMediaImage(
-                        url: cardImageURL,
-                        containerSize: proxy.size,
-                        baseCardHeight: baseCardHeight
-                    )
-                }
-
                 VStack(spacing: 0) {
                     StudyProgressHeader(totalCount: totalCount, remainingCount: remainingCount)
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
-                        .background(progressHeaderMeasurement)
 
                     Spacer(minLength: Self.verticalGap)
 
                     VStack(spacing: Self.actionGap) {
                         flashcard(baseHeight: baseCardHeight, maxHeight: maxCardHeight)
-                            .background(collapsedCardTopMeasurement)
 
                         actionButtons
                     }
@@ -98,7 +75,6 @@ struct FlashcardStudyView: View {
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
-            .coordinateSpace(.named(Self.layoutCoordinateSpace))
         }
         .task(id: presentation.id) {
             resetForNewCard()
@@ -130,68 +106,6 @@ struct FlashcardStudyView: View {
             isEnabled: isAnswerEnabled,
             onAnswer: answer
         )
-    }
-
-    private var progressHeaderMeasurement: some View {
-        GeometryReader { proxy in
-            Color.clear
-                .preference(
-                    key: FlashcardProgressBottomPreferenceKey.self,
-                    value: proxy.frame(in: .named(Self.layoutCoordinateSpace)).maxY
-                )
-        }
-        .onPreferenceChange(FlashcardProgressBottomPreferenceKey.self) { bottom in
-            guard bottom > 0 else { return }
-            progressHeaderBottom = bottom
-        }
-    }
-
-    private var collapsedCardTopMeasurement: some View {
-        GeometryReader { proxy in
-            Color.clear
-                .preference(
-                    key: FlashcardCollapsedTopPreferenceKey.self,
-                    value: proxy.frame(in: .named(Self.layoutCoordinateSpace)).minY
-                )
-        }
-        .onPreferenceChange(FlashcardCollapsedTopPreferenceKey.self) { top in
-            guard top > 0, !isShowingExampleExpanded else { return }
-            collapsedCardTop = top
-        }
-    }
-
-    private func backgroundMediaImage(url: URL, containerSize: CGSize, baseCardHeight: CGFloat) -> some View {
-        let progressBottom = progressHeaderBottom > 0
-            ? progressHeaderBottom
-            : Self.fallbackProgressHeaderBottom
-        let cardTop = collapsedCardTop > 0
-            ? collapsedCardTop
-            : fallbackCollapsedCardTop(in: containerSize.height, progressBottom: progressBottom, baseCardHeight: baseCardHeight)
-        let imageTopLimit = progressBottom + Self.mediaProgressGap
-        let imageBottomLimit = max(imageTopLimit, cardTop - Self.mediaCardGap)
-        let availableImageHeight = max(0, imageBottomLimit - imageTopLimit)
-        let availableImageWidth = max(0, containerSize.width - 96)
-        let rawImageSize = min(Self.maxMediaImageSize, availableImageWidth, availableImageHeight)
-        let imageSize = availableImageHeight >= Self.minMediaImageSize
-            ? max(Self.minMediaImageSize, rawImageSize)
-            : rawImageSize
-
-        return FlashcardMediaImage(url: url)
-            .frame(width: imageSize, height: imageSize)
-            .position(x: containerSize.width / 2, y: imageBottomLimit - imageSize / 2)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-    }
-
-    private func fallbackCollapsedCardTop(
-        in height: CGFloat,
-        progressBottom: CGFloat,
-        baseCardHeight: CGFloat
-    ) -> CGFloat {
-        let studyBlockHeight = baseCardHeight + Self.actionGap + Self.fallbackActionHeight
-        let availableSpacerHeight = height - progressBottom - studyBlockHeight
-        let spacerHeight = max(Self.verticalGap, availableSpacerHeight / 2)
-        return progressBottom + spacerHeight
     }
 
     private func flashcard(baseHeight: CGFloat, maxHeight: CGFloat) -> some View {
@@ -656,7 +570,6 @@ struct FlashcardStudyView: View {
         expandedCardContentHeight = 0
         cardRotation = 0
         isFlipAnimating = false
-        collapsedCardTop = 0
     }
 }
 
@@ -667,7 +580,6 @@ private struct FlashcardPresentation {
     let exampleText: String
     let exampleTranslation: String?
     let notesHTML: String?
-    let imageURL: URL?
     let answer: String
 
     init(card: WordCardContent, displayMode: FlashcardDisplayMode) {
@@ -684,7 +596,6 @@ private struct FlashcardPresentation {
                 sense?.note,
                 card.cardNotes,
             ])
-            imageURL = sense?.imageURL ?? card.imageURL
             answer = card.effectiveClozeAnswer
         case .wholeCard:
             let activeSenses = card.activeSenses
@@ -698,7 +609,6 @@ private struct FlashcardPresentation {
                 Self.etymologyNote(card.etymology),
                 card.cardNotes,
             ])
-            imageURL = exampleSense?.imageURL
             answer = exampleSense?.clozeAnswer ?? card.effectiveClozeAnswer
         }
     }
@@ -729,22 +639,6 @@ private struct ExpandedFlashcardHeightKey: PreferenceKey {
     }
 }
 
-private struct FlashcardProgressBottomPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
-private struct FlashcardCollapsedTopPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
 private enum FlashcardPalette {
     static let primaryText = Color.white
     static let secondaryText = oklch(0.92, 0.01, 260)
@@ -753,40 +647,6 @@ private enum FlashcardPalette {
 }
 
 private let flashcardShape = RoundedRectangle(cornerRadius: 28, style: .continuous)
-
-private struct FlashcardMediaImage: View {
-    let url: URL
-
-    var body: some View {
-        Group {
-            if url.isFileURL, let image = UIImage(contentsOfFile: url.path) {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .empty, .failure:
-                        Color.white.opacity(0.10)
-                    @unknown default:
-                        Color.white.opacity(0.10)
-                    }
-                }
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
-        )
-        .compositingGroup()
-        .shadow(color: MatchPalette.shadow.opacity(0.18), radius: 14, x: 0, y: 8)
-    }
-}
 
 private extension String {
     var nonEmpty: String? {
