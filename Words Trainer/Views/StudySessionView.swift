@@ -21,6 +21,7 @@ struct StudySessionView: View {
     @State private var isFlashcardSubmitEnabled = true
     @State private var didSaveMatchingAttempt = false
     @State private var didPlayMatchingCompletionEffects = false
+    @State private var didRequestCompletionSync = false
     @State private var sessionError: String?
 
     private static let flashcardSubmitCooldown: TimeInterval = 1
@@ -57,10 +58,14 @@ struct StudySessionView: View {
             if session.mode.isMatching, session.isFinished {
                 finishMatchingSessionIfNeeded(playCompletionEffects: false)
             }
+            requestCompletionSyncIfNeeded()
         }
         .onChange(of: session.isFinished) { _, isFinished in
-            guard isFinished, session.mode.isMatching else { return }
-            finishMatchingSessionIfNeeded(playCompletionEffects: true)
+            guard isFinished else { return }
+            if session.mode.isMatching {
+                finishMatchingSessionIfNeeded(playCompletionEffects: true)
+            }
+            requestCompletionSyncIfNeeded()
         }
         .onChange(of: userStore.selectedUserID) { _, selectedUserID in
             guard selectedUserID != store.currentUserID else { return }
@@ -285,6 +290,7 @@ struct StudySessionView: View {
                 reviewsActiveCardSenses: session.mode == .flashcards && settings.flashcardDisplayMode == .wholeCard,
                 store: store
             )
+            requestCompletionSyncIfNeeded()
         } catch {
             sessionError = error.localizedDescription
             isFlashcardSubmitEnabled = true
@@ -317,6 +323,7 @@ struct StudySessionView: View {
                 }
             }
             matchingFinished = true
+            requestCompletionSyncIfNeeded()
             if playCompletionEffects, session.mode == .matching, beatRecord, !didPlayMatchingCompletionEffects {
                 didPlayMatchingCompletionEffects = true
                 confettiBurst += 1
@@ -330,6 +337,19 @@ struct StudySessionView: View {
     private func validateCurrentUser() throws {
         guard userStore.selectedUserID == store.currentUserID else {
             throw StudySessionViewError.userChanged
+        }
+    }
+
+    private func requestCompletionSyncIfNeeded() {
+        guard !didRequestCompletionSync,
+              session.isFinished || matchingFinished,
+              userStore.selectedUserID == store.currentUserID else {
+            return
+        }
+
+        didRequestCompletionSync = true
+        AppBackgroundSync.run {
+            await userStore.syncPendingEventsToServer()
         }
     }
 }

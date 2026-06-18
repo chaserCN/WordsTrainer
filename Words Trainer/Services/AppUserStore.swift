@@ -96,6 +96,7 @@ final class AppUserStore {
     private var refreshTask: Task<AppUserRefreshResult, Never>?
     private var refreshTaskID: UUID?
     private var refreshTaskUserID: UUID?
+    private var isPendingEventsUploadRunning = false
 
     init(defaults: UserDefaults, syncClient: ServerSyncClient) {
         self.defaults = defaults
@@ -456,6 +457,10 @@ final class AppUserStore {
     }
 
     private func uploadPendingEvents(database: ContentDatabase, selectedUserID: UUID, deviceID: UUID) async throws {
+        guard !isPendingEventsUploadRunning else { return }
+        isPendingEventsUploadRunning = true
+        defer { isPendingEventsUploadRunning = false }
+
         var iteration = 0
         var previousFingerprint: String?
         while true {
