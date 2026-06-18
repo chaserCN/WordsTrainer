@@ -11,13 +11,14 @@ struct HTMLText: View {
         if let styled = Self.cachedStyled(
             from: html,
             foregroundColor: foregroundColor,
-            emphasisColor: emphasisColor
+            emphasisColor: emphasisColor,
+            font: font
         ) {
-            // Один шрифт на весь Text; жирный/курсив — через inlinePresentationIntent.
-            // ВАЖНО: Text(AttributedString), где есть курсив и НЕТ жирного, в SwiftUI
-            // недомеряет высоту многострочного текста и обрезает его («…»). Смешанная
-            // разметка (есть <b>) меряется нормально. Поэтому в контенте эмфазу в notes
-            // делаем <b>, а не только <i>. См. docs/card-generation-format.md.
+            // Жирный/курсив задаём run-атрибутом `.font` (.bold()/.italic()), а НЕ
+            // `inlinePresentationIntent`. SwiftUI недомеряет высоту многострочного
+            // `Text(AttributedString)` с inline-intent — на длинном тексте (6-7 строк)
+            // хвост обрезается в «…», даже с lineLimit(nil)+fixedSize. Font-атрибут
+            // на run меряется корректно. См. docs/card-generation-format.md.
             Text(styled)
                 .font(font)
                 .multilineTextAlignment(.leading)
@@ -37,6 +38,7 @@ struct HTMLText: View {
         let html: String
         let foregroundColor: Color?
         let emphasisColor: Color?
+        let font: Font?
     }
 
     /// Кэш разобранных строк: одни и те же карточки перерисовываются много раз
@@ -50,16 +52,22 @@ struct HTMLText: View {
     private static func cachedStyled(
         from html: String,
         foregroundColor: Color?,
-        emphasisColor: Color?
+        emphasisColor: Color?,
+        font: Font?
     ) -> AttributedString? {
-        let key = StyleCacheKey(html: html, foregroundColor: foregroundColor, emphasisColor: emphasisColor)
+        let key = StyleCacheKey(
+            html: html,
+            foregroundColor: foregroundColor,
+            emphasisColor: emphasisColor,
+            font: font
+        )
         if let cached = styledCache[key] {
             return cached
         }
         if styledCache.count >= styledCacheLimit {
             styledCache.removeAll(keepingCapacity: true)
         }
-        let styled = styled(from: html, foregroundColor: foregroundColor, emphasisColor: emphasisColor)
+        let styled = styled(from: html, foregroundColor: foregroundColor, emphasisColor: emphasisColor, font: font)
         styledCache[key] = styled
         return styled
     }
@@ -67,19 +75,25 @@ struct HTMLText: View {
     private static func styled(
         from html: String,
         foregroundColor: Color?,
-        emphasisColor: Color?
+        emphasisColor: Color?,
+        font: Font?
     ) -> AttributedString? {
         let runs = htmlRuns(from: html)
         guard !runs.isEmpty else { return nil }
 
+        let baseFont = font ?? .body
         var result = AttributedString()
         for run in runs {
             var piece = AttributedString(run.text)
-            var intent: InlinePresentationIntent = []
-            if run.isBold { intent.insert(.stronglyEmphasized) }
-            if run.isItalic { intent.insert(.emphasized) }
-            if !intent.isEmpty {
-                piece.inlinePresentationIntent = intent
+            // Emphasis via a run-level `.font` (not inlinePresentationIntent): SwiftUI
+            // measures the former correctly but under-measures the latter on long
+            // multiline text, clipping the tail. Only set `.font` on emphasized runs
+            // so plain runs inherit the outer `.font(font)` modifier unchanged.
+            if run.isBold || run.isItalic {
+                var f = baseFont
+                if run.isBold { f = f.bold() }
+                if run.isItalic { f = f.italic() }
+                piece.font = f
             }
             if run.isBold, let emphasisColor {
                 piece.foregroundColor = emphasisColor

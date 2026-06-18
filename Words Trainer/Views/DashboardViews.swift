@@ -1410,6 +1410,10 @@ private struct TodayStudyModesView: View {
     var practiceCount: Int = 0
     var deck: DeckContent? = nil
     var wordListCards: [WordCardContent] = []
+    /// Whether any active sense has an image — gates the «Картинки» button.
+    /// Passed in (computed synchronously from cache by the parent) so the button
+    /// doesn't flicker waiting on the async-loaded `wordListCards`.
+    var hasImagedCards: Bool = false
     var navigationTitle: String? = nil
     var summaryTitle: String? = nil
     var summaryText: String? = nil
@@ -1512,6 +1516,16 @@ private struct TodayStudyModesView: View {
                     ) {
                         start(.matchingAudio)
                     }
+
+                    TodayModeButton(
+                        title: "Картинки",
+                        subtitle: "Смотри картинку — выбери слово",
+                        systemImage: "photo",
+                        accent: .pink,
+                        isEnabled: canStart && hasImagedCards
+                    ) {
+                        start(.pictureChoice)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1555,6 +1569,7 @@ struct RandomAllDecksModesView: View {
         TodayStudyModesView(
             queueCount: cards.count,
             wordListCards: cards,
+            hasImagedCards: cards.contains { $0.activeSenses.contains { $0.imageURL != nil } },
             navigationTitle: title,
             summaryTitle: title,
             summaryText: LocalizedCounts.randomCards(cards.count),
@@ -1726,6 +1741,7 @@ private struct TodayAllDecksModesView: View {
             laterCount: laterCount,
             practiceCount: practiceCount,
             wordListCards: wordListCards,
+            hasImagedCards: StudyCardCache.shared.hasImagedSenses(userID: store.currentUserID),
             start: start
         )
         .navigationDestination(isPresented: $showStudy) {
@@ -1883,6 +1899,10 @@ private struct TodayDeckModesView: View {
             practiceCount: practiceCount,
             deck: deck,
             wordListCards: wordListCards,
+            hasImagedCards: StudyCardCache.shared.hasImagedSenses(
+                userID: store.currentUserID,
+                deckIDs: [deck.id]
+            ),
             start: start
         )
         .navigationDestination(isPresented: $showStudy) {

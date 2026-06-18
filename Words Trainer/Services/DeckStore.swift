@@ -445,11 +445,16 @@ final class DeckStore {
         let studyCards = deck.isActive ? deck.activeCards : []
         let progress = try database.progressMap(deckID: deck.id)
         let usage = try database.dailyUsage(deckID: deck.id, dayKey: DeckDailyUsage.todayKey())
-        let queue = StudyQueueBuilder.build(
+        var queue = StudyQueueBuilder.build(
             deck: deck,
             progressBySenseID: progress,
             dailyUsage: usage
         )
+        // Picture-choice is a recognition warm-up: only senses with an image, and
+        // it must not write FSRS / consume the day's new-card budget.
+        if mode == .pictureChoice {
+            queue = queue.filter { $0.sense.imageURL != nil }
+        }
         Log.log("Perf", "Сегодня start \(mode): deck \(studyCards.count) cards → today queue \(queue.count) items, built in \(Int(Date().timeIntervalSince(started) * 1000))ms")
 
         return StudySession(
@@ -459,8 +464,9 @@ final class DeckStore {
             deckCards: studyCards,
             dailyUsage: usage,
             engine: engine,
-            matchingRecordScope: mode.isMatching ? MatchingRecordScope.none : nil,
-            reviewSource: .todayQueue
+            matchingRecordScope: (mode.isMatching || mode == .pictureChoice) ? MatchingRecordScope.none : nil,
+            reviewSource: .todayQueue,
+            savesProgress: mode != .pictureChoice
         )
     }
 

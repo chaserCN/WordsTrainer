@@ -38,6 +38,20 @@ final class StudyCardCache {
         return cardsByDeckID
     }
 
+    /// Whether any active sense of the given scope has an image — gates the
+    /// «Картинки» button. Synchronous (cache-only), so the gate is ready on the
+    /// first frame instead of flickering while async card lists load. `deckIDs`
+    /// nil = all warmed decks. Empty/cold cache returns false (no images yet).
+    func hasImagedSenses(userID: UUID, deckIDs: Set<UUID>? = nil) -> Bool {
+        guard self.userID == userID else { return false }
+        for (deckID, cards) in cardsByDeckID where deckIDs == nil || deckIDs!.contains(deckID) {
+            if cards.contains(where: { $0.activeSenses.contains { $0.imageURL != nil } }) {
+                return true
+            }
+        }
+        return false
+    }
+
     /// Drop everything. Call on content change (sync), local edits, or user switch.
     func invalidate() {
         warmTask?.cancel()

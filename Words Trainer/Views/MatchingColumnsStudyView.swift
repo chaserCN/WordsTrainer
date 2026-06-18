@@ -743,15 +743,25 @@ struct MatchingFlashcardPreviewOverlay: View {
     }
 
     private var exampleTranslation: String? {
-        trimmedNonEmpty(card.clozeExampleTranslation)
+        trimmedNonEmpty(pairSense?.clozeExampleTranslation ?? card.clozeExampleTranslation)
+    }
+
+    private var examplePlainText: String {
+        let text = pairSense?.exampleText ?? card.exampleText
+        return WordCardContent.plainTextWithBoldRange(fromHTMLFragment: text).text
     }
 
     private var etymologyHTML: String? {
         trimmedNonEmpty(card.etymology)
     }
 
+    /// Note of the sense actually being matched in this pair, not the primary one.
+    private var pairSense: WordSenseContent? {
+        card.activeSenses.first { $0.id == pair.senseID }
+    }
+
     private var senseNoteHTML: String? {
-        trimmedNonEmpty(card.primarySense?.note)
+        trimmedNonEmpty(pairSense?.note)
     }
 
     private var cardNotesHTML: String? {
@@ -838,20 +848,27 @@ struct MatchingFlashcardPreviewOverlay: View {
             Text(card.word)
                 .font(.title.bold())
                 .foregroundStyle(.white)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Text(pair.translation)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private var exampleSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(card.clozeExamplePlainText)
+            Text(examplePlainText)
                 .font(.body)
                 .foregroundStyle(oklch(0.92, 0.01, 260))
+                .multilineTextAlignment(.leading)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if let exampleTranslation {

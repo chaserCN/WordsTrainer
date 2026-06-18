@@ -65,6 +65,12 @@ enum TodayStudySessionBuilder {
 
         guard !queue.isEmpty else { return nil }
         queue.shuffle(using: &rng)
+        // Picture-choice is a recognition warm-up: only senses with an image, and
+        // it must not write FSRS / consume the day's new-card budget.
+        if mode == .pictureChoice {
+            queue = queue.filter { $0.sense.imageURL != nil }
+            guard !queue.isEmpty else { return nil }
+        }
         return StudySession(
             deckID: deckID,
             mode: mode,
@@ -73,7 +79,8 @@ enum TodayStudySessionBuilder {
             dailyUsage: nil,
             engine: engine,
             matchingRecordScope: matchingRecordScope(for: mode, dayKey: dayKey),
-            reviewSource: .todayQueue
+            reviewSource: .todayQueue,
+            savesProgress: mode != .pictureChoice
         )
     }
 
@@ -156,6 +163,12 @@ enum TodayStudySessionBuilder {
     }
 
     private static func practiceQueue(_ items: [StudyQueueItem], for mode: StudyMode) -> [StudyQueueItem] {
+        // Picture-choice only ever asks senses that have an image, even in the
+        // practice fallback (queue already drained for the day). Without this the
+        // fallback showed imageless / wrong-deck senses with blank pictures.
+        if mode == .pictureChoice {
+            return items.filter { $0.sense.imageURL != nil }.shuffled()
+        }
         if mode.isMatching || mode == .recall || mode == .clozeMultipleChoice {
             return items.shuffled()
         }
@@ -238,6 +251,13 @@ enum RandomStudySessionBuilder {
         }
 
         queue = cards.flatMap { card in card.activeSenses.compactMap { itemBySenseID[$0.id] } }
+        // Picture-choice keeps only senses with an image and never writes FSRS /
+        // daily-usage progress (it's a recognition warm-up). Without this the
+        // picture session from «Сегодня» reviewed imageless senses and consumed
+        // the day's new-card budget, emptying the queue for the other modes.
+        if mode == .pictureChoice {
+            queue = queue.filter { $0.sense.imageURL != nil }.shuffled()
+        }
         guard !queue.isEmpty else { return nil }
 
         return StudySession(
@@ -248,7 +268,8 @@ enum RandomStudySessionBuilder {
             dailyUsage: nil,
             engine: engine,
             matchingRecordScope: MatchingRecordScope.none,
-            reviewSource: .deckSession
+            reviewSource: .deckSession,
+            savesProgress: mode != .pictureChoice
         )
     }
 
