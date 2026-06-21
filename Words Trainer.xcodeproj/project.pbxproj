@@ -253,7 +253,6 @@
 /* Begin PBXShellScriptBuildPhase section */
 		EBEE368C2FC8CB7E00BDFEBC /* Upload Crashlytics dSYMs */ = {
 			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -270,10 +269,11 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
+				"$(DERIVED_FILE_DIR)/CrashlyticsUpload-$(CONFIGURATION)-$(PLATFORM_NAME).stamp",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\"\n";
+			shellScript = "STAMP_FILE=\"${DERIVED_FILE_DIR}/CrashlyticsUpload-${CONFIGURATION}-${PLATFORM_NAME}.stamp\"\n\nif [ \"${CONFIGURATION}\" = \"Debug\" ] && [ \"${PLATFORM_NAME}\" = \"iphonesimulator\" ]; then\n  echo \"Skipping Crashlytics dSYM upload for Debug simulator build.\"\n  mkdir -p \"$(dirname \"${STAMP_FILE}\")\"\n  touch \"${STAMP_FILE}\"\n  exit 0\nfi\n\n\"${BUILD_DIR%/Build/*}/SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\"\nSTATUS=$?\nif [ ${STATUS} -eq 0 ]; then\n  mkdir -p \"$(dirname \"${STAMP_FILE}\")\"\n  touch \"${STAMP_FILE}\"\nfi\nexit ${STATUS}\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -442,7 +442,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 68;
+				CURRENT_PROJECT_VERSION = 71;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = F7B2N6P9WP;
 				ENABLE_PREVIEWS = YES;
@@ -480,7 +480,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 68;
+				CURRENT_PROJECT_VERSION = 71;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = F7B2N6P9WP;
 				ENABLE_PREVIEWS = YES;

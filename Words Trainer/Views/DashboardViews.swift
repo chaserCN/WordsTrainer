@@ -518,11 +518,12 @@ struct StatisticsView: View {
             }
             .background { LovableBackground(variant: .stats) }
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(isPresented: $showWeakGame) {
-                if let weakGameSession, let store {
-                    StudySessionView(session: weakGameSession, store: store, deckTitle: "Забытые слова")
-                }
-            }
+            .studySessionDestination(
+                session: $weakGameSession,
+                isPresented: $showWeakGame,
+                store: store,
+                deckTitle: "Забытые слова"
+            )
             .overlay {
                 if let loadError {
                     DataPlaceholderView(
@@ -1477,54 +1478,16 @@ private struct TodayStudyModesView: View {
                         .foregroundStyle(LovableSurface.foreground)
                         .padding(.top, 28)
 
-                    TodayModeButton(
-                        title: "Карточки",
-                        subtitle: "Слово, перевод и заметки — переворот по тапу",
-                        systemImage: "rectangle.on.rectangle.angled",
-                        accent: .orange,
-                        isEnabled: canStart
-                    ) {
-                        start(.flashcards)
-                    }
-
-                    TodayModeButton(
-                        title: "Предложения",
-                        subtitle: "Выбери слово для примера с пропуском",
-                        systemImage: "text.quote",
-                        accent: .blue,
-                        isEnabled: canStart
-                    ) {
-                        start(.clozeMultipleChoice)
-                    }
-
-                    TodayModeButton(
-                        title: "Колонки",
-                        subtitle: "Соедини слово и перевод",
-                        systemImage: "rectangle.split.2x1.fill",
-                        accent: .green,
-                        isEnabled: canStart
-                    ) {
-                        start(.matching)
-                    }
-
-                    TodayModeButton(
-                        title: "Колонки аудио",
-                        subtitle: "Слушай слово и выбирай перевод",
-                        systemImage: "speaker.wave.2.fill",
-                        accent: .cyan,
-                        isEnabled: canStart
-                    ) {
-                        start(.matchingAudio)
-                    }
-
-                    TodayModeButton(
-                        title: "Картинки",
-                        subtitle: "Смотри картинку — выбери слово",
-                        systemImage: "photo",
-                        accent: .pink,
-                        isEnabled: canStart && hasImagedCards
-                    ) {
-                        start(.pictureChoice)
+                    ForEach(StudyModeMenuItem.exercises) { item in
+                        TodayModeButton(
+                            title: item.title,
+                            subtitle: item.subtitle,
+                            systemImage: item.systemImage,
+                            accent: item.accent,
+                            isEnabled: item.isEnabled(canStart: canStart, hasImagedCards: hasImagedCards)
+                        ) {
+                            start(item.mode)
+                        }
                     }
                 }
             }
@@ -1588,30 +1551,11 @@ struct RandomAllDecksModesView: View {
         }
         .overlay(alignment: .bottom) { toastOverlay }
         .animation(.snappy(duration: 0.22), value: toast)
-        .navigationDestination(isPresented: $showStudy) {
-            if let session {
-                StudySessionView(session: session, store: store, deckTitle: title)
-            }
-        }
-        .alert("Не удалось начать упражнение", isPresented: loadErrorBinding) {
-            Button("ОК", role: .cancel) {
-                loadError = nil
-            }
-        } message: {
-            Text(loadError ?? "")
-        }
+        .studySessionDestination(session: $session, isPresented: $showStudy, store: store, deckTitle: title)
+        .studyStartErrorAlert($loadError)
         .onDisappear {
             clearRegeneratedToast()
         }
-    }
-
-    private var loadErrorBinding: Binding<Bool> {
-        Binding(
-            get: { loadError != nil },
-            set: { isPresented in
-                if !isPresented { loadError = nil }
-            }
-        )
     }
 
     @ViewBuilder
@@ -1744,18 +1688,8 @@ private struct TodayAllDecksModesView: View {
             hasImagedCards: StudyCardCache.shared.hasImagedSenses(userID: store.currentUserID),
             start: start
         )
-        .navigationDestination(isPresented: $showStudy) {
-            if let session {
-                StudySessionView(session: session, store: store, deckTitle: sessionDeckTitle)
-            }
-        }
-        .alert("Не удалось начать упражнение", isPresented: loadErrorBinding) {
-            Button("ОК", role: .cancel) {
-                loadError = nil
-            }
-        } message: {
-            Text(loadError ?? "")
-        }
+        .studySessionDestination(session: $session, isPresented: $showStudy, store: store, deckTitle: sessionDeckTitle)
+        .studyStartErrorAlert($loadError)
         .onAppear {
             isVisible = true
             if needsReloadWhenVisible {
@@ -1781,15 +1715,6 @@ private struct TodayAllDecksModesView: View {
         }
     }
 
-    private var loadErrorBinding: Binding<Bool> {
-        Binding(
-            get: { loadError != nil },
-            set: { isPresented in
-                if !isPresented { loadError = nil }
-            }
-        )
-    }
-
     private func start(_ mode: StudyMode) {
         do {
             if let todaySession = try store.startTodaySession(mode: mode) {
@@ -1799,6 +1724,7 @@ private struct TodayAllDecksModesView: View {
                 sessionDeckTitle = TodayStudySessionBuilder.practiceTitle
                 session = practiceSession
             } else {
+                loadError = "Нет карточек для этого упражнения."
                 return
             }
             showStudy = true
@@ -1905,32 +1831,13 @@ private struct TodayDeckModesView: View {
             ),
             start: start
         )
-        .navigationDestination(isPresented: $showStudy) {
-            if let session {
-                StudySessionView(session: session, store: store, deckTitle: deck.title)
-            }
-        }
+        .studySessionDestination(session: $session, isPresented: $showStudy, store: store, deckTitle: deck.title)
         .task { await reload() }
-        .alert("Не удалось начать упражнение", isPresented: loadErrorBinding) {
-            Button("ОК", role: .cancel) {
-                loadError = nil
-            }
-        } message: {
-            Text(loadError ?? "")
-        }
+        .studyStartErrorAlert($loadError)
         .onChange(of: showStudy) { _, isShowing in
             guard !isShowing else { return }
             Task { await reload() }
         }
-    }
-
-    private var loadErrorBinding: Binding<Bool> {
-        Binding(
-            get: { loadError != nil },
-            set: { isPresented in
-                if !isPresented { loadError = nil }
-            }
-        )
     }
 
     private func reload() async {

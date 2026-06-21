@@ -5,6 +5,23 @@ import Testing
 
 @Suite("Today study session builder")
 struct TodayStudySessionBuilderTests {
+    @Test(
+        "study mode session policies are centralized",
+        arguments: [
+            StudyMode.recall,
+            .flashcards,
+            .clozeMultipleChoice,
+            .matching,
+            .matchingAudio,
+            .pictureChoice,
+        ]
+    )
+    func studyModeSessionPolicies(mode: StudyMode) {
+        #expect(mode.savesProgressByDefault == (mode != .pictureChoice))
+        #expect(mode.requiresImagedSenseQueue == (mode == .pictureChoice))
+        #expect(mode.disablesMatchingRecordScope == (mode.isMatching || mode == .pictureChoice))
+    }
+
     @Test("today session mixes active deck queues and keeps source deck ids")
     @MainActor
     func todaySessionMixesActiveDeckQueues() throws {
@@ -235,6 +252,59 @@ struct TodayStudySessionBuilderTests {
         #expect(TodayStudySessionBuilder.todayPracticeCardCount(snapshots: snapshots) == 1)
     }
 
+    @Test("picture-choice today session keeps only imaged senses and skips progress")
+    @MainActor
+    func pictureChoiceTodaySessionFiltersImagedSenses() throws {
+        let imagedCard = TestFixtures.card(
+            word: "apple",
+            translation: "яблоко",
+            imageURL: URL(string: "https://example.com/apple.png")
+        )
+        let plainCard = TestFixtures.card(word: "stone", translation: "камень")
+        let activeDeck = deck(title: "Images", cards: [imagedCard, plainCard])
+        var rng = SeededRNG(seed: 17)
+
+        let session = try #require(
+            TodayStudySessionBuilder.todaySession(
+                snapshots: [
+                    TodayStudyDeckSnapshot(deck: activeDeck, progressBySenseID: [:], dailyUsage: nil),
+                ],
+                mode: .pictureChoice,
+                dayKey: "2026-06-02",
+                engine: StudySessionEngine(),
+                using: &rng
+            )
+        )
+
+        #expect(session.queue.map(\.card.id) == [imagedCard.id])
+        #expect(session.savesProgress == false)
+        #expect(session.matchingRecordScope == .none)
+    }
+
+    @Test("picture-choice practice session returns nil when reviewed senses have no images")
+    @MainActor
+    func pictureChoicePracticeRequiresImages() throws {
+        let reviewedCard = TestFixtures.card(word: "stone", translation: "камень")
+        let reviewedSense = try #require(reviewedCard.primarySense)
+        let activeDeck = deck(title: "No images", cards: [reviewedCard])
+
+        let session = TodayStudySessionBuilder.todayPracticeSession(
+            snapshots: [
+                TodayStudyDeckSnapshot(
+                    deck: activeDeck,
+                    progressBySenseID: [:],
+                    dailyUsage: nil,
+                    reviewedSenseIDs: [reviewedSense.id]
+                ),
+            ],
+            mode: .pictureChoice,
+            dayKey: "2026-06-02",
+            engine: StudySessionEngine()
+        )
+
+        #expect(session == nil)
+    }
+
     @Test("deck practice session does not keep a matching record scope")
     @MainActor
     func deckPracticeDoesNotKeepMatchingRecordScope() throws {
@@ -352,6 +422,33 @@ struct TodayStudySessionBuilderTests {
 
         #expect(session.queue.map(\.card.id) == selected.map(\.id))
         #expect(session.queue.compactMap(\.deckID) == [sourceDeck.id, sourceDeck.id, sourceDeck.id])
+    }
+
+    @Test("random picture-choice session keeps only imaged senses and skips progress")
+    @MainActor
+    func randomPictureChoiceSessionFiltersImagedSenses() throws {
+        let imagedCard = TestFixtures.card(
+            word: "apple",
+            translation: "яблоко",
+            imageURL: URL(string: "https://example.com/apple.png")
+        )
+        let plainCard = TestFixtures.card(word: "stone", translation: "камень")
+        let sourceDeck = deck(title: "Images", cards: [imagedCard, plainCard])
+
+        let session = try #require(
+            RandomStudySessionBuilder.session(
+                snapshots: [
+                    TodayStudyDeckSnapshot(deck: sourceDeck, progressBySenseID: [:], dailyUsage: nil),
+                ],
+                cards: [plainCard, imagedCard],
+                mode: .pictureChoice,
+                engine: StudySessionEngine()
+            )
+        )
+
+        #expect(session.queue.map(\.card.id) == [imagedCard.id])
+        #expect(session.savesProgress == false)
+        #expect(session.matchingRecordScope == .none)
     }
 
     private func deck(

@@ -41,13 +41,7 @@ struct DeckListView: View {
                 }
             }
         }
-        .alert("Не удалось начать упражнение", isPresented: startErrorBinding) {
-            Button("ОК", role: .cancel) {
-                startError = nil
-            }
-        } message: {
-            Text(startError ?? "")
-        }
+        .studyStartErrorAlert($startError)
         .task {
             loadCollapsedDeckGroups()
             // .task re-runs every time the tab re-appears. Deck content only
@@ -310,15 +304,6 @@ struct DeckListView: View {
         default:
             userStore.bootstrapState.message ?? "Сначала синхронизируйте пользователей с сервером."
         }
-    }
-
-    private var startErrorBinding: Binding<Bool> {
-        Binding(
-            get: { startError != nil },
-            set: { isPresented in
-                if !isPresented { startError = nil }
-            }
-        )
     }
 
     private func reloadImmediately() {
@@ -1501,63 +1486,28 @@ struct DeckDetailView: View {
                     title: "Упражнения",
                     trailing: AnyView(DeckExerciseScopePicker(selection: $exerciseScope))
                 ) {
-                    StudyActionButton(
-                        title: "Карточки",
-                        subtitle: "Слово, перевод и заметки — переворот по тапу",
-                        systemImage: "rectangle.on.rectangle.angled",
-                        accent: .orange,
-                        isEnabled: !scopedStudyCards.isEmpty
-                    ) {
-                        start(.flashcards)
-                    }
-
-                    StudyActionButton(
-                        title: "Предложения",
-                        subtitle: "Выбери слово для примера с пропуском",
-                        systemImage: "text.quote",
-                        accent: .blue,
-                        isEnabled: !scopedStudyCards.isEmpty
-                    ) {
-                        start(.clozeMultipleChoice)
-                    }
-
-                    StudyActionButton(
-                        title: "Колонки",
-                        subtitle: matchingSubtitle,
-                        systemImage: "rectangle.split.2x1.fill",
-                        accent: .green,
-                        isEnabled: !scopedStudyCards.isEmpty
-                    ) {
-                        start(.matching)
-                    }
-
-                    StudyActionButton(
-                        title: "Колонки аудио",
-                        subtitle: "Слушай слово и выбирай перевод",
-                        systemImage: "speaker.wave.2.fill",
-                        accent: .cyan,
-                        isEnabled: !scopedStudyCards.isEmpty
-                    ) {
-                        start(.matchingAudio)
-                    }
-
-                    StudyActionButton(
-                        title: "Картинки",
-                        subtitle: "Смотри картинку — выбери слово",
-                        systemImage: "photo",
-                        accent: .pink,
-                        isEnabled: hasImagedCards
-                    ) {
-                        start(.pictureChoice)
+                    ForEach(StudyModeMenuItem.exercises) { item in
+                        StudyActionButton(
+                            title: item.title,
+                            subtitle: item.subtitle(matchingRecordSubtitle: matchingRecordSubtitle),
+                            systemImage: item.systemImage,
+                            accent: item.accent,
+                            isEnabled: item.isEnabled(
+                                canStart: !scopedStudyCards.isEmpty,
+                                hasImagedCards: hasImagedCards
+                            )
+                        ) {
+                            start(item.mode)
+                        }
                     }
                 }
 
                 StudySection(title: "Сбросить") {
                     StudyActionButton(
-                        title: "Оставить / Сбросить",
-                        subtitle: "Покажи слово и реши: оставить прогресс или начать заново",
-                        systemImage: "eye.fill",
-                        accent: .purple,
+                        title: StudyModeMenuItem.reset.title,
+                        subtitle: StudyModeMenuItem.reset.subtitle,
+                        systemImage: StudyModeMenuItem.reset.systemImage,
+                        accent: StudyModeMenuItem.reset.accent,
                         isEnabled: !studyCards.isEmpty
                     ) {
                         start(.recall)
@@ -1593,11 +1543,7 @@ struct DeckDetailView: View {
                 .tint(LovableSurface.foreground)
             }
         }
-        .navigationDestination(isPresented: $showStudy) {
-            if let session {
-                StudySessionView(session: session, store: store, deckTitle: deck.title)
-            }
-        }
+        .studySessionDestination(session: $session, isPresented: $showStudy, store: store, deckTitle: deck.title)
         .task(id: statsTaskID) {
             await reloadDeckState()
         }
@@ -1614,13 +1560,7 @@ struct DeckDetailView: View {
         } message: {
             Text(statusError ?? "")
         }
-        .alert("Не удалось начать упражнение", isPresented: startErrorBinding) {
-            Button("ОК", role: .cancel) {
-                startError = nil
-            }
-        } message: {
-            Text(startError ?? "")
-        }
+        .studyStartErrorAlert($startError)
     }
 
     private func start(_ mode: StudyMode) {
@@ -1651,11 +1591,11 @@ struct DeckDetailView: View {
         }
     }
 
-    private var matchingSubtitle: String {
+    private var matchingRecordSubtitle: String? {
         guard exerciseScope == .all,
               let matchingRecord,
               matchingRecord.pairCount == fullDeckMatchingPairCount else {
-            return "Соедини слово и перевод"
+            return nil
         }
         return L10n.format("Рекорд: %@", StudyDurationFormat.string(matchingRecord.bestDuration))
     }
@@ -1716,15 +1656,6 @@ struct DeckDetailView: View {
             get: { statusError != nil },
             set: { isPresented in
                 if !isPresented { statusError = nil }
-            }
-        )
-    }
-
-    private var startErrorBinding: Binding<Bool> {
-        Binding(
-            get: { startError != nil },
-            set: { isPresented in
-                if !isPresented { startError = nil }
             }
         )
     }

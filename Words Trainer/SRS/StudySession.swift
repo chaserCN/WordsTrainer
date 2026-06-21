@@ -45,14 +45,14 @@ final class StudySession {
     }
 
     func displayTotalCount(flashcardDisplayMode: FlashcardDisplayMode) -> Int {
-        guard mode == .flashcards, flashcardDisplayMode == .wholeCard else {
+        guard mode.usesWholeCardCounters(flashcardDisplayMode: flashcardDisplayMode) else {
             return sessionChoicePool.count
         }
         return flashcardWholeCardTotalCount
     }
 
     func displayRemainingCount(flashcardDisplayMode: FlashcardDisplayMode) -> Int {
-        guard mode == .flashcards, flashcardDisplayMode == .wholeCard else {
+        guard mode.usesWholeCardCounters(flashcardDisplayMode: flashcardDisplayMode) else {
             return remainingCount
         }
         return Self.uniqueCardGroupCount(in: queue)
@@ -124,7 +124,7 @@ final class StudySession {
             : [item]
         let reviewedAt = Date()
         let durationMS = reviewDurationMS(endedAt: reviewedAt)
-        if mode == .recall, outcome == .remembered {
+        if mode.skipsProgressSave(outcome: outcome) {
             queue.removeFirst()
             startNextCurrentIfNeeded()
             return
@@ -134,7 +134,7 @@ final class StudySession {
         for reviewedItem in reviewedItems {
             let wasNew = reviewedItem.progress.fsrsCard.state == .new
             let updated: CardProgress
-            if mode == .recall, outcome == .forgot {
+            if mode.resetsProgress(outcome: outcome) {
                 updated = CardProgress.newSense(senseID: reviewedItem.senseID, now: reviewedAt)
             } else {
                 updated = try engine.applyReview(progress: reviewedItem.progress, outcome: outcome, now: reviewedAt)

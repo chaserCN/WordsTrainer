@@ -597,6 +597,39 @@ nonisolated final class ContentDatabase {
         }
     }
 
+    func mediaObjects(ids: [UUID]) throws -> [ServerMediaObject] {
+        guard !ids.isEmpty else { return [] }
+        let sql = """
+        SELECT id, storage_key, sha256, mime_type, byte_size, width, height
+        FROM media_objects
+        WHERE id IN (\(placeholders(count: ids.count)))
+        ORDER BY id
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw ContentDatabaseError.queryFailed
+        }
+        defer { sqlite3_finalize(statement) }
+        try bindUUIDs(ids, to: statement)
+
+        var media: [ServerMediaObject] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let id = uuidColumn(statement, index: 0) else { continue }
+            media.append(
+                ServerMediaObject(
+                    id: id,
+                    storageKey: textColumn(statement, index: 1),
+                    sha256: textColumn(statement, index: 2),
+                    mimeType: textColumn(statement, index: 3),
+                    byteSize: intColumn(statement, index: 4),
+                    width: intColumn(statement, index: 5),
+                    height: intColumn(statement, index: 6)
+                )
+            )
+        }
+        return media
+    }
+
     func updateDeckStatus(deckID: UUID, status: ContentStatus) throws {
         try setDeckUserEnabled(status.isActive, deckID: deckID)
     }
@@ -3226,7 +3259,7 @@ nonisolated final class ContentDatabase {
             return mediaURLs[id]
         }
 
-        return rows.compactMap { row in
+        return rows.compactMap { row -> WordCardContent? in
             let forms = formsByCardID[row.id] ?? []
             let senses = (sensesByCardID[row.id] ?? []).compactMap { senseRow -> WordSenseContent? in
                 guard let example = examplesBySenseID[senseRow.id] else { return nil }
@@ -3292,7 +3325,7 @@ nonisolated final class ContentDatabase {
         let sensesByCardID = try fetchSenses(cardIDs: rows.map(\.id))
         let emptyExample = SenseExampleContent(text: "", translation: nil, note: nil)
         let emptyQuestion = SentenceQuestionContent(template: "", answer: "", answerFormKey: nil, audioAnswerURL: nil)
-        return rows.compactMap { row in
+        return rows.compactMap { row -> WordCardContent? in
             let senses = (sensesByCardID[row.id] ?? []).map { senseRow in
                 WordSenseContent(
                     id: senseRow.id,

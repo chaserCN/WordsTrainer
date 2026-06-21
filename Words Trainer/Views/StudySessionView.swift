@@ -10,17 +10,8 @@ struct StudySessionView: View {
     let store: DeckStore
     let deckTitle: String
 
-    /// Matching завершаем сразу по scheduler, а не после анимации очистки доски.
-    @State private var matchingFinished = false
-    /// Поставлен ли на этом раунде новый рекорд — чтобы сыграть джингл в конце раунда.
-    @State private var beatRecord = false
-    /// Счётчик залпов конфетти: ++ запускает залп на постоянно смонтированной ConfettiView.
-    @State private var confettiBurst = 0
-    /// Время прохождения раунда — для сообщения о рекорде.
-    @State private var finishedDuration: TimeInterval?
+    @State private var matchingCompletion = MatchingSessionCompletionController()
     @State private var isFlashcardSubmitEnabled = true
-    @State private var didSaveMatchingAttempt = false
-    @State private var didPlayMatchingCompletionEffects = false
     @State private var didRequestCompletionSync = false
     @State private var sessionError: String?
 
@@ -32,8 +23,8 @@ struct StudySessionView: View {
             sessionContent
         }
         .overlay {
-            if session.mode == .matching {
-                ConfettiView(trigger: confettiBurst)
+            if session.mode.showsMatchingRecordCelebration {
+                ConfettiView(trigger: matchingCompletion.confettiBurst)
             }
         }
         .navigationTitle(session.mode.title)
@@ -100,90 +91,34 @@ struct StudySessionView: View {
 
     @ViewBuilder
     private var sessionContent: some View {
-        if session.mode.isMatching {
-            matchingContent
-        } else if session.isFinished {
+        StudySessionContentRouter(
+            session: session,
+            store: store,
+            flashcardDisplayMode: settings.flashcardDisplayMode,
+            isFlashcardSubmitEnabled: isFlashcardSubmitEnabled,
+            isMatchingFinished: matchingCompletion.isFinished,
+            onSubmit: submit,
+            onMatchingFinished: {
+                finishMatchingSessionIfNeeded(playCompletionEffects: true)
+            },
+            onCloseUnsupportedMode: {
+                dismiss()
+            }
+        ) {
             finishedView
-        } else if let item = session.current {
-            studyContent(for: item)
-        }
-    }
-
-    @ViewBuilder
-    private var matchingContent: some View {
-        if matchingFinished {
-            finishedView
-        } else {
-            MatchingColumnsStudyView(
-                session: session,
-                store: store,
-                onFinished: {
-                    finishMatchingSessionIfNeeded(playCompletionEffects: true)
-                }
-            )
-        }
-    }
-
-    @ViewBuilder
-    private func studyContent(for item: StudyQueueItem) -> some View {
-        switch session.mode {
-        case .recall:
-            RecallStudyView(
-                card: item.card,
-                totalCount: session.sessionChoicePool.count,
-                remainingCount: session.remainingCount
-            ) { outcome in
-                submit(outcome)
-            }
-        case .flashcards:
-            flashcardContent(for: item)
-        case .clozeMultipleChoice:
-            ClozeMCQStudyView(
-                card: item.card,
-                sessionChoicePool: session.sessionChoicePool,
-                deckChoicePool: session.deckChoicePool,
-                totalCount: session.sessionChoicePool.count,
-                remainingCount: session.remainingCount
-            ) { outcome, additionalFailureSenseID in
-                submit(outcome, additionalFailureSenseID: additionalFailureSenseID)
-            }
-        case .pictureChoice:
-            PictureChoiceStudyView(
-                card: item.card,
-                sessionChoicePool: session.sessionChoicePool,
-                deckChoicePool: session.deckChoicePool,
-                totalCount: session.sessionChoicePool.count,
-                remainingCount: session.remainingCount
-            ) { outcome in
-                submit(outcome)
-            }
-        case .matching, .matchingAudio, .clozeTyping:
-            EmptyView()
-        }
-    }
-
-    private func flashcardContent(for item: StudyQueueItem) -> some View {
-        let displayMode = settings.flashcardDisplayMode
-        return FlashcardStudyView(
-            card: item.card,
-            displayMode: displayMode,
-            totalCount: session.displayTotalCount(flashcardDisplayMode: displayMode),
-            remainingCount: session.displayRemainingCount(flashcardDisplayMode: displayMode),
-            isAnswerEnabled: isFlashcardSubmitEnabled
-        ) { outcome in
-            submit(outcome)
         }
     }
 
     @ViewBuilder
     private var toolbarSettingsButton: some View {
-        if session.mode == .matching {
+        switch session.mode.toolbarSettingsKind {
+        case .matching:
             MatchingSettingsMenu()
-        } else if session.mode == .flashcards {
+        case .flashcards:
             FlashcardSettingsMenu()
-        } else if session.mode == .matchingAudio || session.mode == .clozeMultipleChoice {
+        case .sound:
             SoundToggleButton()
-        } else {
+        case .none:
             EmptyView()
         }
     }
@@ -200,7 +135,7 @@ struct StudySessionView: View {
     }
 
     private var finishedView: some View {
-        let isNewRecord = session.mode == .matching && beatRecord
+        let isNewRecord = session.mode.recordsMatchingBestDuration && matchingCompletion.beatRecord
         return ContentUnavailableView {
             Label(
                 L10n.text(isNewRecord ? newRecordTitle : "Готово"),
@@ -208,7 +143,7 @@ struct StudySessionView: View {
             )
             .foregroundStyle(finishedTint)
         } description: {
-            if isNewRecord, let finishedDuration {
+            if isNewRecord, let finishedDuration = matchingCompletion.finishedDuration {
                 Text(L10n.format("Лучшее время: %@", StudyDurationFormat.string(finishedDuration)))
                     .foregroundStyle(finishedTint)
             } else {
@@ -236,7 +171,7 @@ struct StudySessionView: View {
 
     private var finishedTint: Color {
         if usesLightStudyTheme {
-            return beatRecord ? MatchPalette.accent : MatchPalette.foreground
+            return matchingCompletion.beatRecord ? MatchPalette.accent : MatchPalette.foreground
         }
         return .white
     }
@@ -250,30 +185,12 @@ struct StudySessionView: View {
         usesLightStudyTheme ? LovableSurface.foreground : .white
     }
 
-    private var matchingAttemptDeckID: UUID? {
-        switch session.matchingRecordScope {
-        case .deck(let deckID):
-            return deckID
-        case .none:
-            guard session.deckID != TodayStudySessionBuilder.deckID,
-                  session.deckID != RandomStudySessionBuilder.deckID,
-                  session.deckID != WeakCardsPractice.deckID else {
-                return nil
-            }
-            return session.deckID
-        }
-    }
-
     private var usesLightStudyTheme: Bool {
-        session.mode.isMatching
-            || session.mode == .clozeMultipleChoice
-            || session.mode == .recall
-            || session.mode == .flashcards
-            || session.mode == .pictureChoice
+        session.mode.usesLightStudyTheme
     }
 
     private func submit(_ outcome: ReviewOutcome, additionalFailureSenseID: UUID? = nil) {
-        if session.mode == .flashcards {
+        if session.mode.usesSubmitCooldown {
             guard isFlashcardSubmitEnabled else { return }
             isFlashcardSubmitEnabled = false
 
@@ -287,7 +204,9 @@ struct StudySessionView: View {
             try session.advanceAfterReview(
                 outcome: outcome,
                 additionalFailureSenseID: additionalFailureSenseID,
-                reviewsActiveCardSenses: session.mode == .flashcards && settings.flashcardDisplayMode == .wholeCard,
+                reviewsActiveCardSenses: session.mode.reviewsActiveCardSenses(
+                    flashcardDisplayMode: settings.flashcardDisplayMode
+                ),
                 store: store
             )
             requestCompletionSyncIfNeeded()
@@ -301,34 +220,12 @@ struct StudySessionView: View {
         guard session.mode.isMatching else { return }
         do {
             try validateCurrentUser()
-            if !didSaveMatchingAttempt {
-                let duration = session.matchingElapsed
-                finishedDuration = duration
-                try store.saveMatchingAttempt(
-                    MatchingAttemptEvent(
-                        deckID: matchingAttemptDeckID,
-                        mode: session.mode,
-                        source: session.reviewSource,
-                        duration: duration,
-                        pairCount: session.matchingTotalPairCount
-                    )
-                )
-                didSaveMatchingAttempt = true
-                if session.mode == .matching {
-                    beatRecord = try store.saveMatchingRecordIfBest(
-                        scope: session.matchingRecordScope,
-                        duration: duration,
-                        pairCount: session.matchingTotalPairCount
-                    )
-                }
-            }
-            matchingFinished = true
+            try matchingCompletion.finishIfNeeded(
+                session: session,
+                store: store,
+                playCompletionEffects: playCompletionEffects
+            )
             requestCompletionSyncIfNeeded()
-            if playCompletionEffects, session.mode == .matching, beatRecord, !didPlayMatchingCompletionEffects {
-                didPlayMatchingCompletionEffects = true
-                confettiBurst += 1
-                WordAudioPlayer.shared.playEffect(named: "new_record")
-            }
         } catch {
             sessionError = error.localizedDescription
         }
@@ -342,7 +239,7 @@ struct StudySessionView: View {
 
     private func requestCompletionSyncIfNeeded() {
         guard !didRequestCompletionSync,
-              session.isFinished || matchingFinished,
+              session.isFinished || matchingCompletion.isFinished,
               userStore.selectedUserID == store.currentUserID else {
             return
         }

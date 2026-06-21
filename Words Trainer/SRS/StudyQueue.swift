@@ -176,6 +176,56 @@ nonisolated enum StudyQueueBuilder {
     }
 }
 
+extension StudyMode {
+    var savesProgressByDefault: Bool {
+        self != .pictureChoice
+    }
+
+    var disablesMatchingRecordScope: Bool {
+        isMatching || self == .pictureChoice
+    }
+
+    var requiresImagedSenseQueue: Bool {
+        self == .pictureChoice
+    }
+
+    func preparedTodayQueue<RNG: RandomNumberGenerator>(
+        _ items: [StudyQueueItem],
+        using rng: inout RNG
+    ) -> [StudyQueueItem] {
+        var queue = items
+        queue.shuffle(using: &rng)
+        return filteredQueue(queue)
+    }
+
+    func preparedScheduledQueue(_ items: [StudyQueueItem]) -> [StudyQueueItem] {
+        filteredQueue(items)
+    }
+
+    func preparedPracticeQueue(_ items: [StudyQueueItem]) -> [StudyQueueItem] {
+        let queue = filteredQueue(items)
+        return shouldShufflePracticeQueue ? queue.shuffled() : queue
+    }
+
+    func preparedDeckQueue(_ items: [StudyQueueItem]) -> [StudyQueueItem] {
+        let queue = filteredQueue(items)
+        return shouldShuffleDeckQueue ? queue.shuffled() : queue
+    }
+
+    private func filteredQueue(_ items: [StudyQueueItem]) -> [StudyQueueItem] {
+        guard requiresImagedSenseQueue else { return items }
+        return items.filter { $0.sense.imageURL != nil }
+    }
+
+    private var shouldShufflePracticeQueue: Bool {
+        isMatching || self == .recall || self == .clozeMultipleChoice || self == .pictureChoice
+    }
+
+    private var shouldShuffleDeckQueue: Bool {
+        self == .recall || self == .clozeMultipleChoice || self == .pictureChoice
+    }
+}
+
 final class StudySessionEngine: @unchecked Sendable {
     let scheduler: FSRS
 

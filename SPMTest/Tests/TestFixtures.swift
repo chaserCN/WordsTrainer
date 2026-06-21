@@ -11,7 +11,8 @@ enum TestFixtures {
         translation: String,
         clozePrompt: String = "___",
         clozeAnswer: String? = nil,
-        distractors: [String] = []
+        distractors: [String] = [],
+        imageURL: URL? = nil
     ) -> WordCardContent {
         let senseTranslations = WordCardContent.translationSenses(translation)
         let senses = senseTranslations.enumerated().map { index, senseTranslation in
@@ -22,7 +23,7 @@ enum TestFixtures {
                 displayPattern: nil,
                 translation: senseTranslation,
                 note: nil,
-                imageURL: nil,
+                imageURL: imageURL,
                 example: SenseExampleContent(
                     text: WordCardContent.fillTemplate(
                         clozePrompt,

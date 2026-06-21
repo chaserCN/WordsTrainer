@@ -11,6 +11,14 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
 
     var id: String { rawValue }
 
+    static let exerciseModes: [StudyMode] = [
+        .flashcards,
+        .clozeMultipleChoice,
+        .matching,
+        .matchingAudio,
+        .pictureChoice,
+    ]
+
     var title: String {
         switch self {
         case .recall: L10n.text("Оставить / Сбросить")
@@ -41,6 +49,18 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
         case .recall, .matching, .matchingAudio:
             false
         }
+    }
+
+    func usesWholeCardCounters(flashcardDisplayMode: FlashcardDisplayMode) -> Bool {
+        self == .flashcards && flashcardDisplayMode == .wholeCard
+    }
+
+    func skipsProgressSave(outcome: ReviewOutcome) -> Bool {
+        self == .recall && outcome == .remembered
+    }
+
+    func resetsProgress(outcome: ReviewOutcome) -> Bool {
+        self == .recall && outcome == .forgot
     }
 }
 

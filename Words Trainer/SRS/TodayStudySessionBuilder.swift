@@ -64,13 +64,8 @@ enum TodayStudySessionBuilder {
         }
 
         guard !queue.isEmpty else { return nil }
-        queue.shuffle(using: &rng)
-        // Picture-choice is a recognition warm-up: only senses with an image, and
-        // it must not write FSRS / consume the day's new-card budget.
-        if mode == .pictureChoice {
-            queue = queue.filter { $0.sense.imageURL != nil }
-            guard !queue.isEmpty else { return nil }
-        }
+        queue = mode.preparedTodayQueue(queue, using: &rng)
+        guard !queue.isEmpty else { return nil }
         return StudySession(
             deckID: deckID,
             mode: mode,
@@ -80,7 +75,7 @@ enum TodayStudySessionBuilder {
             engine: engine,
             matchingRecordScope: matchingRecordScope(for: mode, dayKey: dayKey),
             reviewSource: .todayQueue,
-            savesProgress: mode != .pictureChoice
+            savesProgress: mode.savesProgressByDefault
         )
     }
 
@@ -110,10 +105,12 @@ enum TodayStudySessionBuilder {
         }
 
         guard !queue.isEmpty else { return nil }
+        queue = mode.preparedPracticeQueue(queue)
+        guard !queue.isEmpty else { return nil }
         return StudySession(
             deckID: deckID,
             mode: mode,
-            queue: practiceQueue(queue, for: mode),
+            queue: queue,
             deckCards: choicePool,
             dailyUsage: nil,
             engine: engine,
@@ -131,11 +128,13 @@ enum TodayStudySessionBuilder {
     ) -> StudySession? {
         let queue = todayPracticeItems(snapshot: snapshot)
         guard !queue.isEmpty else { return nil }
+        let preparedQueue = mode.preparedPracticeQueue(queue)
+        guard !preparedQueue.isEmpty else { return nil }
         let studyCards = snapshot.deck.isActive ? snapshot.deck.activeCards : []
         return StudySession(
             deckID: snapshot.deck.id,
             mode: mode,
-            queue: practiceQueue(queue, for: mode),
+            queue: preparedQueue,
             deckCards: studyCards,
             dailyUsage: nil,
             engine: engine,
@@ -160,19 +159,6 @@ enum TodayStudySessionBuilder {
             }
         }
         return snapshot.reviewedSenseIDs.compactMap { itemBySenseID[$0] }
-    }
-
-    private static func practiceQueue(_ items: [StudyQueueItem], for mode: StudyMode) -> [StudyQueueItem] {
-        // Picture-choice only ever asks senses that have an image, even in the
-        // practice fallback (queue already drained for the day). Without this the
-        // fallback showed imageless / wrong-deck senses with blank pictures.
-        if mode == .pictureChoice {
-            return items.filter { $0.sense.imageURL != nil }.shuffled()
-        }
-        if mode.isMatching || mode == .recall || mode == .clozeMultipleChoice {
-            return items.shuffled()
-        }
-        return items
     }
 
     private static func matchingRecordScope(for _: StudyMode, dayKey _: String) -> MatchingRecordScope {
@@ -251,13 +237,7 @@ enum RandomStudySessionBuilder {
         }
 
         queue = cards.flatMap { card in card.activeSenses.compactMap { itemBySenseID[$0.id] } }
-        // Picture-choice keeps only senses with an image and never writes FSRS /
-        // daily-usage progress (it's a recognition warm-up). Without this the
-        // picture session from «Сегодня» reviewed imageless senses and consumed
-        // the day's new-card budget, emptying the queue for the other modes.
-        if mode == .pictureChoice {
-            queue = queue.filter { $0.sense.imageURL != nil }.shuffled()
-        }
+        queue = mode.preparedDeckQueue(queue)
         guard !queue.isEmpty else { return nil }
 
         return StudySession(
@@ -269,7 +249,7 @@ enum RandomStudySessionBuilder {
             engine: engine,
             matchingRecordScope: MatchingRecordScope.none,
             reviewSource: .deckSession,
-            savesProgress: mode != .pictureChoice
+            savesProgress: mode.savesProgressByDefault
         )
     }
 
