@@ -982,6 +982,14 @@ private struct WordSearchPane: View {
                 Text(L10n.text("Отмена"))
                     .font(.system(size: 18, weight: .regular))
                     .foregroundStyle(LovableSurface.foreground)
+                    .padding(.horizontal, 18)
+                    .frame(height: 56)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay {
+                        Capsule()
+                            .stroke(.white.opacity(0.58), lineWidth: 0.8)
+                    }
+                    .shadow(color: oklch(0.18, 0.05, 260, 0.12), radius: 16, x: 0, y: 8)
             }
             .buttonStyle(.plain)
         }
@@ -1241,7 +1249,8 @@ private struct DeckSearchWordRow: View {
             Text(item.card.joinedTranslations)
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(oklch(0.82, 0.03, 250, 0.65))
-                .lineLimit(2)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
