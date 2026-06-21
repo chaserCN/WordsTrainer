@@ -807,9 +807,11 @@ private struct WordSearchPane: View {
     @State private var query = ""
     @State private var debouncedQuery = ""
     @State private var visibleItems: [DeckWordSearchItem] = []
+    @State private var previewPair: MatchingPair?
     @FocusState private var isSearchFieldFocused: Bool
 
     private static let searchDebounceNanoseconds: UInt64 = 180_000_000
+    private static let listTopPadding: CGFloat = 92
 
     init(
         index: DeckWordSearchIndex?,
@@ -826,27 +828,33 @@ private struct WordSearchPane: View {
     }
 
     var body: some View {
-        VStack(spacing: 22) {
-            searchHeader
-
+        ZStack(alignment: .top) {
             ScrollView {
                 content
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
+                    .padding(.top, Self.listTopPadding)
                     .padding(.bottom, 32)
             }
             .scrollDismissesKeyboard(.interactively)
+
+            searchHeader
+                .zIndex(1)
         }
-        .padding(.top, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .task {
-            // Поднимаем клавиатуру только после того, как форма доехала до места:
-            // если фокусироваться посреди перехода, первое появление клавиатуры
-            // подвешивает анимацию ровно на середине.
-            try? await Task.sleep(for: .seconds(DeckListView.searchTransitionDuration + 0.05))
-            guard !Task.isCancelled else { return }
-            isSearchFieldFocused = true
+        .toolbar(.hidden, for: .navigationBar)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .overlay {
+            if let previewPair {
+                MatchingFlashcardPreviewOverlay(pair: previewPair) {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        self.previewPair = nil
+                    }
+                }
+                .transition(.opacity)
+            }
         }
+        .animation(.easeOut(duration: 0.18), value: previewPair?.id)
         .task(id: sourceRevision) {
             applyCurrentIndex()
         }
@@ -922,6 +930,12 @@ private struct WordSearchPane: View {
                     item: item,
                     position: rowPosition(index: position, count: list.count)
                 )
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.45)
+                        .onEnded { _ in
+                            showPreview(for: item)
+                        }
+                )
             }
         }
     }
@@ -948,20 +962,24 @@ private struct WordSearchPane: View {
                     .autocorrectionDisabled()
                     .focused($isSearchFieldFocused)
                     .submitLabel(.search)
-
-                if !query.isEmpty {
-                    Button {
-                        query = ""
-                        isSearchFieldFocused = true
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 18))
-                            .foregroundStyle(LovableSurface.muted.opacity(0.6))
+                    .onSubmit {
+                        isSearchFieldFocused = false
                     }
-                    .buttonStyle(.plain)
-                    .transition(.opacity)
-                    .accessibilityLabel(L10n.text("Очистить"))
+
+                Button {
+                    query = ""
+                    isSearchFieldFocused = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(LovableSurface.muted.opacity(0.6))
+                        .frame(width: 28, height: 28)
                 }
+                .buttonStyle(.plain)
+                .opacity(query.isEmpty ? 0 : 1)
+                .allowsHitTesting(!query.isEmpty)
+                .accessibilityHidden(query.isEmpty)
+                .accessibilityLabel(L10n.text("Очистить"))
             }
             .padding(.horizontal, 18)
             .frame(height: 56)
@@ -972,7 +990,10 @@ private struct WordSearchPane: View {
             }
             .shadow(color: oklch(0.18, 0.05, 260, 0.12), radius: 16, x: 0, y: 8)
 
-            Button(action: onCancel) {
+            Button {
+                isSearchFieldFocused = false
+                onCancel()
+            } label: {
                 Text(L10n.text("Отмена"))
                     .font(.system(size: 18, weight: .regular))
                     .foregroundStyle(LovableSurface.foreground)
@@ -982,6 +1003,23 @@ private struct WordSearchPane: View {
         .padding(.horizontal, 20)
         .padding(.top, 12)
         .animation(.easeInOut(duration: 0.15), value: query.isEmpty)
+    }
+
+    private func showPreview(for item: DeckWordSearchItem) {
+        let card = item.card
+        let sense = card.primarySense
+        let pair = MatchingPair(
+            cardID: card.id,
+            senseID: sense?.id ?? card.primarySenseID ?? card.id,
+            deckID: item.deckID,
+            card: sense.map { card.focused(on: $0) } ?? card,
+            translation: sense?.translation ?? card.translation
+        )
+        isSearchFieldFocused = false
+        WordAudioPlayer.shared.playWord(from: card)
+        withAnimation(.easeOut(duration: 0.18)) {
+            previewPair = pair
+        }
     }
 }
 
@@ -1246,12 +1284,13 @@ private struct DeckSearchWordRow: View {
                     .padding(.leading, 16)
             }
         }
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 }
 
 private extension String {
-    var normalizedForWordSearch: String {
+    nonisolated var normalizedForWordSearch: String {
         folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .components(separatedBy: .whitespacesAndNewlines)
