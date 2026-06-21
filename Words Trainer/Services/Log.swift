@@ -9,9 +9,9 @@ import Foundation
 /// Debug-only: in release builds `log` compiles to an empty body and, because
 /// `message` is an @autoclosure, the message string is never even constructed,
 /// so there is zero runtime cost in production.
-enum Log {
+nonisolated enum Log {
     #if DEBUG
-    nonisolated(unsafe) private static let formatter: DateFormatter = {
+    private static let formatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss.SSS"
         return f

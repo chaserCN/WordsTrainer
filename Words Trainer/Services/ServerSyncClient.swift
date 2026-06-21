@@ -367,7 +367,7 @@ private extension KeyedDecodingContainer {
     }
 }
 
-struct ServerSyncEventsPayload: Encodable, Sendable {
+nonisolated struct ServerSyncEventsPayload: Encodable, Sendable {
     var reviews: [ServerReviewEventPayload] = []
     var practiceReviews: [ServerPracticeReviewPayload] = []
     var progress: [ServerProgressPayload] = []
@@ -385,7 +385,7 @@ struct ServerSyncEventsPayload: Encodable, Sendable {
     }
 }
 
-struct ServerReviewEventPayload: Codable, Sendable {
+nonisolated struct ServerReviewEventPayload: Codable, Sendable {
     let clientEventId: UUID
     let deckId: UUID
     let deckVersionId: UUID?
@@ -401,7 +401,7 @@ struct ServerReviewEventPayload: Codable, Sendable {
     let newState: String?
 }
 
-struct ServerProgressPayload: Codable, Sendable {
+nonisolated struct ServerProgressPayload: Codable, Sendable {
     let senseId: UUID
     let cardId: UUID
     let deckId: UUID
@@ -429,7 +429,7 @@ struct ServerProgressPayload: Codable, Sendable {
     }
 }
 
-struct ServerPracticeReviewPayload: Codable, Sendable {
+nonisolated struct ServerPracticeReviewPayload: Codable, Sendable {
     let clientEventId: UUID
     let deckId: UUID
     let deckVersionId: UUID?
@@ -442,7 +442,7 @@ struct ServerPracticeReviewPayload: Codable, Sendable {
     let durationMs: Int?
 }
 
-struct ServerMatchingRecordPayload: Codable, Sendable {
+nonisolated struct ServerMatchingRecordPayload: Codable, Sendable {
     let deckId: UUID
     let deckVersionId: UUID?
     let bestDurationSeconds: Double
@@ -450,7 +450,7 @@ struct ServerMatchingRecordPayload: Codable, Sendable {
     let achievedAt: String
 }
 
-struct ServerMatchingAttemptPayload: Codable, Sendable {
+nonisolated struct ServerMatchingAttemptPayload: Codable, Sendable {
     let clientEventId: UUID
     let deckId: UUID?
     let deckVersionId: UUID?
@@ -461,7 +461,7 @@ struct ServerMatchingAttemptPayload: Codable, Sendable {
     let pairCount: Int
 }
 
-struct ServerDeckPreferencePayload: Codable, Sendable {
+nonisolated struct ServerDeckPreferencePayload: Codable, Sendable {
     let deckId: UUID
     let isEnabled: Bool
     let updatedAt: String?

@@ -27,30 +27,30 @@ struct ContentCacheCleanupResult {
     let removedDeckIDs: [UUID]
 }
 
-struct PendingProgressSnapshot {
+nonisolated struct PendingProgressSnapshot {
     let senseID: UUID
     let updatedAt: Date
 }
 
-struct PendingPracticeReviewSnapshot {
+nonisolated struct PendingPracticeReviewSnapshot {
     let id: UUID
 }
 
-struct PendingMatchingRecordSnapshot {
+nonisolated struct PendingMatchingRecordSnapshot {
     let deckID: UUID
     let achievedAt: Date
 }
 
-struct PendingMatchingAttemptSnapshot {
+nonisolated struct PendingMatchingAttemptSnapshot {
     let id: UUID
 }
 
-struct PendingDeckPreferenceSnapshot {
+nonisolated struct PendingDeckPreferenceSnapshot {
     let deckID: UUID
     let updatedAt: Date
 }
 
-struct PendingServerSyncBatch {
+nonisolated struct PendingServerSyncBatch {
     let payload: ServerSyncEventsPayload
     let reviewIDs: [UUID]
     let practiceReviewIDs: [UUID]

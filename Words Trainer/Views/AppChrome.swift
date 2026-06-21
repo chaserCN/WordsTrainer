@@ -8,6 +8,19 @@ func deckSymbol(_ name: String?, fallback: String = "books.vertical.fill") -> St
     return name
 }
 
+/// Screen geometry for offscreen background rasterization, sourced from the active
+/// window scene (UIScreen.main is deprecated in iOS 26). Used by both background
+/// image caches so the scene lookup isn't duplicated.
+@MainActor
+enum ScreenMetrics {
+    static let fallbackScale: CGFloat = 2
+
+    static var activeScene: UIWindowScene? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+    }
+}
+
 /// Dark study background. Static gradient + two blurred orbs — rendered once into
 /// a UIImage and shown as an Image, mirroring LovableBackground. The live version
 /// re-rasterized its big blurs offscreen on every screen appearance, blocking the
@@ -83,19 +96,13 @@ enum AppBackgroundImageCache {
     }
 
     private static var screenSize: CGSize {
-        if let scene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first(where: { $0.activationState == .foregroundActive })
-            ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
-            return scene.screen.bounds.size
-        }
-        return UIScreen.main.bounds.size
+        // No active scene yet (e.g. warmed before a window exists): return .zero so
+        // image() bails and renders later once a scene is available.
+        ScreenMetrics.activeScene?.screen.bounds.size ?? .zero
     }
 
     private static var screenScale: CGFloat {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first?.screen.scale ?? UIScreen.main.scale
+        ScreenMetrics.activeScene?.screen.scale ?? ScreenMetrics.fallbackScale
     }
 }
 
@@ -189,19 +196,13 @@ enum LovableBackgroundImageCache {
     }
 
     private static var screenSize: CGSize {
-        if let scene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first(where: { $0.activationState == .foregroundActive })
-            ?? UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
-            return scene.screen.bounds.size
-        }
-        return UIScreen.main.bounds.size
+        // No active scene yet (e.g. warmed before a window exists): return .zero so
+        // image() bails and renders later once a scene is available.
+        ScreenMetrics.activeScene?.screen.bounds.size ?? .zero
     }
 
     private static var screenScale: CGFloat {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first?.screen.scale ?? UIScreen.main.scale
+        ScreenMetrics.activeScene?.screen.scale ?? ScreenMetrics.fallbackScale
     }
 }
 
