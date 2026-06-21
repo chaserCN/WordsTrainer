@@ -490,10 +490,7 @@ final class DeckStore {
     }
 
     private func uniqueCards(_ cards: [WordCardContent]) -> [WordCardContent] {
-        var seen: Set<UUID> = []
-        return cards.filter { card in
-            seen.insert(card.id).inserted
-        }
+        TodaySnapshotBuilder.uniqueCards(cards)
     }
 
     private func unfocusedCards(for queue: [StudyQueueItem], in decks: [DeckContent]) -> [WordCardContent] {

@@ -27,7 +27,7 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
         case .clozeTyping: L10n.text("Пропуск — ввод")
         case .matching: L10n.text("Колонки")
         case .matchingAudio: L10n.text("Колонки аудио")
-        case .pictureChoice: L10n.text("Картинка → слово")
+        case .pictureChoice: L10n.text("Картинки")
         }
     }
 
