@@ -10,7 +10,7 @@ enum StudyModeToolbarSettingsKind {
 extension StudyMode {
     var usesLightStudyTheme: Bool {
         switch self {
-        case .recall, .flashcards, .clozeMultipleChoice, .matching, .matchingAudio, .pictureChoice:
+        case .recall, .flashcards, .flashcardsReverse, .clozeMultipleChoice, .clozeMultipleChoiceReverse, .matching, .matchingAudio, .pictureChoice:
             true
         case .clozeTyping:
             true
@@ -21,9 +21,9 @@ extension StudyMode {
         switch self {
         case .matching:
             .matching
-        case .flashcards:
+        case .flashcards, .flashcardsReverse:
             .flashcards
-        case .matchingAudio, .clozeMultipleChoice:
+        case .matchingAudio, .clozeMultipleChoice, .clozeMultipleChoiceReverse:
             .sound
         case .recall, .pictureChoice, .clozeTyping:
             .none
@@ -43,11 +43,11 @@ extension StudyMode {
     }
 
     var usesSubmitCooldown: Bool {
-        self == .flashcards
+        isFlashcard
     }
 
     func reviewsActiveCardSenses(flashcardDisplayMode: FlashcardDisplayMode) -> Bool {
-        self == .flashcards && flashcardDisplayMode == .wholeCard
+        isFlashcard && flashcardDisplayMode == .wholeCard
     }
 }
 

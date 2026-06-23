@@ -397,12 +397,16 @@ struct MatchingBackground: View {
                 .init(0, 1), .init(0.5, 1), .init(1, 1),
             ],
             colors: [
-                oklch(0.92, 0.08, 30), oklch(0.93, 0.05, 5), oklch(0.90, 0.10, 350),
-                oklch(0.985, 0.005, 240), oklch(0.985, 0.005, 240), oklch(0.985, 0.005, 240),
-                oklch(0.92, 0.08, 145), oklch(0.92, 0.05, 250), oklch(0.90, 0.09, 250),
+                amb(0.92, 0.08, 30), amb(0.93, 0.05, 5), amb(0.90, 0.10, 350),
+                amb(0.985, 0.005, 240), amb(0.985, 0.005, 240), amb(0.985, 0.005, 240),
+                amb(0.93, 0.05, 215), amb(0.92, 0.06, 235), amb(0.90, 0.09, 250),
             ]
         )
         .ignoresSafeArea()
+    }
+
+    private func amb(_ l: Double, _ c: Double, _ h: Double, _ a: Double = 1) -> Color {
+        oklch(l, c, h + LovableAmbience.hueShift, a)
     }
 }
 

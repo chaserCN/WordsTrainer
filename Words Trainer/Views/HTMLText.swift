@@ -14,13 +14,9 @@ struct HTMLText: View {
             emphasisColor: emphasisColor,
             font: font
         ) {
-            // Жирный/курсив задаём run-атрибутом `.font` (.bold()/.italic()), а НЕ
-            // `inlinePresentationIntent`. SwiftUI недомеряет высоту многострочного
-            // `Text(AttributedString)` с inline-intent — на длинном тексте (6-7 строк)
-            // хвост обрезается в «…», даже с lineLimit(nil)+fixedSize. Font-атрибут
-            // на run меряется корректно. См. docs/card-generation-format.md.
+            // Шрифт задаём только run-атрибутами внутри AttributedString. Внешний
+            // `.font(font)` поверх `Text(styled)` перетирает жирность `<b>`-run'ов.
             Text(styled)
-                .font(font)
                 .multilineTextAlignment(.leading)
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
@@ -87,14 +83,13 @@ struct HTMLText: View {
             var piece = AttributedString(run.text)
             // Emphasis via a run-level `.font` (not inlinePresentationIntent): SwiftUI
             // measures the former correctly but under-measures the latter on long
-            // multiline text, clipping the tail. Only set `.font` on emphasized runs
-            // so plain runs inherit the outer `.font(font)` modifier unchanged.
+            // multiline text, clipping the tail.
+            var f = baseFont
             if run.isBold || run.isItalic {
-                var f = baseFont
                 if run.isBold { f = f.bold() }
                 if run.isItalic { f = f.italic() }
-                piece.font = f
             }
+            piece.font = f
             if run.isBold, let emphasisColor {
                 piece.foregroundColor = emphasisColor
             } else if let foregroundColor {

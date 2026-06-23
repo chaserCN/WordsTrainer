@@ -3,6 +3,11 @@ import SwiftUI
 let studyCardShape = RoundedRectangle(cornerRadius: 24, style: .continuous)
 private let studyActionShape = RoundedRectangle(cornerRadius: 16, style: .continuous)
 
+enum StudyTargetHighlight {
+    static let color = oklch(0.78, 0.16, 155)
+    static let translationColor = oklch(0.52, 0.15, 155)
+}
+
 struct RecallOutcomeButton: View {
     let title: String
     let systemImage: String

@@ -3,6 +3,7 @@ import SwiftUI
 struct FlashcardStudyView: View {
     let card: WordCardContent
     let displayMode: FlashcardDisplayMode
+    let promptMode: FlashcardPromptMode
     let totalCount: Int
     let remainingCount: Int
     let isAnswerEnabled: Bool
@@ -35,12 +36,16 @@ struct FlashcardStudyView: View {
         card.audioWordURL != nil
     }
 
+    private var isWordAudioAvailableNow: Bool {
+        hasWordAudio && (promptMode == .word || isShowingBack)
+    }
+
     private var notesText: String? {
         presentation.notesHTML?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
     }
 
     private var presentation: FlashcardPresentation {
-        FlashcardPresentation(card: card, displayMode: displayMode)
+        FlashcardPresentation(card: card, displayMode: displayMode, promptMode: promptMode)
     }
 
     var body: some View {
@@ -78,7 +83,9 @@ struct FlashcardStudyView: View {
         }
         .task(id: presentation.id) {
             resetForNewCard()
-            WordAudioPlayer.shared.playWord(from: card)
+            if promptMode == .word {
+                WordAudioPlayer.shared.playWord(from: card)
+            }
         }
     }
 
@@ -136,7 +143,7 @@ struct FlashcardStudyView: View {
             }
             .animation(Self.exampleAnimation, value: isShowingExampleExpanded)
 
-            if hasWordAudio {
+            if isWordAudioAvailableNow {
                 Button {
                     WordAudioPlayer.shared.playWord(from: card)
                 } label: {
@@ -370,37 +377,37 @@ struct FlashcardStudyView: View {
                     .frame(width: 10, height: 10)
                     .shadow(color: wordDotColor.opacity(0.7), radius: 5)
                     .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-                Text(presentation.word)
+                Text(isBack ? presentation.backTitle : presentation.frontTitle)
                     .font(.title2.bold())
                     .foregroundStyle(FlashcardPalette.primaryText)
                     .lineLimit(nil)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.trailing, hasWordAudio ? 40 : 0)
+                    .padding(.trailing, isWordAudioAvailableNow ? 40 : 0)
             }
 
             if isBack {
-                Text(presentation.translation)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(FlashcardPalette.primaryText)
-                    .lineLimit(nil)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .layoutPriority(1)
+                bodyText(
+                    presentation.backBody,
+                    isHTML: presentation.backBodyIsHTML,
+                    font: .title3.weight(.semibold),
+                    color: FlashcardPalette.primaryText
+                )
             } else {
-                Text(frontExample)
-                    .lineLimit(nil)
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .layoutPriority(1)
+                bodyText(
+                    presentation.frontBody,
+                    isHTML: presentation.frontBodyIsHTML,
+                    font: .title3.weight(.medium),
+                    color: FlashcardPalette.primaryText
+                )
                 if revealedCardID == presentation.id,
-                   let exampleTranslation = presentation.exampleTranslation?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   let exampleTranslation = presentation.frontRevealedHTML?.trimmingCharacters(in: .whitespacesAndNewlines),
                    !exampleTranslation.isEmpty {
                     HTMLText(
                         html: exampleTranslation,
                         foregroundColor: FlashcardPalette.secondaryText,
-                        font: .body
+                        font: .body,
+                        emphasisColor: StudyTargetHighlight.color
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -409,6 +416,27 @@ struct FlashcardStudyView: View {
             if layout == .fixed && !isBack {
                 Spacer(minLength: 0)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func bodyText(_ value: String, isHTML: Bool, font: Font, color: Color) -> some View {
+        if isHTML {
+            HTMLText(
+                html: value,
+                foregroundColor: color,
+                font: font,
+                emphasisColor: StudyTargetHighlight.color
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
+        } else {
+            Text(attributedBodyText(value, font: font, color: color))
+                .lineLimit(nil)
+                .lineSpacing(4)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
         }
     }
 
@@ -484,21 +512,19 @@ struct FlashcardStudyView: View {
         }
     }
 
-    private var frontExample: AttributedString {
-        exampleSentence(font: .title3.weight(.medium), color: FlashcardPalette.primaryText)
-    }
-
-    private func exampleSentence(font: Font, color: Color) -> AttributedString {
-        let (example, boldRange) = WordCardContent.plainTextWithBoldRange(fromHTMLFragment: presentation.exampleText)
+    private func attributedBodyText(_ source: String, font: Font, color: Color) -> AttributedString {
+        let (example, boldRange) = WordCardContent.plainTextWithBoldRange(fromHTMLFragment: source)
         var attributed = AttributedString(example)
         attributed.font = font
         attributed.foregroundColor = color
 
         if let boldRange, let range = Range(boldRange, in: attributed) {
             attributed[range].font = font.weight(.bold)
+            attributed[range].foregroundColor = StudyTargetHighlight.color
         } else if let stringRange = example.range(of: presentation.answer, options: [.caseInsensitive, .diacriticInsensitive]),
                   let range = Range(stringRange, in: attributed) {
             attributed[range].font = font.weight(.bold)
+            attributed[range].foregroundColor = StudyTargetHighlight.color
         }
         return attributed
     }
@@ -575,41 +601,53 @@ struct FlashcardStudyView: View {
 
 private struct FlashcardPresentation {
     let id: String
-    let word: String
-    let translation: String
-    let exampleText: String
-    let exampleTranslation: String?
+    let frontTitle: String
+    let frontBody: String
+    let frontBodyIsHTML: Bool
+    let frontRevealedHTML: String?
+    let backTitle: String
+    let backBody: String
+    let backBodyIsHTML: Bool
     let notesHTML: String?
     let answer: String
 
-    init(card: WordCardContent, displayMode: FlashcardDisplayMode) {
+    init(card: WordCardContent, displayMode: FlashcardDisplayMode, promptMode: FlashcardPromptMode) {
+        let base = FlashcardBasePresentation(card: card, displayMode: displayMode)
         switch displayMode {
         case .oneSense:
             let sense = card.primarySense
             id = "\(card.id.uuidString):\(sense?.id.uuidString ?? card.id.uuidString):sense"
-            word = sense?.displayPattern ?? card.word
-            translation = sense?.translation ?? card.translation
-            exampleText = card.clozeExamplePlainText
-            exampleTranslation = sense?.clozeExampleTranslation ?? card.clozeExampleTranslation
             notesHTML = Self.joinNotes([
                 Self.etymologyNote(card.etymology),
                 sense?.note,
                 card.cardNotes,
             ])
-            answer = card.effectiveClozeAnswer
         case .wholeCard:
-            let activeSenses = card.activeSenses
-            let exampleSense = card.primarySense ?? activeSenses.first
             id = "\(card.id.uuidString):whole"
-            word = card.baseWord
-            translation = activeSenses.map(\.translation).joined(separator: "; ")
-            exampleText = exampleSense?.exampleText ?? card.clozeExamplePlainText
-            exampleTranslation = exampleSense?.clozeExampleTranslation
             notesHTML = Self.joinNotes([
                 Self.etymologyNote(card.etymology),
                 card.cardNotes,
             ])
-            answer = exampleSense?.clozeAnswer ?? card.effectiveClozeAnswer
+        }
+        answer = base.answer
+
+        switch promptMode {
+        case .word:
+            frontTitle = base.word
+            frontBody = base.exampleText
+            frontBodyIsHTML = false
+            frontRevealedHTML = base.exampleTranslation
+            backTitle = base.word
+            backBody = base.translation
+            backBodyIsHTML = false
+        case .translation:
+            frontTitle = base.translation
+            frontBody = base.exampleTranslation ?? ""
+            frontBodyIsHTML = true
+            frontRevealedHTML = nil
+            backTitle = base.word
+            backBody = base.exampleText
+            backBodyIsHTML = false
         }
     }
 
@@ -628,6 +666,47 @@ private struct FlashcardPresentation {
         }
         guard !notes.isEmpty else { return nil }
         return notes.joined(separator: "<br><br>")
+    }
+}
+
+nonisolated enum FlashcardPromptMode: Sendable {
+    case word
+    case translation
+}
+
+private struct FlashcardBasePresentation {
+    let word: String
+    let translation: String
+    let exampleText: String
+    let exampleTranslation: String?
+    let answer: String
+
+    init(card: WordCardContent, displayMode: FlashcardDisplayMode) {
+        switch displayMode {
+        case .oneSense:
+            let sense = card.primarySense
+            word = sense?.displayPattern ?? card.word
+            translation = sense?.translation ?? card.translation
+            exampleText = card.clozeExamplePlainText
+            exampleTranslation = Self.trimmedNonEmpty(sense?.clozeExampleTranslation ?? card.clozeExampleTranslation)
+                ?? Self.trimmedNonEmpty(card.clozeQuestionTranslation)
+            answer = card.effectiveClozeAnswer
+        case .wholeCard:
+            let activeSenses = card.activeSenses
+            let exampleSense = card.primarySense ?? activeSenses.first
+            word = card.baseWord
+            translation = activeSenses.map(\.translation).joined(separator: "; ")
+            exampleText = exampleSense?.exampleText ?? card.clozeExamplePlainText
+            exampleTranslation = Self.trimmedNonEmpty(exampleSense?.clozeExampleTranslation)
+                ?? Self.trimmedNonEmpty(card.clozeQuestionTranslation)
+            answer = exampleSense?.clozeAnswer ?? card.effectiveClozeAnswer
+        }
+    }
+
+    private static func trimmedNonEmpty(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

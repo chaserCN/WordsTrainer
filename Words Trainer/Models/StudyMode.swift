@@ -3,7 +3,9 @@ import Foundation
 enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case recall
     case flashcards
+    case flashcardsReverse
     case clozeMultipleChoice
+    case clozeMultipleChoiceReverse
     case clozeTyping
     case matching
     case matchingAudio
@@ -13,7 +15,9 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
 
     static let exerciseModes: [StudyMode] = [
         .flashcards,
+        .flashcardsReverse,
         .clozeMultipleChoice,
+        .clozeMultipleChoiceReverse,
         .matching,
         .matchingAudio,
         .pictureChoice,
@@ -23,7 +27,9 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
         switch self {
         case .recall: L10n.text("Оставить / Сбросить")
         case .flashcards: L10n.text("Карточки")
+        case .flashcardsReverse: L10n.text("Карточки наоборот")
         case .clozeMultipleChoice: L10n.text("Предложения")
+        case .clozeMultipleChoiceReverse: L10n.text("Предложения наоборот")
         case .clozeTyping: L10n.text("Пропуск — ввод")
         case .matching: L10n.text("Колонки")
         case .matchingAudio: L10n.text("Колонки аудио")
@@ -44,7 +50,7 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
 
     var recordsStudyReview: Bool {
         switch self {
-        case .flashcards, .clozeMultipleChoice, .clozeTyping, .pictureChoice:
+        case .flashcards, .flashcardsReverse, .clozeMultipleChoice, .clozeMultipleChoiceReverse, .clozeTyping, .pictureChoice:
             true
         case .recall, .matching, .matchingAudio:
             false
@@ -52,7 +58,15 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 
     func usesWholeCardCounters(flashcardDisplayMode: FlashcardDisplayMode) -> Bool {
-        self == .flashcards && flashcardDisplayMode == .wholeCard
+        isFlashcard && flashcardDisplayMode == .wholeCard
+    }
+
+    var isFlashcard: Bool {
+        self == .flashcards || self == .flashcardsReverse
+    }
+
+    var isReversePrompt: Bool {
+        self == .flashcardsReverse || self == .clozeMultipleChoiceReverse
     }
 
     func skipsProgressSave(outcome: ReviewOutcome) -> Bool {

@@ -1472,21 +1472,29 @@ private struct TodayStudyModesView: View {
                     )
                 }
 
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 16) {
                     Text("Упражнения")
                         .font(.system(size: 26, weight: .bold))
                         .foregroundStyle(LovableSurface.foreground)
                         .padding(.top, 28)
 
-                    ForEach(StudyModeMenuItem.exercises) { item in
-                        TodayModeButton(
-                            title: item.title,
-                            subtitle: item.subtitle,
-                            systemImage: item.systemImage,
-                            accent: item.accent,
-                            isEnabled: item.isEnabled(canStart: canStart, hasImagedCards: hasImagedCards)
-                        ) {
-                            start(item.mode)
+                    ForEach(StudyModeMenuItem.sections) { section in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(section.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(LovableSurface.muted)
+
+                            ForEach(section.items) { item in
+                                TodayModeButton(
+                                    title: item.title,
+                                    subtitle: item.subtitle,
+                                    systemImage: item.systemImage,
+                                    accent: item.accent,
+                                    isEnabled: item.isEnabled(canStart: canStart, hasImagedCards: hasImagedCards)
+                                ) {
+                                    start(item.mode)
+                                }
+                            }
                         }
                     }
                 }

@@ -831,7 +831,7 @@ private struct WordSearchPane: View {
         .toolbarBackground(.hidden, for: .navigationBar)
         .overlay {
             if let previewPair {
-                MatchingFlashcardPreviewOverlay(pair: previewPair) {
+                MatchingFlashcardPreviewOverlay(pair: previewPair, scope: .wholeWord) {
                     withAnimation(.easeOut(duration: 0.18)) {
                         self.previewPair = nil
                     }
@@ -1495,18 +1495,26 @@ struct DeckDetailView: View {
                     title: "Упражнения",
                     trailing: AnyView(DeckExerciseScopePicker(selection: $exerciseScope))
                 ) {
-                    ForEach(StudyModeMenuItem.exercises) { item in
-                        StudyActionButton(
-                            title: item.title,
-                            subtitle: item.subtitle(matchingRecordSubtitle: matchingRecordSubtitle),
-                            systemImage: item.systemImage,
-                            accent: item.accent,
-                            isEnabled: item.isEnabled(
-                                canStart: !scopedStudyCards.isEmpty,
-                                hasImagedCards: hasImagedCards
-                            )
-                        ) {
-                            start(item.mode)
+                    ForEach(StudyModeMenuItem.sections) { section in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(section.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(LovableSurface.muted)
+
+                            ForEach(section.items) { item in
+                                StudyActionButton(
+                                    title: item.title,
+                                    subtitle: item.subtitle(matchingRecordSubtitle: matchingRecordSubtitle),
+                                    systemImage: item.systemImage,
+                                    accent: item.accent,
+                                    isEnabled: item.isEnabled(
+                                        canStart: !scopedStudyCards.isEmpty,
+                                        hasImagedCards: hasImagedCards
+                                    )
+                                ) {
+                                    start(item.mode)
+                                }
+                            }
                         }
                     }
                 }

@@ -732,8 +732,16 @@ private struct MatchingStatusBar: View {
     }
 }
 
+/// What the preview overlay shows: a single matched sense (Sentences/Columns/Pictures),
+/// or the whole word with every active sense (Search) — mirroring flashcards' "one card".
+enum FlashcardPreviewScope: Equatable {
+    case sense
+    case wholeWord
+}
+
 struct MatchingFlashcardPreviewOverlay: View {
     let pair: MatchingPair
+    var scope: FlashcardPreviewScope = .sense
     let onClose: () -> Void
 
     @State private var cardFrame: CGRect = .zero
@@ -742,12 +750,37 @@ struct MatchingFlashcardPreviewOverlay: View {
         pair.card
     }
 
+    private var wordText: String {
+        switch scope {
+        case .sense: return card.word
+        case .wholeWord: return card.baseWord
+        }
+    }
+
+    private var translationText: String {
+        switch scope {
+        case .sense:
+            return pair.translation
+        case .wholeWord:
+            return card.activeSenses.map(\.translation).joined(separator: "; ")
+        }
+    }
+
+    /// Sense whose example/translation the overlay shows. In whole-word scope this is the
+    /// primary (or first active) sense, matching flashcards' whole-card example.
+    private var exampleSense: WordSenseContent? {
+        switch scope {
+        case .sense: return pairSense
+        case .wholeWord: return card.primarySense ?? card.activeSenses.first
+        }
+    }
+
     private var exampleTranslation: String? {
-        trimmedNonEmpty(pairSense?.clozeExampleTranslation ?? card.clozeExampleTranslation)
+        trimmedNonEmpty(exampleSense?.clozeExampleTranslation ?? card.clozeExampleTranslation)
     }
 
     private var examplePlainText: String {
-        let text = pairSense?.exampleText ?? card.exampleText
+        let text = exampleSense?.exampleText ?? card.exampleText
         return WordCardContent.plainTextWithBoldRange(fromHTMLFragment: text).text
     }
 
@@ -760,8 +793,11 @@ struct MatchingFlashcardPreviewOverlay: View {
         card.activeSenses.first { $0.id == pair.senseID }
     }
 
+    /// Per-sense note is shown only when previewing a single sense; the whole-word
+    /// scope mirrors flashcards' whole card, which omits per-sense notes.
     private var senseNoteHTML: String? {
-        trimmedNonEmpty(pairSense?.note)
+        guard scope == .sense else { return nil }
+        return trimmedNonEmpty(pairSense?.note)
     }
 
     private var cardNotesHTML: String? {
@@ -845,14 +881,14 @@ struct MatchingFlashcardPreviewOverlay: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(card.word)
+            Text(wordText)
                 .font(.title.bold())
                 .foregroundStyle(.white)
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(pair.translation)
+            Text(translationText)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)
                 .lineLimit(nil)

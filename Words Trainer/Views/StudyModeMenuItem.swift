@@ -19,9 +19,17 @@ struct StudyModeMenuItem: Identifiable {
             subtitle = "Слово, перевод и заметки — переворот по тапу"
             systemImage = "rectangle.on.rectangle.angled"
             accent = .orange
+        case .flashcardsReverse:
+            subtitle = "Перевод и пример — вспомни английское слово"
+            systemImage = "arrow.left.arrow.right.square"
+            accent = .orange
         case .clozeMultipleChoice:
             subtitle = "Выбери слово для примера с пропуском"
             systemImage = "text.quote"
+            accent = .blue
+        case .clozeMultipleChoiceReverse:
+            subtitle = "Русский перевод предложения — выбери английское слово"
+            systemImage = "quote.bubble"
             accent = .blue
         case .matching:
             subtitle = "Соедини слово и перевод"
@@ -50,6 +58,16 @@ struct StudyModeMenuItem: Identifiable {
     }
 
     @MainActor
+    static var sections: [StudyModeMenuSection] {
+        [
+            StudyModeMenuSection(title: L10n.text("Флешкарты"), modes: [.flashcards, .flashcardsReverse]),
+            StudyModeMenuSection(title: L10n.text("Предложения"), modes: [.clozeMultipleChoice, .clozeMultipleChoiceReverse]),
+            StudyModeMenuSection(title: L10n.text("Колонки"), modes: [.matching, .matchingAudio]),
+            StudyModeMenuSection(title: L10n.text("Картинки"), modes: [.pictureChoice]),
+        ]
+    }
+
+    @MainActor
     static var reset: StudyModeMenuItem {
         StudyModeMenuItem(.recall)!
     }
@@ -65,5 +83,18 @@ struct StudyModeMenuItem: Identifiable {
         default:
             subtitle
         }
+    }
+}
+
+struct StudyModeMenuSection: Identifiable {
+    let title: String
+    let items: [StudyModeMenuItem]
+
+    var id: String { title }
+
+    @MainActor
+    init(title: String, modes: [StudyMode]) {
+        self.title = title
+        items = modes.compactMap(StudyModeMenuItem.init)
     }
 }

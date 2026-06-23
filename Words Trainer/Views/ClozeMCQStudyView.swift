@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ClozeMCQStudyView: View {
     let card: WordCardContent
+    let promptMode: ClozePromptMode
     let sessionChoicePool: [WordCardContent]
     let deckChoicePool: [WordCardContent]
     let totalCount: Int
@@ -73,7 +74,8 @@ struct ClozeMCQStudyView: View {
                             HTMLText(
                                 html: translation,
                                 foregroundColor: MatchPalette.foreground,
-                                font: .subheadline
+                                font: .subheadline,
+                                emphasisColor: StudyTargetHighlight.translationColor
                             )
                             .multilineTextAlignment(.center)
                             .frame(maxWidth: .infinity)
@@ -131,7 +133,9 @@ struct ClozeMCQStudyView: View {
 
     private var sentenceCard: some View {
         Group {
-            if let parts = card.clozeSentenceParts {
+            if promptMode == .translation, let translationPromptHTML {
+                ClozeTranslationPromptText(html: translationPromptHTML)
+            } else if let parts = card.clozeSentenceParts {
                 ClozeSentenceText(
                     parts: parts,
                     filledWord: answered && passed ? selected : nil
@@ -232,6 +236,14 @@ struct ClozeMCQStudyView: View {
             .replacingOccurrences(of: "'", with: "&#39;")
     }
 
+    private var translationPromptHTML: String? {
+        guard let questionTranslation = card.clozeQuestionTranslation?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !questionTranslation.isEmpty else {
+            return nil
+        }
+        return questionTranslation
+    }
+
     private func previewPair(for option: String) -> MatchingPair? {
         if optionsMatch(option, card.effectiveClozeAnswer) {
             return MatchingPair(
@@ -266,6 +278,11 @@ struct ClozeMCQStudyView: View {
     }
 }
 
+nonisolated enum ClozePromptMode: Sendable {
+    case cloze
+    case translation
+}
+
 private struct ClozeChoice: Identifiable {
     let id = UUID()
     let text: String
@@ -288,7 +305,7 @@ private let clozeSentenceGradient = LinearGradient(
 /// Цвета текста предложения на тёмной карточке.
 private enum ClozeSentencePalette {
     static let text = Color.white.opacity(0.92)
-    static let filled = oklch(0.78, 0.16, 155)
+    static let filled = StudyTargetHighlight.color
 }
 
 private struct ClozeSentenceText: View {
@@ -326,6 +343,29 @@ private struct ClozeSentenceText: View {
         blanks.font = .title3.weight(.semibold)
         blanks.foregroundColor = ClozeSentencePalette.text
         return blanks
+    }
+}
+
+private struct ClozeTranslationPromptText: View {
+    let html: String
+
+    var body: some View {
+        Text(styledText)
+    }
+
+    private var styledText: AttributedString {
+        let parsed = WordCardContent.plainTextWithBoldRange(fromHTMLFragment: html)
+        var text = AttributedString(parsed.text)
+        text.font = .title3.weight(.medium)
+        text.foregroundColor = ClozeSentencePalette.text
+
+        if let boldRange = parsed.boldRange,
+           let range = Range(boldRange, in: text) {
+            text[range].font = .title3.weight(.bold)
+            text[range].foregroundColor = StudyTargetHighlight.color
+        }
+
+        return text
     }
 }
 

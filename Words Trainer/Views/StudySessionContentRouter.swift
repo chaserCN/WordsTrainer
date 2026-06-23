@@ -45,11 +45,12 @@ struct StudySessionContentRouter<FinishedContent: View>: View {
             ) { outcome in
                 onSubmit(outcome, nil)
             }
-        case .flashcards:
+        case .flashcards, .flashcardsReverse:
             flashcardContent(for: item)
-        case .clozeMultipleChoice:
+        case .clozeMultipleChoice, .clozeMultipleChoiceReverse:
             ClozeMCQStudyView(
                 card: item.card,
+                promptMode: session.mode.isReversePrompt ? .translation : .cloze,
                 sessionChoicePool: session.sessionChoicePool,
                 deckChoicePool: session.deckChoicePool,
                 totalCount: session.sessionChoicePool.count,
@@ -78,6 +79,7 @@ struct StudySessionContentRouter<FinishedContent: View>: View {
         FlashcardStudyView(
             card: item.card,
             displayMode: flashcardDisplayMode,
+            promptMode: session.mode.isReversePrompt ? .translation : .word,
             totalCount: session.displayTotalCount(flashcardDisplayMode: flashcardDisplayMode),
             remainingCount: session.displayRemainingCount(flashcardDisplayMode: flashcardDisplayMode),
             isAnswerEnabled: isFlashcardSubmitEnabled

@@ -7,14 +7,7 @@ import Testing
 struct TodayStudySessionBuilderTests {
     @Test(
         "study mode session policies are centralized",
-        arguments: [
-            StudyMode.recall,
-            .flashcards,
-            .clozeMultipleChoice,
-            .matching,
-            .matchingAudio,
-            .pictureChoice,
-        ]
+        arguments: StudyMode.allCases
     )
     func studyModeSessionPolicies(mode: StudyMode) {
         #expect(mode.savesProgressByDefault == (mode != .pictureChoice))
