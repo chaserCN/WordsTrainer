@@ -68,18 +68,18 @@ struct ClozeMCQStudyView: View {
                     }
                 }
 
-                if answered {
-                    VStack(spacing: 16) {
-                        if let translation = answerTranslationHTML {
-                            HTMLText(
-                                html: translation,
-                                foregroundColor: MatchPalette.foreground,
-                                font: .subheadline,
-                                emphasisColor: StudyTargetHighlight.translationColor
-                            )
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity)
+                VStack(spacing: 16) {
+                    answerTranslation
+                        .frame(maxWidth: .infinity)
+                        .opacity(answered ? 1 : 0)
+
+                    ZStack {
+                        ClozeForgetButton {
+                            revealAnswerAsForgotten()
                         }
+                        .opacity(answered ? 0 : 1)
+                        .disabled(answered)
+                        .accessibilityHidden(answered)
 
                         Button("Дальше") {
                             nextFeedbackTrigger.toggle()
@@ -90,9 +90,12 @@ struct ClozeMCQStudyView: View {
                         .controlSize(.large)
                         .frame(maxWidth: .infinity)
                         .sensoryFeedback(.selection, trigger: nextFeedbackTrigger)
+                        .opacity(answered ? 1 : 0)
+                        .disabled(!answered)
+                        .accessibilityHidden(!answered)
                     }
-                    .padding(.top, 20)
                 }
+                .padding(.top, 20)
 
                 Spacer(minLength: 0)
             }
@@ -120,6 +123,24 @@ struct ClozeMCQStudyView: View {
             }
         }
         .animation(.easeOut(duration: 0.18), value: previewPair?.id)
+    }
+
+    @ViewBuilder
+    private var answerTranslation: some View {
+        if let translation = answerTranslationHTML {
+            HTMLText(
+                html: translation,
+                foregroundColor: MatchPalette.foreground,
+                font: .subheadline,
+                emphasisColor: StudyTargetHighlight.translationColor
+            )
+            .multilineTextAlignment(.center)
+            .frame(minHeight: 22)
+        } else {
+            Text(" ")
+                .font(.subheadline)
+                .frame(minHeight: 22)
+        }
     }
 
     private var answerTranslationHTML: String? {
@@ -193,6 +214,14 @@ struct ClozeMCQStudyView: View {
             shakeCount += 1
         } else {
             WordAudioPlayer.shared.playClozeAnswer(from: card)
+        }
+    }
+
+    private func revealAnswerAsForgotten() {
+        guard !answered else { return }
+        selected = nil
+        withAnimation(.easeInOut(duration: 0.28)) {
+            answered = true
         }
     }
 
@@ -448,5 +477,46 @@ private struct ClozeChoiceButton: View {
         if isCorrect { return (MatchPalette.success.opacity(0.32), 10, 4) }
         if isWrong { return (MatchPalette.destructive.opacity(0.28), 8, 5) }
         return (MatchPalette.shadow.opacity(0.12), 6, 4)
+    }
+}
+
+private struct ClozeForgetButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            action()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .heavy))
+                    .foregroundStyle(MatchPalette.destructive)
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(MatchPalette.destructive.opacity(0.14)))
+
+                Text(L10n.text("Не помню"))
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(MatchPalette.destructive)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(clozeCardShape.fill(cardFill))
+            .overlay(clozeCardShape.strokeBorder(MatchPalette.shadow.opacity(0.10), lineWidth: 0.5))
+            .compositingGroup()
+            .shadow(color: MatchPalette.shadow.opacity(0.12), radius: 6, x: 0, y: 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var cardFill: LinearGradient {
+        LinearGradient(
+            colors: [.white, oklch(0.995, 0.003, 250)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 }

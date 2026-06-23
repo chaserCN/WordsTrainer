@@ -116,20 +116,35 @@ struct PictureChoiceStudyView: View {
                 .frame(maxWidth: .infinity)
                 .opacity(effectiveAnswered ? 1 : 0)
 
-            // Always reserve the Next button's space so answering doesn't push
-            // the grid and image upward; only the button's visibility changes.
-            Button(L10n.text("Дальше")) {
-                nextFeedbackTrigger.toggle()
-                advance()
+            // Reserve one action slot so revealing an answer doesn't push the
+            // grid and image upward; only the visible button changes.
+            ZStack {
+                CompactRecallOutcomeButton(
+                    title: "Не помню",
+                    systemImage: "xmark",
+                    titleColor: MatchPalette.destructive,
+                    iconColor: MatchPalette.destructive,
+                    iconBackground: MatchPalette.destructive.opacity(0.14)
+                ) {
+                    revealAnswerAsForgotten()
+                }
+                .opacity(effectiveAnswered ? 0 : 1)
+                .disabled(effectiveAnswered)
+                .accessibilityHidden(effectiveAnswered)
+
+                Button(L10n.text("Дальше")) {
+                    nextFeedbackTrigger.toggle()
+                    advance()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(MatchPalette.primary)
+                .controlSize(.large)
+                .frame(maxWidth: .infinity)
+                .sensoryFeedback(.selection, trigger: nextFeedbackTrigger)
+                .opacity(effectiveAnswered ? 1 : 0)
+                .disabled(!effectiveAnswered)
+                .accessibilityHidden(!effectiveAnswered)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(MatchPalette.primary)
-            .controlSize(.large)
-            .frame(maxWidth: .infinity)
-            .sensoryFeedback(.selection, trigger: nextFeedbackTrigger)
-            .opacity(effectiveAnswered ? 1 : 0)
-            .disabled(!effectiveAnswered)
-            .accessibilityHidden(!effectiveAnswered)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.horizontal, 16)
@@ -165,6 +180,11 @@ struct PictureChoiceStudyView: View {
                 font: .subheadline
             )
             .multilineTextAlignment(.center)
+            .frame(minHeight: 22)
+        } else {
+            Text(" ")
+                .font(.subheadline)
+                .frame(minHeight: 22)
         }
     }
 
@@ -198,6 +218,14 @@ struct PictureChoiceStudyView: View {
         // Play audio only on a correct answer; a wrong pick stays silent.
         if choice.optionID == correctOptionID {
             WordAudioPlayer.shared.playWord(from: card)
+        }
+    }
+
+    private func revealAnswerAsForgotten() {
+        guard !effectiveAnswered else { return }
+        selected = nil
+        withAnimation(.easeInOut(duration: 0.28)) {
+            answered = true
         }
     }
 

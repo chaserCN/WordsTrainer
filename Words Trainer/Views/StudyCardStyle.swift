@@ -55,6 +55,53 @@ struct RecallOutcomeButton: View {
     }
 }
 
+struct CompactRecallOutcomeButton: View {
+    let title: String
+    let systemImage: String
+    let titleColor: Color
+    let iconColor: Color
+    let iconBackground: Color
+    var verticalPadding: CGFloat = 10
+    var horizontalPadding: CGFloat = 22
+    let action: () -> Void
+    @State private var feedbackTrigger = false
+
+    var body: some View {
+        Button {
+            feedbackTrigger.toggle()
+            action()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .heavy))
+                    .foregroundStyle(iconColor)
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(iconBackground))
+
+                Text(L10n.text(title))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(titleColor)
+            }
+            .padding(.vertical, verticalPadding)
+            .padding(.horizontal, horizontalPadding)
+            .background(studyActionShape.fill(cardFill))
+            .overlay(studyActionShape.strokeBorder(.white.opacity(0.7), lineWidth: 0.5))
+            .compositingGroup()
+            .shadow(color: MatchPalette.shadow.opacity(0.12), radius: 10, x: 0, y: 6)
+        }
+        .buttonStyle(.plain)
+        .sensoryFeedback(.selection, trigger: feedbackTrigger)
+    }
+
+    private var cardFill: LinearGradient {
+        LinearGradient(
+            colors: [.white, oklch(0.995, 0.003, 250)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+}
+
 struct ReviewOutcomeControls: View {
     var forgotTitle = "Сбросить"
     var rememberedTitle = "Оставить"
