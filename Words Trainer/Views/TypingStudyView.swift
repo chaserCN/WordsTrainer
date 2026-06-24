@@ -153,8 +153,9 @@ struct TypingStudyView: View {
     }
 
     private var answerSlots: some View {
-        Text(slotsAttributedString)
-            .font(.system(size: slotMetrics.fontSize, weight: .semibold, design: .monospaced))
+        let metrics = slotMetrics
+        return Text(slotsAttributedString(fontSize: metrics.fontSize, lineCount: metrics.lineCount))
+            .font(.system(size: metrics.fontSize, weight: .semibold, design: .monospaced))
             .multilineTextAlignment(.center)
             .lineLimit(slotMetrics.lineCount)
             // Страховка: если оценка ширины чуть промахнулась, буквы ужимаются,
@@ -270,36 +271,74 @@ struct TypingStudyView: View {
     /// Внутри слова слоты соединяются неразрывным пробелом, на границе слов —
     /// обычным, чтобы при переносе строка рвалась только между словами, а не
     /// посередине слова.
-    private var slotsAttributedString: AttributedString {
-        var result = AttributedString()
+    /// Строка слотов с ЖЁСТКИМ переносом, посчитанным заранее.
+    ///
+    /// Раньше переносом управлял системный word-wrap: при каждом наборе буквы
+    /// ширина строки чуть менялась, и движок выбирал то одну границу слов, то
+    /// другую — раскладка прыгала. Здесь все пробелы делаем неразрывными, а
+    /// перенос на 2-ю строку вставляем сами (`\n`) в детерминированной точке,
+    /// не зависящей от введённого текста. Поэтому раскладка стабильна.
+    private func slotsAttributedString(fontSize: CGFloat, lineCount: Int) -> AttributedString {
+        // Зазор между прочерками — обычный пробел моноширинного шрифта, который во
+        // весь кегль выглядит слишком широким. Поджимаем его отрицательным кернингом
+        // примерно вдвое.
+        let spacerKern = -fontSize * 0.3
         let slots = answer.slots(for: input)
-        var previous: TypingAnswer.Slot?
+        let words = TypingSlotLayout.wordRanges(isSeparator: slots.map(\.isSeparator))
+        let breakAfterWord = lineCount >= 2
+            ? TypingSlotLayout.balancedBreakIndex(wordSlotCounts: words.map(\.count))
+            : nil
 
-        for slot in slots {
-            if let previous {
-                let breakable = previous.isSeparator || slot.isSeparator
-                result.append(plainRun(breakable ? " " : "\u{00A0}"))
+        var result = AttributedString()
+        for (wordIndex, word) in words.enumerated() {
+            if wordIndex > 0 {
+                // Перенос строки строго после посчитанного слова; иначе —
+                // неразрывный пробел, чтобы система не переносила сама.
+                if breakAfterWord == wordIndex - 1 {
+                    result.append(plainRun("\n"))
+                } else {
+                    result.append(spacerRun("\u{00A0}", kern: spacerKern))
+                }
             }
-            switch slot {
-            case let .fixed(text), let .typed(text):
-                result.append(coloredRun(text, slotColor))
-            case .current:
-                // Подсвечиваем ближайший слот для ввода только до ответа.
-                result.append(coloredRun("_", answered ? slotColor : MatchPalette.primary))
-            case .pending:
-                result.append(coloredRun("_", slotColor))
-            case .separator:
-                result.append(coloredRun("_", typingSeparatorColor))
+            // Хвостовой разделитель слова, после которого идёт перенос, в конце
+            // строки не рисуем — прочерк-пробел у самого края не нужен.
+            let dropsTrailingSeparator = breakAfterWord == wordIndex && slots[word.upperBound - 1].isSeparator
+            let visible = dropsTrailingSeparator ? word.dropLast() : word
+            for (offset, slotIndex) in visible.enumerated() {
+                if offset > 0 {
+                    result.append(spacerRun("\u{00A0}", kern: spacerKern))
+                }
+                result.append(runForSlot(slots[slotIndex]))
             }
-            previous = slot
         }
 
         return result
     }
 
+    private func runForSlot(_ slot: TypingAnswer.Slot) -> AttributedString {
+        switch slot {
+        case let .fixed(text), let .typed(text):
+            return coloredRun(text, slotColor)
+        case .current:
+            // Подсвечиваем ближайший слот для ввода только до ответа.
+            return coloredRun("_", answered ? slotColor : MatchPalette.primary)
+        case .pending:
+            return coloredRun("_", slotColor)
+        case .separator:
+            return coloredRun("_", typingSeparatorColor)
+        }
+    }
+
+
     private func coloredRun(_ string: String, _ color: Color) -> AttributedString {
         var run = AttributedString(string)
         run.foregroundColor = color
+        return run
+    }
+
+    private func spacerRun(_ string: String, kern: CGFloat) -> AttributedString {
+        var run = AttributedString(string)
+        run.kern = kern
         return run
     }
 

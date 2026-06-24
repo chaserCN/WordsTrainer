@@ -59,6 +59,7 @@ let package = Package(
                 "SRS/StudySession.swift",
                 "SRS/StudySessionFactory.swift",
                 "SRS/TodayStudySessionBuilder.swift",
+                "SRS/TypingSlotLayout.swift",
             ]
         ),
         .testTarget(
