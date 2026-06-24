@@ -199,7 +199,12 @@ extension StudyMode {
     }
 
     func preparedScheduledQueue(_ items: [StudyQueueItem]) -> [StudyQueueItem] {
-        filteredQueue(items)
+        let queue = filteredQueue(items)
+        // The scheduled "today deck" queue emits a card's new senses as a block
+        // (see StudyQueueBuilder.build), so without this they appear back-to-back.
+        // Shuffle for the same modes as the deck/practice queues to spread them
+        // out; ordering within a session is irrelevant to FSRS scheduling.
+        return shouldShuffleDeckQueue ? queue.shuffled() : queue
     }
 
     func preparedPracticeQueue(_ items: [StudyQueueItem]) -> [StudyQueueItem] {

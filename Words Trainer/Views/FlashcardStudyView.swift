@@ -23,6 +23,7 @@ struct FlashcardStudyView: View {
     @State private var isFlipAnimating = false
     @State private var flipGeneration = 0
     @State private var renderedCardID: String?
+    @State private var didAutoPlayReverseAudio = false
 
     private static let cardHeightFraction: CGFloat = 0.34
     private static let verticalGap: CGFloat = 16
@@ -534,9 +535,12 @@ struct FlashcardStudyView: View {
         FrameHitchMonitor.shared.mark("card flip")
         renderedCardID = presentation.id
 
+        let willShowBack = !isFlipped
+
         if reduceMotion {
             isFlipped.toggle()
             revealedCardID = presentation.id
+            playWordAudioIfRevealing(back: willShowBack)
             return
         }
 
@@ -563,6 +567,8 @@ struct FlashcardStudyView: View {
                 revealedCardID = presentation.id
             }
 
+            playWordAudioIfRevealing(back: targetIsBack)
+
             withAnimation(.easeOut(duration: Self.flipHalfDuration)) {
                 cardRotation = 0
             }
@@ -572,6 +578,17 @@ struct FlashcardStudyView: View {
                 isFlipAnimating = false
             }
         }
+    }
+
+    /// In reverse mode the English word lives on the back, so play its audio once
+    /// the first time the flip reveals it — not on every subsequent flip back. (In
+    /// forward mode the word is on the front and is already spoken on appear, so
+    /// flipping to the translation stays silent.)
+    private func playWordAudioIfRevealing(back: Bool) {
+        guard back, promptMode == .translation else { return }
+        guard !didAutoPlayReverseAudio else { return }
+        didAutoPlayReverseAudio = true
+        WordAudioPlayer.shared.playWord(from: card)
     }
 
     private func answer(_ outcome: ReviewOutcome) {
@@ -596,6 +613,7 @@ struct FlashcardStudyView: View {
         expandedCardContentHeight = 0
         cardRotation = 0
         isFlipAnimating = false
+        didAutoPlayReverseAudio = false
     }
 }
 

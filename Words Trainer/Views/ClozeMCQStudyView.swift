@@ -127,7 +127,15 @@ struct ClozeMCQStudyView: View {
 
     @ViewBuilder
     private var answerTranslation: some View {
-        if let translation = answerTranslationHTML {
+        // In reverse mode the sentence card already shows the Russian prompt, so the
+        // helper line below must reveal the English sentence with the answer filled in
+        // (mirrors the normal mode, where the card is English and this line is Russian).
+        if promptMode == .translation, let parts = card.clozeSentenceParts {
+            ClozeAnswerSentenceText(parts: parts, answer: card.effectiveClozeAnswer)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 22)
+        } else if let translation = answerTranslationHTML {
             HTMLText(
                 html: translation,
                 foregroundColor: MatchPalette.foreground,
@@ -372,6 +380,35 @@ private struct ClozeSentenceText: View {
         blanks.font = .title3.weight(.semibold)
         blanks.foregroundColor = ClozeSentencePalette.text
         return blanks
+    }
+}
+
+/// The English example sentence with the correct answer filled in and highlighted,
+/// shown in the helper line beneath the choices in reverse ("наоборот") mode.
+private struct ClozeAnswerSentenceText: View {
+    let parts: ClozeSentenceParts
+    let answer: String
+
+    var body: some View {
+        Text(styledSentence)
+    }
+
+    private var styledSentence: AttributedString {
+        var sentence = AttributedString(parts.prefix)
+        sentence.font = .subheadline
+        sentence.foregroundColor = MatchPalette.foreground
+
+        var word = AttributedString(answer)
+        word.font = .subheadline.weight(.bold)
+        word.foregroundColor = StudyTargetHighlight.translationColor
+        sentence.append(word)
+
+        var suffix = AttributedString(parts.suffix)
+        suffix.font = .subheadline
+        suffix.foregroundColor = MatchPalette.foreground
+        sentence.append(suffix)
+
+        return sentence
     }
 }
 
