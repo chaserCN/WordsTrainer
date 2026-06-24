@@ -10,9 +10,7 @@ enum StudyModeToolbarSettingsKind {
 extension StudyMode {
     var usesLightStudyTheme: Bool {
         switch self {
-        case .recall, .flashcards, .flashcardsReverse, .clozeMultipleChoice, .clozeMultipleChoiceReverse, .matching, .matchingAudio, .pictureChoice:
-            true
-        case .clozeTyping:
+        case .recall, .flashcards, .flashcardsReverse, .clozeMultipleChoice, .clozeMultipleChoiceReverse, .clozeTyping, .translationTyping, .matching, .matchingAudio, .pictureChoice:
             true
         }
     }
@@ -25,7 +23,7 @@ extension StudyMode {
             .flashcards
         case .matchingAudio, .clozeMultipleChoice, .clozeMultipleChoiceReverse:
             .sound
-        case .recall, .pictureChoice, .clozeTyping:
+        case .recall, .pictureChoice, .clozeTyping, .translationTyping:
             .none
         }
     }

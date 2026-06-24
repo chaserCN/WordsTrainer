@@ -218,11 +218,11 @@ extension StudyMode {
     }
 
     private var shouldShufflePracticeQueue: Bool {
-        isMatching || self == .recall || self == .clozeMultipleChoice || self == .clozeMultipleChoiceReverse || self == .pictureChoice
+        isMatching || self == .recall || self == .clozeMultipleChoice || self == .clozeMultipleChoiceReverse || self == .clozeTyping || self == .translationTyping || self == .pictureChoice
     }
 
     private var shouldShuffleDeckQueue: Bool {
-        self == .recall || self == .clozeMultipleChoice || self == .clozeMultipleChoiceReverse || self == .pictureChoice
+        self == .recall || self == .clozeMultipleChoice || self == .clozeMultipleChoiceReverse || self == .clozeTyping || self == .translationTyping || self == .pictureChoice
     }
 }
 

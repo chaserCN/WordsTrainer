@@ -58,6 +58,15 @@ struct StudySessionContentRouter<FinishedContent: View>: View {
             ) { outcome, additionalFailureSenseID in
                 onSubmit(outcome, additionalFailureSenseID)
             }
+        case .clozeTyping, .translationTyping:
+            TypingStudyView(
+                card: item.card,
+                promptMode: session.mode == .translationTyping ? .translationExample : .clozeSentence,
+                totalCount: session.sessionChoicePool.count,
+                remainingCount: session.remainingCount
+            ) { outcome in
+                onSubmit(outcome, nil)
+            }
         case .pictureChoice:
             PictureChoiceStudyView(
                 card: item.card,
@@ -70,8 +79,6 @@ struct StudySessionContentRouter<FinishedContent: View>: View {
             }
         case .matching, .matchingAudio:
             EmptyView()
-        case .clozeTyping:
-            UnsupportedStudyModeView(mode: session.mode, close: onCloseUnsupportedMode)
         }
     }
 

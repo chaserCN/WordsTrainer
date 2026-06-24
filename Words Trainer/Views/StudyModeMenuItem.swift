@@ -43,12 +43,18 @@ struct StudyModeMenuItem: Identifiable {
             subtitle = "Смотри картинку — выбери слово"
             systemImage = "photo"
             accent = .pink
+        case .clozeTyping:
+            subtitle = "Впиши слово в пропуск по буквам"
+            systemImage = "keyboard"
+            accent = .indigo
+        case .translationTyping:
+            subtitle = "Смотри перевод и пример — напиши английское слово"
+            systemImage = "pencil"
+            accent = .indigo
         case .recall:
             subtitle = "Покажи слово и реши: оставить прогресс или начать заново"
             systemImage = "eye.fill"
             accent = .purple
-        case .clozeTyping:
-            return nil
         }
     }
 
@@ -62,6 +68,7 @@ struct StudyModeMenuItem: Identifiable {
         [
             StudyModeMenuSection(title: L10n.text("Флешкарты"), modes: [.flashcards, .flashcardsReverse]),
             StudyModeMenuSection(title: L10n.text("Предложения"), modes: [.clozeMultipleChoice, .clozeMultipleChoiceReverse]),
+            StudyModeMenuSection(title: L10n.text("Письмо"), modes: [.clozeTyping, .translationTyping]),
             StudyModeMenuSection(title: L10n.text("Колонки"), modes: [.matching, .matchingAudio]),
             StudyModeMenuSection(title: L10n.text("Картинки"), modes: [.pictureChoice]),
         ]

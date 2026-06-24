@@ -1077,7 +1077,7 @@ nonisolated final class ContentDatabase {
         )
         SELECT
             COALESCE(SUM(CASE WHEN mode = ? THEN duration_ms ELSE 0 END), 0),
-            COALESCE(SUM(CASE WHEN mode IN (?, ?) THEN duration_ms ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN mode IN (?, ?, ?) THEN duration_ms ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN mode = ? THEN duration_ms ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN mode IN (?, ?) THEN duration_ms ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN mode = ? THEN duration_ms ELSE 0 END), 0)
@@ -1103,10 +1103,11 @@ nonisolated final class ContentDatabase {
         try bind(statement, index: 7, text: StudyMode.flashcards.rawValue)
         try bind(statement, index: 8, text: StudyMode.clozeMultipleChoice.rawValue)
         try bind(statement, index: 9, text: StudyMode.clozeTyping.rawValue)
-        try bind(statement, index: 10, text: StudyMode.matching.rawValue)
-        try bind(statement, index: 11, text: StudyMode.matchingAudio.rawValue)
-        try bind(statement, index: 12, text: "matching_audio")
-        try bind(statement, index: 13, text: StudyMode.pictureChoice.rawValue)
+        try bind(statement, index: 10, text: StudyMode.translationTyping.rawValue)
+        try bind(statement, index: 11, text: StudyMode.matching.rawValue)
+        try bind(statement, index: 12, text: StudyMode.matchingAudio.rawValue)
+        try bind(statement, index: 13, text: "matching_audio")
+        try bind(statement, index: 14, text: StudyMode.pictureChoice.rawValue)
 
         guard sqlite3_step(statement) == SQLITE_ROW else { return .zero }
         return StudyTimeBreakdown(
@@ -2649,6 +2650,8 @@ nonisolated final class ContentDatabase {
             StudyMode.clozeMultipleChoice.rawValue
         case "cloze_typing":
             StudyMode.clozeTyping.rawValue
+        case "translation_typing":
+            StudyMode.translationTyping.rawValue
         case "matching_audio":
             StudyMode.matchingAudio.rawValue
         case "picture_choice":

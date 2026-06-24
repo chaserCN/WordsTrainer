@@ -7,6 +7,7 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case clozeMultipleChoice
     case clozeMultipleChoiceReverse
     case clozeTyping
+    case translationTyping
     case matching
     case matchingAudio
     case pictureChoice
@@ -18,6 +19,8 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
         .flashcardsReverse,
         .clozeMultipleChoice,
         .clozeMultipleChoiceReverse,
+        .clozeTyping,
+        .translationTyping,
         .matching,
         .matchingAudio,
         .pictureChoice,
@@ -30,7 +33,8 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
         case .flashcardsReverse: L10n.text("Карточки наоборот")
         case .clozeMultipleChoice: L10n.text("Предложения")
         case .clozeMultipleChoiceReverse: L10n.text("Предложения наоборот")
-        case .clozeTyping: L10n.text("Пропуск — ввод")
+        case .clozeTyping: L10n.text("Письмо: предложения")
+        case .translationTyping: L10n.text("Письмо: слова")
         case .matching: L10n.text("Колонки")
         case .matchingAudio: L10n.text("Колонки аудио")
         case .pictureChoice: L10n.text("Картинки")
@@ -50,7 +54,7 @@ enum StudyMode: String, Codable, CaseIterable, Identifiable, Sendable {
 
     var recordsStudyReview: Bool {
         switch self {
-        case .flashcards, .flashcardsReverse, .clozeMultipleChoice, .clozeMultipleChoiceReverse, .clozeTyping, .pictureChoice:
+        case .flashcards, .flashcardsReverse, .clozeMultipleChoice, .clozeMultipleChoiceReverse, .clozeTyping, .translationTyping, .pictureChoice:
             true
         case .recall, .matching, .matchingAudio:
             false
