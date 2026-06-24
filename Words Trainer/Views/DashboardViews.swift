@@ -810,10 +810,16 @@ private struct SyncProgressIndicator: View {
 
 private struct StatisticsHeader: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .center, spacing: 14) {
             Text("Статистика")
                 .font(.system(size: 40, weight: .bold))
                 .foregroundStyle(LovableSurface.foreground)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+
+            Spacer(minLength: 12)
+
+            MainSettingsButton()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

@@ -116,8 +116,6 @@ struct StudySessionView: View {
             MatchingSettingsMenu()
         case .flashcards:
             FlashcardSettingsMenu()
-        case .sound:
-            SoundToggleButton()
         case .none:
             EmptyView()
         }

@@ -75,43 +75,32 @@ final class AppSettings {
     }
 }
 
-/// Кнопка настройки громкости в тулбаре.
-struct SoundToggleButton: View {
-    @Environment(AppSettings.self) private var settings
-    @State private var isShowingVolume = false
-    let showsFlashcardMode: Bool
-
-    init(showsFlashcardMode: Bool = false) {
-        self.showsFlashcardMode = showsFlashcardMode
-    }
+/// Шестерёнка настроек на главном окне (слева от синхронизации). Пока только
+/// громкость звука; единая точка входа в настройки приложения.
+struct MainSettingsButton: View {
+    @State private var isShowingSettings = false
 
     var body: some View {
         Button {
-            isShowingVolume.toggle()
+            isShowingSettings.toggle()
         } label: {
-            Image(systemName: soundIcon)
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(LovableSurface.foreground)
+                .frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay {
+                    Circle().stroke(.white.opacity(0.58), lineWidth: 0.8)
+                }
+                .shadow(color: oklch(0.18, 0.05, 260, 0.12), radius: 12, x: 0, y: 6)
+                .contentShape(Circle())
         }
-        .accessibilityLabel("Громкость")
-        .accessibilityValue(volumeAccessibilityValue)
-        .popover(isPresented: $isShowingVolume) {
-            SoundSettingsPopover(showsFlashcardMode: showsFlashcardMode)
+        .buttonStyle(.plain)
+        .accessibilityLabel(L10n.text("Настройки"))
+        .popover(isPresented: $isShowingSettings) {
+            SoundSettingsPopover()
                 .presentationCompactAdaptation(.popover)
         }
-    }
-
-    private var soundIcon: String {
-        switch settings.soundVolume {
-        case 0:
-            return "speaker.slash.fill"
-        case ..<0.45:
-            return "speaker.wave.1.fill"
-        default:
-            return "speaker.wave.2.fill"
-        }
-    }
-
-    private var volumeAccessibilityValue: String {
-        "\(Int((settings.soundVolume * 100).rounded()))%"
     }
 }
 
@@ -128,13 +117,13 @@ struct MatchingSettingsMenu: View {
         }
         .accessibilityLabel("Настройки")
         .popover(isPresented: $isShowingSettings) {
-            SoundSettingsPopover(showsPaceBarToggle: true)
+            SoundSettingsPopover(showsSound: false, showsPaceBarToggle: true)
                 .presentationCompactAdaptation(.popover)
         }
     }
 }
 
-/// Меню-шестерёнка в тулбаре flashcards: звук и способ показа senses.
+/// Меню-шестерёнка в тулбаре flashcards: способ показа senses.
 struct FlashcardSettingsMenu: View {
     @State private var isShowingSettings = false
 
@@ -146,7 +135,7 @@ struct FlashcardSettingsMenu: View {
         }
         .accessibilityLabel("Настройки")
         .popover(isPresented: $isShowingSettings) {
-            SoundSettingsPopover(showsFlashcardMode: true)
+            SoundSettingsPopover(showsSound: false, showsFlashcardMode: true)
                 .presentationCompactAdaptation(.popover)
         }
     }
@@ -154,10 +143,12 @@ struct FlashcardSettingsMenu: View {
 
 private struct SoundSettingsPopover: View {
     @Environment(AppSettings.self) private var settings
+    let showsSound: Bool
     let showsPaceBarToggle: Bool
     let showsFlashcardMode: Bool
 
-    init(showsPaceBarToggle: Bool = false, showsFlashcardMode: Bool = false) {
+    init(showsSound: Bool = true, showsPaceBarToggle: Bool = false, showsFlashcardMode: Bool = false) {
+        self.showsSound = showsSound
         self.showsPaceBarToggle = showsPaceBarToggle
         self.showsFlashcardMode = showsFlashcardMode
     }
@@ -165,29 +156,31 @@ private struct SoundSettingsPopover: View {
     var body: some View {
         @Bindable var settings = settings
         VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
-                    Image(systemName: settings.isSoundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                        .frame(width: 24)
-                    Text("Громкость")
-                        .font(.headline)
-                    Spacer()
-                    Text("\(Int((settings.soundVolume * 100).rounded()))%")
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
+            if showsSound {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Image(systemName: settings.isSoundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                            .frame(width: 24)
+                        Text("Громкость")
+                            .font(.headline)
+                        Spacer()
+                        Text("\(Int((settings.soundVolume * 100).rounded()))%")
+                            .font(.subheadline.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
 
-                Slider(value: $settings.soundVolume, in: 0...1) {
-                    Text("Громкость")
-                } minimumValueLabel: {
-                    Image(systemName: "speaker.slash.fill")
-                } maximumValueLabel: {
-                    Image(systemName: "speaker.wave.2.fill")
+                    Slider(value: $settings.soundVolume, in: 0...1) {
+                        Text("Громкость")
+                    } minimumValueLabel: {
+                        Image(systemName: "speaker.slash.fill")
+                    } maximumValueLabel: {
+                        Image(systemName: "speaker.wave.2.fill")
+                    }
                 }
             }
 
             if showsFlashcardMode {
-                Divider()
+                if showsSound { Divider() }
                 VStack(alignment: .leading, spacing: 10) {
                     Label(L10n.text("Значения"), systemImage: "rectangle.stack.fill")
                         .font(.headline)
@@ -200,7 +193,7 @@ private struct SoundSettingsPopover: View {
             }
 
             if showsPaceBarToggle {
-                Divider()
+                if showsSound || showsFlashcardMode { Divider() }
                 Toggle(isOn: $settings.isPaceBarEnabled) {
                     Label("Шкала рекорда", systemImage: "trophy.fill")
                 }
@@ -212,13 +205,10 @@ private struct SoundSettingsPopover: View {
     }
 
     private var popoverHeight: CGFloat {
-        switch (showsPaceBarToggle, showsFlashcardMode) {
-        case (true, true):
-            return 280
-        case (true, false), (false, true):
-            return 220
-        case (false, false):
-            return 170
-        }
+        var height: CGFloat = 40 // вертикальные отступы контейнера
+        if showsSound { height += 90 }
+        if showsFlashcardMode { height += 80 }
+        if showsPaceBarToggle { height += 50 }
+        return max(height, 110)
     }
 }

@@ -2,7 +2,6 @@ import SwiftUI
 
 enum StudyModeToolbarSettingsKind {
     case none
-    case sound
     case flashcards
     case matching
 }
@@ -21,9 +20,8 @@ extension StudyMode {
             .matching
         case .flashcards, .flashcardsReverse:
             .flashcards
-        case .matchingAudio, .clozeMultipleChoice, .clozeMultipleChoiceReverse:
-            .sound
-        case .recall, .pictureChoice, .clozeTyping, .translationTyping:
+        case .recall, .pictureChoice, .clozeTyping, .translationTyping,
+             .matchingAudio, .clozeMultipleChoice, .clozeMultipleChoiceReverse:
             .none
         }
     }
