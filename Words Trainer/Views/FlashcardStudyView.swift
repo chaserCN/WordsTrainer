@@ -705,7 +705,11 @@ private struct FlashcardBasePresentation {
             let sense = card.primarySense
             word = sense?.displayPattern ?? card.word
             translation = sense?.translation ?? card.translation
-            exampleText = card.clozeExamplePlainText
+            // Keep the raw example with its <b>…</b> so the deck's own highlight
+            // range survives (e.g. <b>beads</b>). Stripping to plain text here
+            // dropped it, and the fallback then bolded only the bare answer
+            // ("bead"), leaving the plural "s" un-highlighted.
+            exampleText = sense?.exampleText ?? card.clozeExamplePlainText
             exampleTranslation = Self.trimmedNonEmpty(sense?.clozeExampleTranslation ?? card.clozeExampleTranslation)
                 ?? Self.trimmedNonEmpty(card.clozeQuestionTranslation)
             answer = card.effectiveClozeAnswer

@@ -391,6 +391,10 @@ private struct ClozeAnswerSentenceText: View {
 
     var body: some View {
         Text(styledSentence)
+            // Без этого Text в зажатом по высоте VStack обрезается в одну строку
+            // с многоточием вместо переноса — даём ему расти по вертикали.
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var styledSentence: AttributedString {
