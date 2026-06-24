@@ -18,6 +18,7 @@ struct TypingStudyView: View {
     @State private var passed = false
     @State private var shakeCount: CGFloat = 0
     @State private var nextFeedbackTrigger = false
+    @State private var previewPair: MatchingPair?
     @FocusState private var isInputFocused: Bool
 
     private var roundID: UUID {
@@ -78,6 +79,27 @@ struct TypingStudyView: View {
         .onChange(of: input) { _, newValue in
             sanitizeAndCheck(newValue)
         }
+        .overlay {
+            if let previewPair {
+                MatchingFlashcardPreviewOverlay(pair: previewPair) {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        self.previewPair = nil
+                    }
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: previewPair?.id)
+    }
+
+    /// Карточка слова для overlay по долгому тапу (как в режиме «Предложения»).
+    private var previewPairForCard: MatchingPair {
+        MatchingPair(
+            cardID: card.id,
+            senseID: card.primarySenseID ?? card.id,
+            card: card,
+            translation: card.translation
+        )
     }
 
     private var promptCard: some View {
@@ -131,13 +153,15 @@ struct TypingStudyView: View {
     }
 
     private var answerSlots: some View {
-        Text(answer.displayText(for: input))
-            .font(.system(size: answerSlotFontSize, weight: .semibold, design: .monospaced))
-            .foregroundStyle(slotColor)
+        Text(slotsAttributedString)
+            .font(.system(size: slotMetrics.fontSize, weight: .semibold, design: .monospaced))
             .multilineTextAlignment(.center)
-            .lineLimit(3)
-            .minimumScaleFactor(0.45)
-            .frame(maxWidth: .infinity, minHeight: 52)
+            .lineLimit(slotMetrics.lineCount)
+            // Страховка: если оценка ширины чуть промахнулась, буквы ужимаются,
+            // а не обрезаются. Высота панели при этом фиксирована и не скачет.
+            .minimumScaleFactor(0.7)
+            .frame(maxWidth: .infinity)
+            .frame(height: slotMetrics.boxHeight)
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
             .background(typingInputShape.fill(inputFill))
@@ -149,8 +173,61 @@ struct TypingStudyView: View {
                 guard !answered else { return }
                 isInputFocused = true
             }
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.45)
+                    .onEnded { _ in
+                        guard answered else { return }
+                        isInputFocused = false
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            previewPair = previewPairForCard
+                        }
+                    }
+            )
             .modifier(ShakeEffect(animatableData: shakeCount))
             .animation(.linear(duration: 0.4), value: shakeCount)
+    }
+
+    /// Кегль, число строк и фиксированная высота панели ответа — всё считается
+    /// детерминированно из геометрии слотов (моноширинный шрифт → ширина =
+    /// число глифов × advance) и постоянной доступной ширины. Не зависит от
+    /// введённого текста, поэтому ни размер, ни высота не «прыгают» при наборе.
+    private var slotMetrics: (fontSize: CGFloat, lineCount: Int, boxHeight: CGFloat) {
+        let maxSize: CGFloat = 34
+        let minSize: CGFloat = 18
+        // Реальная ширина ячейки моноширинного SF semibold с учётом пробелов
+        // между слотами; берём с запасом, чтобы строка точно влезала.
+        let advance: CGFloat = 0.70
+
+        // Доступная ширина текста: экран минус внешние (16+16) и внутренние
+        // (16+16) горизонтальные отступы панели.
+        let width = max(UIScreen.main.bounds.width - 64, 1)
+
+        let totalGlyphs = CGFloat(max(answer.slots(for: "").count * 2 - 1, 1))
+        let longestWordGlyphs = CGFloat(max(answer.longestWordSlotCount * 2 - 1, 1))
+
+        // Сначала пробуем одну строку на максимальном кегле.
+        let oneLineSize = min(maxSize, width / (totalGlyphs * advance))
+        let fontSize: CGFloat
+        let lineCount: Int
+        if oneLineSize >= minSize {
+            fontSize = oneLineSize.rounded(.down)
+            lineCount = 1
+        } else {
+            // Не лезет в строку читаемым кеглем → две строки. Перенос по словам
+            // делит фразу неравномерно, поэтому на длинную строку приходится
+            // больше половины глифов — берём ~0.6 как запас. Плюс строка не
+            // должна быть уже самого длинного слова.
+            let glyphsPerLine = max(totalGlyphs * 0.6, longestWordGlyphs)
+            fontSize = min(maxSize, max(minSize, width / (glyphsPerLine * advance))).rounded(.down)
+            lineCount = 2
+        }
+
+        // Высота строки моноширинного SF ≈ 1.2 × кегль; высота панели
+        // фиксирована под число строк, поэтому не меняется при наборе.
+        // Нижняя граница держит панель «воздушной» для коротких слов.
+        let lineHeight = fontSize * 1.2
+        let boxHeight = max(lineHeight * CGFloat(lineCount), 44)
+        return (fontSize, lineCount, boxHeight)
     }
 
     private var hiddenInput: some View {
@@ -187,11 +264,47 @@ struct TypingStudyView: View {
         return passed ? MatchPalette.successText : MatchPalette.destructive
     }
 
-    private var answerSlotFontSize: CGFloat {
-        let visibleCount = answer.displayText(for: input).count
-        if visibleCount > 34 { return 22 }
-        if visibleCount > 24 { return 26 }
-        return 34
+    /// Цветная строка слотов: разделители — светло-серые, текущий слот —
+    /// синий primary из палитры. После ответа всё красится цветом результата.
+    ///
+    /// Внутри слова слоты соединяются неразрывным пробелом, на границе слов —
+    /// обычным, чтобы при переносе строка рвалась только между словами, а не
+    /// посередине слова.
+    private var slotsAttributedString: AttributedString {
+        var result = AttributedString()
+        let slots = answer.slots(for: input)
+        var previous: TypingAnswer.Slot?
+
+        for slot in slots {
+            if let previous {
+                let breakable = previous.isSeparator || slot.isSeparator
+                result.append(plainRun(breakable ? " " : "\u{00A0}"))
+            }
+            switch slot {
+            case let .fixed(text), let .typed(text):
+                result.append(coloredRun(text, slotColor))
+            case .current:
+                // Подсвечиваем ближайший слот для ввода только до ответа.
+                result.append(coloredRun("_", answered ? slotColor : MatchPalette.primary))
+            case .pending:
+                result.append(coloredRun("_", slotColor))
+            case .separator:
+                result.append(coloredRun("_", typingSeparatorColor))
+            }
+            previous = slot
+        }
+
+        return result
+    }
+
+    private func coloredRun(_ string: String, _ color: Color) -> AttributedString {
+        var run = AttributedString(string)
+        run.foregroundColor = color
+        return run
+    }
+
+    private func plainRun(_ string: String) -> AttributedString {
+        AttributedString(string)
     }
 
     private var inputFill: LinearGradient {
@@ -292,31 +405,73 @@ private struct TypingAnswer {
         Self.normalized(sanitizedInput(value)) == Self.normalized(String(targetCharacters))
     }
 
-    func displayText(for value: String) -> String {
+    /// Один отображаемый «слот» в строке ответа.
+    enum Slot: Hashable {
+        /// Заранее открытая часть (артикль/`to`) или буква, не требующая ввода.
+        case fixed(String)
+        /// Введённая пользователем буква.
+        case typed(String)
+        /// Ближайший незаполненный слот — его подсвечиваем.
+        case current
+        /// Ещё не заполненный слот.
+        case pending
+        /// Разделитель между словами (вместо пробела) — пропускается при вводе.
+        case separator
+
+        var isSeparator: Bool {
+            if case .separator = self { return true }
+            return false
+        }
+    }
+
+    /// Полный набор слотов для текущего ввода. Длина и состав не зависят от
+    /// того, сколько уже введено (меняются только typed/current/pending),
+    /// поэтому раскладка не «прыгает» при наборе.
+    func slots(for value: String) -> [Slot] {
         let typed = Array(sanitizedInput(value))
         var typedIndex = 0
-        var pieces: [String] = []
+        var slots: [Slot] = []
 
-        if !prefilledPrefix.isEmpty {
-            pieces.append(prefilledPrefix.trimmingCharacters(in: .whitespacesAndNewlines))
+        let prefix = prefilledPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !prefix.isEmpty {
+            slots.append(.fixed(prefix))
         }
 
         for character in fillableText {
             if Self.isFillable(character) {
                 if typed.indices.contains(typedIndex) {
-                    pieces.append(String(typed[typedIndex]))
+                    slots.append(.typed(String(typed[typedIndex])))
+                } else if typedIndex == typed.count {
+                    slots.append(.current)
                 } else {
-                    pieces.append("_")
+                    slots.append(.pending)
                 }
                 typedIndex += 1
             } else if character.isWhitespace {
-                pieces.append("  ")
+                slots.append(.separator)
             } else {
-                pieces.append(String(character))
+                slots.append(.fixed(String(character)))
             }
         }
 
-        return pieces.joined(separator: " ")
+        return slots
+    }
+
+    /// Число слотов в самом длинном «слове» (между разделителями). По нему
+    /// гарантируем, что при переносе по словам каждое слово влезает в строку
+    /// целиком.
+    var longestWordSlotCount: Int {
+        var longest = 0
+        var current = 0
+        for slot in slots(for: "") {
+            if slot.isSeparator {
+                longest = max(longest, current)
+                current = 0
+            } else {
+                current += 1
+            }
+        }
+        return max(longest, current, 1)
     }
 
     private static func prefilledPrefix(in answer: String) -> String {
@@ -341,6 +496,8 @@ private struct TypingAnswer {
 private let typingPromptShape = RoundedRectangle(cornerRadius: 24, style: .continuous)
 private let typingInputShape = RoundedRectangle(cornerRadius: 18, style: .continuous)
 private let typingPromptText = Color.white.opacity(0.92)
+/// Светло-серый прочерк-разделитель между словами в ответе.
+private let typingSeparatorColor = oklch(0.80, 0.01, 260)
 
 private let typingPromptGradient = LinearGradient(
     gradient: Gradient(stops: [
