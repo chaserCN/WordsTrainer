@@ -92,15 +92,19 @@ struct TypingStudyView: View {
             case .translationExample:
                 VStack(alignment: .leading, spacing: 14) {
                     Text(card.translation)
-                        .font(.title2.weight(.semibold))
+                        .font(.title3.weight(.semibold))
                         .foregroundStyle(typingPromptText)
                         .multilineTextAlignment(.leading)
+                        .lineLimit(3)
+                        .minimumScaleFactor(0.78)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     HTMLText(
                         html: card.clozePromptWithGap,
                         foregroundColor: typingPromptText.opacity(0.86),
                         font: .body.weight(.medium)
                     )
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -128,14 +132,14 @@ struct TypingStudyView: View {
 
     private var answerSlots: some View {
         Text(answer.displayText(for: input))
-            .font(.system(size: 34, weight: .semibold, design: .monospaced))
+            .font(.system(size: answerSlotFontSize, weight: .semibold, design: .monospaced))
             .foregroundStyle(slotColor)
             .multilineTextAlignment(.center)
-            .lineLimit(2)
-            .minimumScaleFactor(0.55)
-            .frame(maxWidth: .infinity, minHeight: 72)
+            .lineLimit(3)
+            .minimumScaleFactor(0.45)
+            .frame(maxWidth: .infinity, minHeight: 52)
             .padding(.horizontal, 16)
-            .padding(.vertical, 18)
+            .padding(.vertical, 14)
             .background(typingInputShape.fill(inputFill))
             .overlay(typingInputShape.strokeBorder(inputRingColor, lineWidth: inputRingWidth))
             .compositingGroup()
@@ -181,6 +185,13 @@ struct TypingStudyView: View {
     private var slotColor: Color {
         if !answered { return MatchPalette.foreground }
         return passed ? MatchPalette.successText : MatchPalette.destructive
+    }
+
+    private var answerSlotFontSize: CGFloat {
+        let visibleCount = answer.displayText(for: input).count
+        if visibleCount > 34 { return 22 }
+        if visibleCount > 24 { return 26 }
+        return 34
     }
 
     private var inputFill: LinearGradient {

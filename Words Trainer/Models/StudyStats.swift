@@ -117,6 +117,7 @@ nonisolated struct StudyReviewCount: Hashable, Sendable {
 nonisolated struct StudyTimeBreakdown: Hashable, Sendable {
     var flashcardsMilliseconds: Int
     var sentenceMilliseconds: Int
+    var writingMilliseconds: Int
     var matchingMilliseconds: Int
     var matchingAudioMilliseconds: Int
     var pictureMilliseconds: Int
@@ -124,14 +125,15 @@ nonisolated struct StudyTimeBreakdown: Hashable, Sendable {
     static let zero = StudyTimeBreakdown(
         flashcardsMilliseconds: 0,
         sentenceMilliseconds: 0,
+        writingMilliseconds: 0,
         matchingMilliseconds: 0,
         matchingAudioMilliseconds: 0,
         pictureMilliseconds: 0
     )
 
     var totalMilliseconds: Int {
-        flashcardsMilliseconds + sentenceMilliseconds + matchingMilliseconds
-            + matchingAudioMilliseconds + pictureMilliseconds
+        flashcardsMilliseconds + sentenceMilliseconds + writingMilliseconds
+            + matchingMilliseconds + matchingAudioMilliseconds + pictureMilliseconds
     }
 }
 

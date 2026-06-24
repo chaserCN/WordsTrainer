@@ -344,13 +344,40 @@ struct ContentDatabaseTests {
                     pairCount: 4
                 )
             )
+            try database.savePracticeReview(
+                PracticeReviewEvent(
+                    id: UUID(uuidString: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")!,
+                    cardID: cardID,
+                    senseID: senseID,
+                    deckID: deckID,
+                    mode: .clozeTyping,
+                    outcome: .correct,
+                    source: .todayPractice,
+                    practicedAt: reviewedAt,
+                    durationMS: 9_000
+                )
+            )
+            try database.savePracticeReview(
+                PracticeReviewEvent(
+                    id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")!,
+                    cardID: cardID,
+                    senseID: senseID,
+                    deckID: deckID,
+                    mode: .translationTyping,
+                    outcome: .correct,
+                    source: .todayPractice,
+                    practicedAt: reviewedAt,
+                    durationMS: 11_000
+                )
+            )
 
             let breakdown = try database.studyTimeBreakdown(since: since)
             #expect(breakdown.flashcardsMilliseconds == 120_000)
-            #expect(breakdown.sentenceMilliseconds == 45_000)
+            #expect(breakdown.sentenceMilliseconds == 0)
+            #expect(breakdown.writingMilliseconds == 65_000)
             #expect(breakdown.matchingMilliseconds == 14_250)
             #expect(breakdown.matchingAudioMilliseconds == 32_000)
-            #expect(breakdown.totalMilliseconds == 211_250)
+            #expect(breakdown.totalMilliseconds == 231_250)
         }
     }
 
@@ -375,7 +402,8 @@ struct ContentDatabaseTests {
             let since = try #require(Self.isoDate("2026-06-02T00:00:00.000Z"))
             let breakdown = try database.studyTimeBreakdown(since: since)
             #expect(breakdown.flashcardsMilliseconds == 0)
-            #expect(breakdown.sentenceMilliseconds == 45_000)
+            #expect(breakdown.sentenceMilliseconds == 0)
+            #expect(breakdown.writingMilliseconds == 45_000)
             #expect(breakdown.matchingMilliseconds == 0)
             #expect(breakdown.matchingAudioMilliseconds == 0)
             #expect(try database.pendingServerSyncBatch().practiceReviewIDs.isEmpty)

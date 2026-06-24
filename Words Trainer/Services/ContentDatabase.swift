@@ -1077,7 +1077,8 @@ nonisolated final class ContentDatabase {
         )
         SELECT
             COALESCE(SUM(CASE WHEN mode = ? THEN duration_ms ELSE 0 END), 0),
-            COALESCE(SUM(CASE WHEN mode IN (?, ?, ?) THEN duration_ms ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN mode = ? THEN duration_ms ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN mode IN (?, ?) THEN duration_ms ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN mode = ? THEN duration_ms ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN mode IN (?, ?) THEN duration_ms ELSE 0 END), 0),
             COALESCE(SUM(CASE WHEN mode = ? THEN duration_ms ELSE 0 END), 0)
@@ -1113,9 +1114,10 @@ nonisolated final class ContentDatabase {
         return StudyTimeBreakdown(
             flashcardsMilliseconds: Int(sqlite3_column_int64(statement, 0)),
             sentenceMilliseconds: Int(sqlite3_column_int64(statement, 1)),
-            matchingMilliseconds: Int(sqlite3_column_int64(statement, 2)),
-            matchingAudioMilliseconds: Int(sqlite3_column_int64(statement, 3)),
-            pictureMilliseconds: Int(sqlite3_column_int64(statement, 4))
+            writingMilliseconds: Int(sqlite3_column_int64(statement, 2)),
+            matchingMilliseconds: Int(sqlite3_column_int64(statement, 3)),
+            matchingAudioMilliseconds: Int(sqlite3_column_int64(statement, 4)),
+            pictureMilliseconds: Int(sqlite3_column_int64(statement, 5))
         )
     }
 

@@ -877,6 +877,11 @@ private struct StudyTimeBreakdownPanel: View {
                 tint: oklch(0.72, 0.16, 35)
             ),
             StudyTimeBreakdownRow(
+                title: "Письмо",
+                milliseconds: breakdown.writingMilliseconds,
+                tint: oklch(0.70, 0.16, 285)
+            ),
+            StudyTimeBreakdownRow(
                 title: "Колонки",
                 milliseconds: breakdown.matchingMilliseconds,
                 tint: oklch(0.72, 0.17, 250)

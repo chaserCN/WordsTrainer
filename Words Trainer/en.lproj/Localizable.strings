@@ -96,8 +96,8 @@
 "Оставить / Сбросить" = "Keep / Reset";
 "Пропуск — ввод" = "Gap typing";
 "Письмо" = "Writing";
-"Письмо: предложения" = "Writing: sentences";
-"Письмо: слова" = "Writing: words";
+"Письмо: пропуск" = "Writing: gap";
+"Письмо: перевод" = "Writing: translation";
 "Карточки" = "Cards";
 "Предложения" = "Sentences";
 "Колонки" = "Columns";

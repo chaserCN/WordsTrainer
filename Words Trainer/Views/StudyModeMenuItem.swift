@@ -44,11 +44,11 @@ struct StudyModeMenuItem: Identifiable {
             systemImage = "photo"
             accent = .pink
         case .clozeTyping:
-            subtitle = "Впиши слово в пропуск по буквам"
+            subtitle = "Впиши слово в английское предложение"
             systemImage = "keyboard"
             accent = .indigo
         case .translationTyping:
-            subtitle = "Смотри перевод и пример — напиши английское слово"
+            subtitle = "Вспомни английское слово по переводу"
             systemImage = "pencil"
             accent = .indigo
         case .recall:
