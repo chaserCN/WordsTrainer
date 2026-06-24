@@ -16,43 +16,43 @@ struct StudyModeMenuItem: Identifiable {
         self.mode = mode
         switch mode {
         case .flashcards:
-            subtitle = "Слово, перевод и заметки — переворот по тапу"
+            subtitle = L10n.text("Слово, перевод и заметки — переворот по тапу")
             systemImage = "rectangle.on.rectangle.angled"
             accent = .orange
         case .flashcardsReverse:
-            subtitle = "Перевод и пример — вспомни английское слово"
+            subtitle = L10n.text("Перевод и пример — вспомни английское слово")
             systemImage = "arrow.left.arrow.right.square"
             accent = .orange
         case .clozeMultipleChoice:
-            subtitle = "Выбери слово для примера с пропуском"
+            subtitle = L10n.text("Выбери слово для примера с пропуском")
             systemImage = "text.quote"
             accent = .blue
         case .clozeMultipleChoiceReverse:
-            subtitle = "Русский перевод предложения — выбери английское слово"
+            subtitle = L10n.text("Перевод предложения — выбери английское слово")
             systemImage = "quote.bubble"
             accent = .blue
         case .matching:
-            subtitle = "Соедини слово и перевод"
+            subtitle = L10n.text("Соедини слово и перевод")
             systemImage = "rectangle.split.2x1.fill"
             accent = .green
         case .matchingAudio:
-            subtitle = "Слушай слово и выбирай перевод"
+            subtitle = L10n.text("Слушай слово и выбирай перевод")
             systemImage = "speaker.wave.2.fill"
             accent = .cyan
         case .pictureChoice:
-            subtitle = "Смотри картинку — выбери слово"
+            subtitle = L10n.text("Смотри картинку — выбери слово")
             systemImage = "photo"
             accent = .pink
         case .clozeTyping:
-            subtitle = "Впиши слово в английское предложение"
+            subtitle = L10n.text("Впиши слово в английское предложение")
             systemImage = "keyboard"
             accent = .indigo
         case .translationTyping:
-            subtitle = "Предложение и перевод — впиши слово"
+            subtitle = L10n.text("Предложение и перевод — впиши слово")
             systemImage = "pencil"
             accent = .indigo
         case .recall:
-            subtitle = "Покажи слово и реши: оставить прогресс или начать заново"
+            subtitle = L10n.text("Покажи слово и реши: оставить прогресс или начать заново")
             systemImage = "eye.fill"
             accent = .purple
         }
