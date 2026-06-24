@@ -48,7 +48,7 @@ struct StudyModeMenuItem: Identifiable {
             systemImage = "keyboard"
             accent = .indigo
         case .translationTyping:
-            subtitle = "Вспомни английское слово по переводу"
+            subtitle = "Предложение и перевод — впиши слово"
             systemImage = "pencil"
             accent = .indigo
         case .recall:
@@ -68,7 +68,7 @@ struct StudyModeMenuItem: Identifiable {
         [
             StudyModeMenuSection(title: L10n.text("Флешкарты"), modes: [.flashcards, .flashcardsReverse]),
             StudyModeMenuSection(title: L10n.text("Предложения"), modes: [.clozeMultipleChoice, .clozeMultipleChoiceReverse]),
-            StudyModeMenuSection(title: L10n.text("Письмо"), modes: [.clozeTyping, .translationTyping]),
+            StudyModeMenuSection(title: L10n.text("Письмо"), modes: [.translationTyping, .clozeTyping]),
             StudyModeMenuSection(title: L10n.text("Колонки"), modes: [.matching, .matchingAudio]),
             StudyModeMenuSection(title: L10n.text("Картинки"), modes: [.pictureChoice]),
         ]

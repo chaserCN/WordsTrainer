@@ -347,15 +347,22 @@ struct TypingStudyView: View {
         guard force || answer.isComplete(input) else { return }
         let isCorrect = answer.matches(input)
         passed = isCorrect
+
+        // Правильный ответ ребёнок уже ввёл сам — подтверждать нечего, сразу
+        // листаем дальше. Фокус НЕ снимаем, чтобы клавиатура не пряталась и не
+        // появлялась снова на следующей карточке. На неверный показываем
+        // результат и кнопку «Дальше».
+        if isCorrect {
+            WordAudioPlayer.shared.playClozeAnswer(from: card)
+            advance()
+            return
+        }
+
         withAnimation(.easeInOut(duration: 0.22)) {
             answered = true
         }
         isInputFocused = false
-        if isCorrect {
-            WordAudioPlayer.shared.playClozeAnswer(from: card)
-        } else {
-            shakeCount += 1
-        }
+        shakeCount += 1
     }
 
     private func advance() {
