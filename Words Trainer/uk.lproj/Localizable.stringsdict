@@ -93,13 +93,13 @@
             <key>NSStringFormatValueTypeKey</key>
             <string>d</string>
             <key>one</key>
-            <string>гра</string>
+            <string>колонка</string>
             <key>few</key>
-            <string>гри</string>
+            <string>колонки</string>
             <key>many</key>
-            <string>ігор</string>
+            <string>колонок</string>
             <key>other</key>
-            <string>гри</string>
+            <string>колонки</string>
         </dict>
     </dict>
     <key>count.hours.short</key>

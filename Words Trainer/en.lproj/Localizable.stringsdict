@@ -77,9 +77,9 @@
             <key>NSStringFormatValueTypeKey</key>
             <string>d</string>
             <key>one</key>
-            <string>game</string>
+            <string>column</string>
             <key>other</key>
-            <string>games</string>
+            <string>columns</string>
         </dict>
     </dict>
     <key>count.hours.short</key>
