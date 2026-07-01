@@ -12,33 +12,35 @@ struct FlashcardStudyView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var isFlipped = false
-    @State private var isExampleExpanded = false
-    @State private var isExampleDetailsVisible = false
+    @State private var hasExpandedForAnswer = false
     @State private var revealedCardID: String?
-    @State private var frontCardContentHeight: CGFloat = 0
-    @State private var backCardContentHeight: CGFloat = 0
-    @State private var expandedCardContentHeight: CGFloat = 0
+    @State private var measuredFrontCardHeight: CGFloat = 0
+    @State private var measuredBackCardHeight: CGFloat = 0
     @State private var cardRotation: Double = 0
     @State private var cardChangeDirection: StudyCardChangeDirection = .right
+    @State private var answerExitOffset: CGSize = .zero
+    @State private var isAnswerExitAnimating = false
+    @State private var answerExitGeneration = 0
     @State private var isFlipAnimating = false
     @State private var flipGeneration = 0
     @State private var renderedCardID: String?
     @State private var didAutoPlayReverseAudio = false
 
-    private static let cardHeightFraction: CGFloat = 0.34
+    private static let cardHeightFraction: CGFloat = 0.36
+    private static let minimumCardHeight: CGFloat = 275
     private static let verticalGap: CGFloat = 16
+    private static let progressHeaderHeight: CGFloat = 28
+    private static let progressHeaderTopPadding: CGFloat = 8
+    private static let progressHeaderReservedHeight = progressHeaderHeight + progressHeaderTopPadding
     private static let controlsHeight: CGFloat = 118
     private static let actionGap: CGFloat = 20
-    private static let flipHalfDuration = 0.18
+    private static let flipDuration = 0.26
+    private static let answerPushDuration = 0.08
+    private static let answerReturnDuration = 0.12
     private static let flipPerspective: CGFloat = 0.25
-    private static let exampleAnimation = Animation.spring(response: 0.22, dampingFraction: 0.88)
 
     private var hasWordAudio: Bool {
         card.audioWordURL != nil
-    }
-
-    private var isWordAudioAvailableNow: Bool {
-        hasWordAudio && (promptMode == .word || isShowingBack)
     }
 
     private var notesText: String? {
@@ -49,22 +51,34 @@ struct FlashcardStudyView: View {
         FlashcardPresentation(card: card, displayMode: displayMode, promptMode: promptMode)
     }
 
+    private var presentationStateKey: String {
+        "\(presentation.id):\(promptMode.stateKeyComponent)"
+    }
+
     var body: some View {
         GeometryReader { proxy in
             let maxCardHeight = max(
-                210,
-                proxy.size.height - Self.controlsHeight - Self.actionGap - Self.verticalGap * 2
+                Self.minimumCardHeight,
+                proxy.size.height
+                    - Self.progressHeaderReservedHeight
+                    - Self.controlsHeight
+                    - Self.actionGap
+                    - Self.verticalGap * 2
             )
             let baseCardHeight = max(
-                210,
-                min(maxCardHeight, (proxy.size.height - 132) * Self.cardHeightFraction)
+                Self.minimumCardHeight,
+                min(
+                    maxCardHeight,
+                    (proxy.size.height - Self.progressHeaderReservedHeight - 132) * Self.cardHeightFraction
+                )
             )
 
             ZStack(alignment: .top) {
                 VStack(spacing: 0) {
                     StudyProgressHeader(totalCount: totalCount, remainingCount: remainingCount)
                         .padding(.horizontal, 16)
-                        .padding(.top, 8)
+                        .frame(height: Self.progressHeaderHeight)
+                        .padding(.top, Self.progressHeaderTopPadding)
 
                     Spacer(minLength: Self.verticalGap)
 
@@ -74,7 +88,7 @@ struct FlashcardStudyView: View {
                         actionButtons
                     }
                     .padding(.horizontal, 16)
-                    .studyCardChangeTransition(cardID: presentation.id, direction: cardChangeDirection)
+                    .offset(answerExitOffset)
 
                     Spacer(minLength: Self.verticalGap)
                 }
@@ -82,7 +96,7 @@ struct FlashcardStudyView: View {
             }
             .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
         }
-        .task(id: presentation.id) {
+        .task(id: presentationStateKey) {
             resetForNewCard()
             if promptMode == .word {
                 WordAudioPlayer.shared.playWord(from: card)
@@ -98,20 +112,12 @@ struct FlashcardStudyView: View {
         isUsingCurrentCardState && isFlipped
     }
 
-    private var isShowingExampleExpanded: Bool {
-        isUsingCurrentCardState && isExampleExpanded
-    }
-
-    private var isShowingExampleDetails: Bool {
-        isShowingExampleExpanded && isExampleDetailsVisible
-    }
-
     private var actionButtons: some View {
         ReviewOutcomeControls(
             forgotTitle: "Снова",
             rememberedTitle: "Хорошо",
             verticalPadding: 14,
-            isEnabled: isAnswerEnabled,
+            isEnabled: isAnswerEnabled && !isAnswerExitAnimating,
             onAnswer: answer
         )
     }
@@ -120,50 +126,67 @@ struct FlashcardStudyView: View {
         let cardHeight = resolvedCardHeight(baseHeight: baseHeight, maxHeight: maxHeight)
 
         return ZStack(alignment: .topTrailing) {
-            Group {
-                if isShowingBack {
-                    if isShowingExampleExpanded {
-                        if expandedCardContentHeight > maxHeight {
+            ZStack(alignment: .top) {
+                ZStack(alignment: .topTrailing) {
+                    cardBody(isBack: false, minHeight: cardHeight, layout: .fixed)
+                        .frame(height: cardHeight, alignment: .top)
+
+                    if hasWordAudio && promptMode == .word {
+                        audioButton
+                            .padding(12)
+                    }
+                }
+                    .frame(height: cardHeight, alignment: .top)
+                    .modifier(FlashcardSideVisibility(rotation: cardRotation, side: .front))
+                    .allowsHitTesting(!isShowingBack)
+
+                ZStack(alignment: .topTrailing) {
+                    Group {
+                        if hasExpandedForAnswer {
                             ScrollView(.vertical, showsIndicators: false) {
-                                expandedCardBody(minHeight: baseHeight)
+                                cardBody(isBack: true, minHeight: baseHeight, layout: .expanded)
+                                    .background(
+                                        GeometryReader { proxy in
+                                            Color.clear
+                                                .preference(
+                                                    key: ExpandedFlashcardHeightKey.self,
+                                                    value: proxy.size.height
+                                                )
+                                        }
+                                    )
                             }
                             .scrollBounceBehavior(.basedOnSize)
-                            .frame(height: maxHeight, alignment: .top)
+                            .onPreferenceChange(ExpandedFlashcardHeightKey.self) { height in
+                                setMeasuredHeight(height, side: .back)
+                            }
                         } else {
-                            expandedCardBody(minHeight: baseHeight)
-                                .frame(minHeight: cardHeight, alignment: .top)
+                            cardBody(isBack: true, minHeight: cardHeight, layout: .fixed)
                         }
-                    } else {
-                        cardBody(isBack: true, minHeight: baseHeight, layout: .fixed)
-                            .frame(height: cardHeight, alignment: .top)
                     }
-                } else {
-                    cardBody(isBack: false, minHeight: baseHeight, layout: .fixed)
-                        .frame(height: cardHeight, alignment: .top)
-                }
-            }
-            .animation(Self.exampleAnimation, value: isShowingExampleExpanded)
+                    .frame(height: cardHeight, alignment: .top)
 
-            if isWordAudioAvailableNow {
-                Button {
-                    WordAudioPlayer.shared.playWord(from: card)
-                } label: {
-                    Image(systemName: "speaker.wave.2.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(FlashcardPalette.audioTint)
-                        .frame(width: 34, height: 34)
-                        .background(
-                            Circle()
-                                .fill(FlashcardPalette.audioTint.opacity(0.16))
-                        )
+                    if hasWordAudio {
+                        audioButton
+                            .padding(12)
+                    }
                 }
-                .buttonStyle(.plain)
-                .padding(12)
-                .accessibilityLabel("Прослушать")
+                .frame(height: cardHeight, alignment: .top)
+                .rotation3DEffect(
+                    .degrees(180),
+                    axis: (x: 0, y: 1, z: 0),
+                    perspective: Self.flipPerspective
+                )
+                .modifier(FlashcardSideVisibility(rotation: cardRotation, side: .back))
+                .allowsHitTesting(isShowingBack)
             }
         }
-        .background(cardHeightMeasurementViews(baseHeight: baseHeight))
         .frame(maxWidth: .infinity, alignment: .top)
+        .background(cardHeightMeasurementViews(baseHeight: baseHeight))
+        .frame(height: cardHeight, alignment: .top)
+        .contentShape(flashcardShape)
+        .onTapGesture {
+            flipCard()
+        }
         .background(
             flashcardShape
                 .fill(cardGradient)
@@ -185,6 +208,23 @@ struct FlashcardStudyView: View {
         .shadow(color: MatchPalette.shadow.opacity(0.08), radius: 4, x: 0, y: 2)
     }
 
+    private var audioButton: some View {
+        Button {
+            WordAudioPlayer.shared.playWord(from: card)
+        } label: {
+            Image(systemName: "speaker.wave.2.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(FlashcardPalette.audioTint)
+                .frame(width: 34, height: 34)
+                .background(
+                    Circle()
+                        .fill(FlashcardPalette.audioTint.opacity(0.16))
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Прослушать")
+    }
+
     /// Передняя сторона — холодный сине-фиолетовый, обратная — мягкая сирень (как в Lovable).
     private var cardGradient: LinearGradient {
         let stops: [Gradient.Stop] = isShowingBack
@@ -201,11 +241,6 @@ struct FlashcardStudyView: View {
         return LinearGradient(gradient: Gradient(stops: stops), startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
-    /// Цвет точки-индикатора перед словом: синий спереди, сиреневый на обороте.
-    private var wordDotColor: Color {
-        isShowingBack ? oklch(0.72, 0.14, 300) : oklch(0.65, 0.2, 245)
-    }
-
     /// Мягкое цветное свечение в углу карты.
     private var cardGlow: some View {
         Circle()
@@ -218,11 +253,11 @@ struct FlashcardStudyView: View {
     private func cardHeightMeasurementViews(baseHeight: CGFloat) -> some View {
         ZStack {
             measuredCardBody(isBack: false, minHeight: baseHeight, layout: .fixed) { height in
-                frontCardContentHeight = height
+                setMeasuredHeight(height, side: .front)
             }
 
-            measuredCardBody(isBack: true, minHeight: baseHeight, layout: .fixed) { height in
-                backCardContentHeight = height
+            measuredCardBody(isBack: true, minHeight: baseHeight, layout: .expanded) { height in
+                setMeasuredHeight(height, side: .back)
             }
         }
     }
@@ -250,30 +285,33 @@ struct FlashcardStudyView: View {
             }
     }
 
-    private func expandedCardBody(minHeight: CGFloat) -> some View {
-        cardBody(isBack: true, minHeight: minHeight, layout: .expanded)
-            .background(
-                GeometryReader { proxy in
-                    Color.clear
-                        .preference(key: ExpandedFlashcardHeightKey.self, value: proxy.size.height)
-                }
-            )
-            .onPreferenceChange(ExpandedFlashcardHeightKey.self) { height in
-                guard height > 0 else { return }
-                guard isShowingExampleDetails else { return }
-                expandedCardContentHeight = height
-            }
-    }
-
-    private func measuredExpandedCardHeight(maxHeight: CGFloat) -> CGFloat? {
-        guard expandedCardContentHeight > 0 else { return nil }
-        return min(expandedCardContentHeight, maxHeight)
-    }
-
     private func resolvedCardHeight(baseHeight: CGFloat, maxHeight: CGFloat) -> CGFloat {
-        let sideHeight = max(frontCardContentHeight, backCardContentHeight)
-        let expandedHeight = isShowingExampleExpanded ? measuredExpandedCardHeight(maxHeight: maxHeight) ?? 0 : 0
-        return min(max(baseHeight, sideHeight, expandedHeight), maxHeight)
+        let frontHeight = max(baseHeight, measuredFrontCardHeight)
+        let backHeight = max(frontHeight, measuredBackCardHeight)
+        let targetHeight = hasExpandedForAnswer ? backHeight : frontHeight
+        return min(targetHeight, maxHeight)
+    }
+
+    private func setMeasuredHeight(_ height: CGFloat, side: CardMeasuredSide) {
+        guard height > 0 else { return }
+
+        switch side {
+        case .front:
+            guard abs(measuredFrontCardHeight - height) > 0.5 else { return }
+        case .back:
+            guard abs(measuredBackCardHeight - height) > 0.5 else { return }
+        }
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            switch side {
+            case .front:
+                measuredFrontCardHeight = height
+            case .back:
+                measuredBackCardHeight = height
+            }
+        }
     }
 
     private enum CardBodyLayout {
@@ -294,58 +332,17 @@ struct FlashcardStudyView: View {
 
     private func cardBodyContent(isBack: Bool, minHeight: CGFloat, layout: CardBodyLayout) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                flipCard()
-            } label: {
-                flipLabel(isBack: isBack, minHeight: minHeight, layout: layout)
-            }
-            .buttonStyle(.plain)
+            flipLabel(isBack: isBack, minHeight: minHeight, layout: layout)
 
             if isBack {
                 if notesText != nil {
-                    exampleToggleButton
+                    exampleDetails
                         .padding(.horizontal, 18)
                         .padding(.top, 12)
-
-                    if isShowingExampleDetails {
-                        exampleDetailsFlipArea
-                            .padding(.horizontal, 18)
-                            .padding(.top, 12)
-                            .padding(.bottom, 20)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                    } else if layout == .fixed {
-                        bottomFlipArea
-                    }
-                } else if layout == .fixed {
-                    bottomFlipArea
+                        .padding(.bottom, 20)
                 }
             }
         }
-    }
-
-    private var exampleDetailsFlipArea: some View {
-        Button {
-            flipCard()
-        } label: {
-            exampleDetails
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Перевернуть карточку")
-    }
-
-    private var bottomFlipArea: some View {
-        Button {
-            flipCard()
-        } label: {
-            Color.clear
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .frame(maxWidth: .infinity, minHeight: 12, maxHeight: .infinity)
-        .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -372,19 +369,18 @@ struct FlashcardStudyView: View {
     @ViewBuilder
     private func flipLabelContent(isBack: Bool, layout: CardBodyLayout) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
                 Circle()
-                    .fill(wordDotColor)
+                    .fill(wordDotColor(isBack: isBack))
                     .frame(width: 10, height: 10)
-                    .shadow(color: wordDotColor.opacity(0.7), radius: 5)
-                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                    .shadow(color: wordDotColor(isBack: isBack).opacity(0.7), radius: 5)
                 Text(isBack ? presentation.backTitle : presentation.frontTitle)
                     .font(.title2.bold())
                     .foregroundStyle(FlashcardPalette.primaryText)
                     .lineLimit(nil)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.trailing, isWordAudioAvailableNow ? 40 : 0)
+                    .padding(.trailing, isWordAudioAvailable(onBack: isBack) ? 40 : 0)
             }
 
             if isBack {
@@ -447,57 +443,12 @@ struct FlashcardStudyView: View {
         return max(80, cardMinHeight - headerPadding - exampleControls - 20)
     }
 
-    private var exampleToggleButton: some View {
-        Button {
-            toggleExampleDetails()
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "lightbulb.fill")
-                    .font(.subheadline.weight(.semibold))
-                Text("Подробнее")
-                    .font(.subheadline.weight(.semibold))
-                Spacer(minLength: 0)
-                Image(systemName: isShowingExampleExpanded ? "chevron.up" : "chevron.down")
-                    .font(.caption.weight(.bold))
-            }
-            .foregroundStyle(FlashcardPalette.primaryText)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white.opacity(0.10))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
+    private func wordDotColor(isBack: Bool) -> Color {
+        isBack ? oklch(0.72, 0.14, 300) : oklch(0.65, 0.2, 245)
     }
 
-    private func toggleExampleDetails() {
-        if isExampleExpanded {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                isExampleDetailsVisible = false
-            }
-
-            setExampleExpanded(false)
-        } else {
-            isExampleDetailsVisible = true
-            setExampleExpanded(true)
-        }
-    }
-
-    private func setExampleExpanded(_ isExpanded: Bool) {
-        if reduceMotion {
-            isExampleExpanded = isExpanded
-        } else {
-            withAnimation(Self.exampleAnimation) {
-                isExampleExpanded = isExpanded
-            }
-        }
+    private func isWordAudioAvailable(onBack isBack: Bool) -> Bool {
+        hasWordAudio && (promptMode == .word || isBack)
     }
 
     private var exampleDetails: some View {
@@ -535,12 +486,16 @@ struct FlashcardStudyView: View {
         FrameHitchMonitor.shared.mark("card flip")
         renderedCardID = presentation.id
 
-        let willShowBack = !isFlipped
+        let targetIsBack = !isFlipped
 
         if reduceMotion {
-            isFlipped.toggle()
+            if targetIsBack {
+                hasExpandedForAnswer = true
+            }
+            isFlipped = targetIsBack
+            cardRotation = targetIsBack ? 180 : 0
             revealedCardID = presentation.id
-            playWordAudioIfRevealing(back: willShowBack)
+            playWordAudioIfRevealing(back: targetIsBack)
             return
         }
 
@@ -548,35 +503,26 @@ struct FlashcardStudyView: View {
         flipGeneration += 1
 
         let generation = flipGeneration
-        let targetIsBack = !isFlipped
-        let outgoingAngle = targetIsBack ? 90.0 : -90.0
-        let incomingAngle = targetIsBack ? -90.0 : 90.0
 
-        withAnimation(.easeIn(duration: Self.flipHalfDuration)) {
-            cardRotation = outgoingAngle
+        withAnimation(.easeInOut(duration: Self.flipDuration)) {
+            if targetIsBack {
+                hasExpandedForAnswer = true
+            }
+            isFlipped = targetIsBack
+            cardRotation = targetIsBack ? 180 : 0
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.flipHalfDuration) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.flipDuration / 2) {
             guard generation == flipGeneration else { return }
-
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                isFlipped = targetIsBack
-                cardRotation = incomingAngle
+            if targetIsBack {
                 revealedCardID = presentation.id
+                playWordAudioIfRevealing(back: true)
             }
+        }
 
-            playWordAudioIfRevealing(back: targetIsBack)
-
-            withAnimation(.easeOut(duration: Self.flipHalfDuration)) {
-                cardRotation = 0
-            }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.flipHalfDuration) {
-                guard generation == flipGeneration else { return }
-                isFlipAnimating = false
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.flipDuration) {
+            guard generation == flipGeneration else { return }
+            isFlipAnimating = false
         }
     }
 
@@ -592,28 +538,123 @@ struct FlashcardStudyView: View {
     }
 
     private func answer(_ outcome: ReviewOutcome) {
+        guard !isAnswerExitAnimating else { return }
+
         switch outcome {
         case .forgot, .incorrect:
             cardChangeDirection = .left
         case .remembered, .correct:
             cardChangeDirection = .right
         }
-        onAnswer(outcome)
+
+        if reduceMotion {
+            resetCardFaceBeforeAnswerSubmit()
+            onAnswer(outcome)
+            return
+        }
+
+        isAnswerExitAnimating = true
+        answerExitGeneration += 1
+        let generation = answerExitGeneration
+
+        withAnimation(.easeOut(duration: Self.answerPushDuration)) {
+            answerExitOffset = answerExitOffset(for: cardChangeDirection)
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.answerPushDuration) {
+            guard generation == answerExitGeneration else { return }
+
+            withAnimation(.easeOut(duration: Self.answerReturnDuration)) {
+                answerExitOffset = .zero
+            }
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.answerPushDuration + Self.answerReturnDuration) {
+            guard generation == answerExitGeneration else { return }
+
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                resetCardFaceBeforeAnswerSubmit()
+                isAnswerExitAnimating = false
+                onAnswer(outcome)
+            }
+        }
+    }
+
+    private func resetCardFaceBeforeAnswerSubmit() {
+        flipGeneration += 1
+        isFlipped = false
+        hasExpandedForAnswer = false
+        revealedCardID = nil
+        cardRotation = 0
+        isFlipAnimating = false
+    }
+
+    private func answerExitOffset(for direction: StudyCardChangeDirection) -> CGSize {
+        switch direction {
+        case .left:
+            return CGSize(width: -22, height: 28)
+        case .right:
+            return CGSize(width: 22, height: 28)
+        }
     }
 
     private func resetForNewCard() {
         flipGeneration += 1
+        answerExitGeneration += 1
         renderedCardID = presentation.id
         isFlipped = false
         revealedCardID = nil
-        isExampleExpanded = false
-        isExampleDetailsVisible = false
-        frontCardContentHeight = 0
-        backCardContentHeight = 0
-        expandedCardContentHeight = 0
+        hasExpandedForAnswer = false
+        measuredFrontCardHeight = 0
+        measuredBackCardHeight = 0
         cardRotation = 0
         isFlipAnimating = false
+        answerExitOffset = .zero
+        isAnswerExitAnimating = false
         didAutoPlayReverseAudio = false
+    }
+}
+
+private enum FlashcardFlipSide {
+    case front
+    case back
+}
+
+private enum CardMeasuredSide {
+    case front
+    case back
+}
+
+private struct FlashcardSideVisibility: AnimatableModifier {
+    var rotation: Double
+    let side: FlashcardFlipSide
+
+    var animatableData: Double {
+        get { rotation }
+        set { rotation = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(opacity)
+            .accessibilityHidden(opacity == 0)
+    }
+
+    private var opacity: Double {
+        switch side {
+        case .front:
+            return isBackVisible ? 0 : 1
+        case .back:
+            return isBackVisible ? 1 : 0
+        }
+    }
+
+    private var isBackVisible: Bool {
+        let normalized = ((rotation.truncatingRemainder(dividingBy: 360)) + 360)
+            .truncatingRemainder(dividingBy: 360)
+        return normalized >= 90 && normalized < 270
     }
 }
 
@@ -690,6 +731,15 @@ private struct FlashcardPresentation {
 nonisolated enum FlashcardPromptMode: Sendable {
     case word
     case translation
+
+    var stateKeyComponent: String {
+        switch self {
+        case .word:
+            return "word"
+        case .translation:
+            return "translation"
+        }
+    }
 }
 
 private struct FlashcardBasePresentation {
